@@ -166,3 +166,14 @@ from .tool_wrappers import (  # All Bayer scale variations for systematic elimin
     ImageMagickFrameReducer,
     ImageMagickLossyCompressor,
 )
+
+# Prediction module --------------------------------------------------------
+from .prediction import (
+    CompressionCurveV1,
+    CurveType,
+    DatasetSplit,
+    Engine,
+    GifFeaturesV1,
+    PredictionModelMetadataV1,
+    TrainingRecordV1,
+)

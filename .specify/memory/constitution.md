@@ -1,0 +1,104 @@
+<!--
+SYNC IMPACT REPORT
+==================
+Version change: 0.0.0 → 1.0.0
+Modified principles: N/A (initial creation)
+Added sections: Core Principles (5), ML Dataset Requirements, LLM Development Model, Governance
+Removed sections: None
+Templates requiring updates: ✅ None (initial setup)
+Follow-up TODOs: None
+-->
+
+# GifLab Constitution
+
+## Core Principles
+
+### I. Single-Pass Compression (NON-NEGOTIABLE)
+
+All compression parameters (lossy level, frame reduction, color reduction) MUST be applied in a single engine call. Chained re-compressions are forbidden.
+
+**Rationale**: Each GIF decode/encode cycle introduces quality loss. Single-pass compression minimizes artifacts and allows engines to optimize the full parameter space together.
+
+**Enforcement**: Tool wrappers MUST accept all parameters in one `apply()` call. Pipeline execution MUST NOT save intermediate GIF files between compression steps.
+
+### II. ML-Ready Data
+
+All pipeline outputs MUST be deterministic, reproducible, and validated against Pydantic schemas. Dataset versioning is mandatory.
+
+**Requirements**:
+- Validate against `MetricRecordV1` schema before CSV/DB write
+- Tag outputs with `giflab_version` and `code_commit`
+- Respect canonical train/val/test GIF splits
+- Preserve `scaler.pkl` feature-scaling artifacts when modifying metrics
+
+**Rationale**: GifLab's purpose is generating training data for ML models. Non-reproducible or schema-violating data corrupts downstream models.
+
+### III. Poetry-First Execution
+
+All Python commands MUST use `poetry run`. The `animately` CLI MUST use flag-based arguments (`--input`, `--output`). Positional arguments will fail silently.
+
+**Enforcement**: Never invoke `python` directly. Always `poetry run python -m giflab ...` or `poetry run pytest`.
+
+**Rationale**: Ensures consistent dependency resolution and prevents environment contamination.
+
+### IV. Test-Driven Quality
+
+New features require tests before or alongside implementation. The 11-metric quality system (SSIM, MS-SSIM, PSNR, FSIM, GMSD, CHIST, Edge Similarity, Texture Similarity, Sharpness Similarity, Temporal Consistency, Composite Quality) is the source of truth for compression quality.
+
+**Requirements**:
+- Tests MUST exist for new compression engines, metrics, or pipeline logic
+- Tests MUST NOT be deleted or weakened without explicit justification
+- Quality metric calculations MUST match documented formulas
+
+### V. Extensible Tool Interfaces
+
+New compression engines MUST implement the `ExternalTool` abstract base class. Tools declare capabilities via the capability registry.
+
+**Interface Contract**:
+- Implement `available()`, `version()`, `apply()` methods
+- Declare `COMBINE_GROUP` for pipeline optimization
+- Register in `capability_registry.py`
+
+**Rationale**: Enables adding new engines (gifski, WebP, AVIF) without modifying core pipeline logic.
+
+### VI. LLM-Optimized Codebase
+
+This codebase is maintained exclusively by LLM agents. Human readability is secondary to machine parseability.
+
+**Implications**:
+- Prefer explicit over implicit patterns
+- Use consistent naming conventions machine agents can pattern-match
+- Docstrings and type hints are mandatory for LLM context
+- Comments explain "why" not "what" (LLMs can read the code)
+
+## ML Dataset Requirements
+
+All code producing or mutating metric data MUST:
+
+1. Guarantee deterministic, reproducible extraction
+2. Validate against `MetricRecordV1` Pydantic schema
+3. Tag outputs with dataset + code versions
+4. Respect canonical train/val/test GIF splits
+5. Preserve or update `scaler.pkl` feature-scaling artifacts
+6. Regenerate outlier and correlation reports when metrics change
+
+PRs modifying dataset-related code MUST include evidence (CI artifacts or test output) showing compliance.
+
+## Development Workflow
+
+1. **Feature Branches**: All work on `feature/<name>` branches
+2. **Spec-First**: New features SHOULD use `/speckit.specify` before implementation
+3. **CI Required**: All tests must pass before merge
+4. **Resume Support**: Pipelines MUST support `--resume` for interrupted runs
+
+## Governance
+
+This constitution supersedes all other development practices. Amendments require:
+
+1. Documentation of the change rationale
+2. Version increment (MAJOR for principle changes, MINOR for additions, PATCH for clarifications)
+3. Update to dependent templates if principles affect spec/plan/task generation
+
+Runtime development guidance is in `CLAUDE.md`. Architecture details are in `SCOPE.md`.
+
+**Version**: 1.0.0 | **Ratified**: 2025-06-26 | **Last Amended**: 2025-01-26

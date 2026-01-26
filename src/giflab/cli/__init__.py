@@ -17,6 +17,8 @@ from .tag_cmd import tag
 from .validate_cmd import validate
 from .view_failures_cmd import view_failures
 
+from giflab.prediction.cli import predict_cli
+
 
 @click.group()
 @click.version_option(version="0.1.0", prog_name="giflab")
@@ -36,6 +38,7 @@ main.add_command(organize_directories)
 main.add_command(select_pipelines)
 main.add_command(validate)
 main.add_command(view_failures)
+main.add_command(predict_cli)
 
 __all__ = [
     "cache",
