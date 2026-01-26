@@ -17,6 +17,7 @@ import logging
 import random
 import tempfile
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -88,7 +89,7 @@ class DatasetBuilder:
         self,
         gif_paths: list[Path],
         engines: list[Engine] | None = None,
-        progress_callback: callable | None = None,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> dict[str, int]:
         """Build training dataset from a list of GIF files.
 
@@ -228,6 +229,8 @@ class DatasetBuilder:
         engine: Engine,
     ) -> CompressionCurveV1:
         """Run color reduction sweep and record file sizes."""
+        import subprocess
+
         sizes = {}
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -235,29 +238,32 @@ class DatasetBuilder:
                 try:
                     output_path = Path(tmpdir) / f"colors_{color_count}.gif"
 
-                    # Map engine enum to LossyEngine
-                    lossy_engine = (
-                        LossyEngine.GIFSICLE
-                        if engine == Engine.GIFSICLE
-                        else LossyEngine.ANIMATELY
-                    )
-
-                    # Use lossy=0 but specify colors
-                    # Note: This uses the color reduction capability
-                    apply_lossy_compression(
-                        gif_path,
-                        output_path,
-                        lossy_level=0,
-                        color_keep_count=color_count,
-                        engine=lossy_engine,
-                    )
+                    if engine == Engine.GIFSICLE:
+                        # Use gifsicle with --colors flag
+                        cmd = [
+                            "gifsicle",
+                            f"--colors={color_count}",
+                            "-O3",
+                            str(gif_path),
+                            "-o",
+                            str(output_path),
+                        ]
+                        subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            timeout=60,
+                            check=True,
+                        )
+                    else:
+                        # Skip animately for now - color reduction not supported
+                        continue
 
                     if output_path.exists():
                         size_kb = output_path.stat().st_size / 1024
                         sizes[color_count] = size_kb
 
                 except Exception as e:
-                    logger.debug(f"Colors {color_count} failed: {e}")
+                    logger.debug("Colors %d failed: %s", color_count, e)
 
         return CompressionCurveV1(
             gif_sha=gif_sha,
