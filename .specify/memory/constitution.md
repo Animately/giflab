@@ -1,11 +1,11 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 0.0.0 → 1.0.0
-Modified principles: N/A (initial creation)
-Added sections: Core Principles (5), ML Dataset Requirements, LLM Development Model, Governance
+Version change: 1.0.0 → 1.1.0
+Modified principles: IV. Test-Driven Quality → IV. Test-First Development (NON-NEGOTIABLE)
+Added sections: Explicit coverage requirements (≥90% core logic), synthetic GIF testing approach
 Removed sections: None
-Templates requiring updates: ✅ None (initial setup)
+Templates requiring updates: ✅ None
 Follow-up TODOs: None
 -->
 
@@ -41,14 +41,28 @@ All Python commands MUST use `poetry run`. The `animately` CLI MUST use flag-bas
 
 **Rationale**: Ensures consistent dependency resolution and prevents environment contamination.
 
-### IV. Test-Driven Quality
+### IV. Test-First Development (NON-NEGOTIABLE)
 
-New features require tests before or alongside implementation. The 11-metric quality system (SSIM, MS-SSIM, PSNR, FSIM, GMSD, CHIST, Edge Similarity, Texture Similarity, Sharpness Similarity, Temporal Consistency, Composite Quality) is the source of truth for compression quality.
+All features MUST have tests written before or alongside implementation. Test coverage is mandatory, not optional.
 
-**Requirements**:
+**Coverage Requirements**:
+- **Core logic**: ≥90% line coverage for models, features, schemas, dataset modules
+- **Integration**: End-to-end tests using synthetic test fixtures
+- **CLI commands**: At least one happy-path test per command
+- **New features**: Tests MUST be included in the same PR as the feature
+
+**Test Approach**:
+- Use synthetic GIFs (solid, gradient, noise, animation patterns) for deterministic testing
+- Compare predicted outcomes against actual compression results where applicable
+- Mock external dependencies (GPU, network) but test real compression engines when available
+
+**Enforcement**:
 - Tests MUST exist for new compression engines, metrics, or pipeline logic
 - Tests MUST NOT be deleted or weakened without explicit justification
-- Quality metric calculations MUST match documented formulas
+- PRs without adequate test coverage MUST NOT be merged
+- `poetry run pytest --cov` MUST be run before any merge
+
+**Quality Metrics**: The 11-metric quality system (SSIM, MS-SSIM, PSNR, FSIM, GMSD, CHIST, Edge Similarity, Texture Similarity, Sharpness Similarity, Temporal Consistency, Composite Quality) is the source of truth for compression quality. Calculations MUST match documented formulas.
 
 ### V. Extensible Tool Interfaces
 
@@ -86,10 +100,12 @@ PRs modifying dataset-related code MUST include evidence (CI artifacts or test o
 
 ## Development Workflow
 
-1. **Feature Branches**: All work on `feature/<name>` branches
-2. **Spec-First**: New features SHOULD use `/speckit.specify` before implementation
-3. **CI Required**: All tests must pass before merge
-4. **Resume Support**: Pipelines MUST support `--resume` for interrupted runs
+1. **Feature Branches**: All work on `feature/<name>` or numbered branches (e.g., `001-feature-name`)
+2. **Test-First**: Write or update tests before implementing features
+3. **Spec-First**: New features SHOULD use `/speckit.specify` before implementation
+4. **Coverage Check**: Run `poetry run pytest --cov` and verify coverage targets before merge
+5. **CI Required**: All tests must pass before merge
+6. **Resume Support**: Pipelines MUST support `--resume` for interrupted runs
 
 ## Governance
 
@@ -101,4 +117,4 @@ This constitution supersedes all other development practices. Amendments require
 
 Runtime development guidance is in `CLAUDE.md`. Architecture details are in `SCOPE.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2025-06-26 | **Last Amended**: 2025-01-26
+**Version**: 1.1.0 | **Ratified**: 2025-06-26 | **Last Amended**: 2025-01-26
