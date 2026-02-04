@@ -215,12 +215,33 @@ poetry run python -m giflab run data/raw data/
 3. **Performance Prediction**: Predict compression results for tool combinations
 4. **Tool Selection**: Intelligently route GIFs to optimal compression strategies
 
+### Prediction Model Export
+GifLab trains and exports prediction models (`.pkl` files) for use by **external tools** (e.g., Animately). The workflow is:
+
+1. **GifLab** runs compression pipelines → collects training data
+2. **GifLab** trains gradient boosting models on collected data
+3. **GifLab** exports trained models as `.pkl` files
+4. **External tools** load models → predict compression curves instantly without running actual compression
+
+> **Important**: GifLab is the data generator, not the consumer of predictions. Predictions are for external consumption.
+
 ### Tool Integration Priority
 1. **Tier 1 (Immediate)**: ImageMagick, FFmpeg, gifski
 2. **Tier 2 (Strategic)**: WebP conversion, AVIF conversion, Pillow
 3. **Tier 3 (Research)**: Neural compression, custom hybrid chains
 
-*See [ML Strategy Documentation](docs/technical/ml-strategy.md) for detailed implementation plans.*
+### Prediction Data Requirements
+To train accurate compression curve prediction models, the main pipeline must generate data at sufficient granularity:
+
+| Parameter | Current Config | Prediction Requirement | Status |
+|-----------|---------------|----------------------|--------|
+| Lossy levels | `[0, 40, 120]` | `[0, 20, 40, 60, 80, 100, 120]` | ⚠️ Gap |
+| Color counts | `[256, 128, 64, 32, 16, 8]` | `[256, 128, 64, 32, 16]` | ✅ OK |
+| Visual features | Basic metadata | 25+ features (see `prediction/schemas.py`) | ⚠️ Gap |
+
+**Recommendation**: Run a dedicated "prediction training" mode with finer lossy granularity, or use `giflab predict build-dataset` which runs its own compression sweeps.
+
+*See [ML Strategy Documentation](docs/technical/ml-strategy.md) for detailed implementation plans.
 
 ---
 
