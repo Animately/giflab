@@ -1,5 +1,8 @@
 """Pipeline results caching system for elimination framework.
 
+DEPRECATED: This module is superseded by giflab.storage.GifLabStorage.
+Use the new prediction_runner.py and storage.py for prediction training.
+
 This module provides SQLite-based caching for pipeline test results
 to avoid redundant testing and improve performance.
 """

@@ -5,17 +5,23 @@
 ## 0 Objective
 
 ### Core Mission
-Analyse every GIF in `data/raw/` by generating a grid of compression variants and writing **one CSV row per variant** with:
+**Generate prediction training datasets** by analyzing GIFs and running compression sweeps at prediction-required granularity. Results are stored in SQLite for ML model training.
 
-* **Frame keep ratio** `frame_keep_ratio` ∈ { 1.00 · 0.90 · 0.80 · 0.70 · 0.50 }
-* **Palette keep count** `color_keep_count` ∈ { 256 · 128 · 64 }
-* **Lossy level** `lossy` ∈ { 0 · 40 · 120 }
-* **Engine** `gifsicle`, `animately` (expanding to ImageMagick, FFmpeg, gifski, etc.)
+**Primary Output**: Trained prediction models (`.pkl` files) exported for use by external tools (e.g., Animately).
+
+### Compression Parameters
+* **Lossy levels** ∈ { 0 · 20 · 40 · 60 · 80 · 100 · 120 } — 7 points for smooth curve prediction
+* **Color counts** ∈ { 256 · 128 · 64 · 32 · 16 } — 5 points for color curve prediction
+* **Engines** `gifsicle`, `animately` (expanding to ImageMagick, FFmpeg, gifski, etc.)
+
+### Visual Features Extracted (25 features)
+* **Spatial**: entropy, edge_density, color_complexity, gradient_smoothness, contrast_score, text_density, dct_energy_ratio, color_histogram_entropy, dominant_color_ratio
+* **Temporal**: motion_intensity, motion_smoothness, static_region_ratio, temporal_entropy, frame_similarity, inter_frame_mse_mean, inter_frame_mse_std
+* **Compressibility**: lossless_compression_ratio, transparency_ratio
+* **CLIP Content Classification**: screen_capture, vector_art, photography, hand_drawn, 3d_rendered, pixel_art
 
 ### ML-Driven Vision
-**Long-term Goal**: Train machine learning models to automatically select the optimal compression tool combination based on GIF content characteristics.
-
-**Strategy**: Use GifLab's compression pipeline to build comprehensive datasets of tool performance across diverse content types, then train ML models for intelligent tool selection.
+**Goal**: Train gradient boosting models to predict compression curves (file size at each lossy level) from visual features alone — enabling instant compression estimation without running actual compression.
 
 ### Requirements
 * Parallel execution, resumable after interruption.
@@ -33,27 +39,24 @@ Analyse every GIF in `data/raw/` by generating a grid of compression variants an
 giflab/
 ├─ data/
 │   ├─ raw/              ← originals
-│   ├─ renders/          ← rendered variants
-│   ├─ csv/              ← results_YYYYMMDD.csv
-│   ├─ bad_gifs/         ← corrupt originals (same weird names)
+│   ├─ giflab.db         ← SQLite database (features + compression runs)
+│   ├─ models/           ← trained prediction models (.pkl)
+│   ├─ bad_gifs/         ← corrupt originals
 │   └─ tmp/              ← temp files
-├─ seed/                 ← lookup_seed_*.json
 ├─ logs/                 ← run logs
 ├─ src/giflab/
-│   config.py
-│   meta.py
-│   frame_keep.py
-│   color_keep.py
-│   lossy.py
-│   metrics.py
-│   tagger.py            ← optional AI tags
-│   io.py                ← atomic_write, CSV append, error log
-│   pipeline.py          ← compression orchestrator (resume)
-│   tag_pipeline.py      ← tagging pass (adds `tags` column)
-│   cli.py               ← `python -m giflab …`
+│   ├─ storage.py        ← SQLite storage (replaces CSV + cache)
+│   ├─ prediction_runner.py ← unified pipeline runner
+│   ├─ prediction/
+│   │   ├─ features.py   ← visual feature extraction + CLIP
+│   │   ├─ models.py     ← gradient boosting model training
+│   │   └─ schemas.py    ← Pydantic schemas
+│   ├─ config.py
+│   ├─ meta.py
+│   ├─ lossy.py
+│   ├─ metrics.py
+│   └─ cli.py            ← `python -m giflab …`
 ├─ notebooks/
-│   01_explore_dataset.ipynb
-│   02_build_seed_json.ipynb
 ├─ tests/
 └─ pyproject.toml
 ```

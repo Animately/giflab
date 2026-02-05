@@ -22,13 +22,15 @@ class CompressionConfig:
 
     def __post_init__(self) -> None:
         if self.FRAME_KEEP_RATIOS is None:
-            self.FRAME_KEEP_RATIOS = [1.00, 0.90, 0.80, 0.70, 0.50]
+            self.FRAME_KEEP_RATIOS = [1.0]  # Frame reduction handled separately
 
         if self.COLOR_KEEP_COUNTS is None:
-            self.COLOR_KEEP_COUNTS = [256, 128, 64, 32, 16, 8]
+            # Prediction-required granularity: 5 color counts
+            self.COLOR_KEEP_COUNTS = [256, 128, 64, 32, 16]
 
         if self.LOSSY_LEVELS is None:
-            self.LOSSY_LEVELS = [0, 40, 120]
+            # Prediction-required granularity: 7 lossy levels for smooth curves
+            self.LOSSY_LEVELS = [0, 20, 40, 60, 80, 100, 120]
 
         if self.ENGINES is None:
             self.ENGINES = ["gifsicle", "animately"]

@@ -11,9 +11,11 @@ Constitution Compliance:
 
 import hashlib
 import logging
+import os
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
+
 import cv2
 import numpy as np
 from PIL import Image
@@ -21,6 +23,17 @@ from PIL import Image
 from giflab.meta import extract_gif_metadata
 from giflab.prediction import FEATURE_EXTRACTOR_VERSION
 from giflab.prediction.schemas import GifFeaturesV1
+
+# Check if CLIP is available
+try:
+    import open_clip
+    import torch
+
+    CLIP_AVAILABLE = not bool(os.environ.get("GIFLAB_DISABLE_CLIP"))
+except ImportError:
+    torch = None  # type: ignore[assignment]
+    open_clip = None
+    CLIP_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -478,3 +491,146 @@ def compute_gif_sha(gif_path: Path) -> str:
         for chunk in iter(lambda: f.read(8192), b""):
             sha256.update(chunk)
     return sha256.hexdigest().lower()
+
+
+# CLIP content classification
+_clip_model = None
+_clip_preprocess = None
+_clip_tokenizer = None
+_clip_device = None
+
+CONTENT_QUERIES = [
+    "a screenshot of computer software with text and UI elements",
+    "vector art with clean geometric shapes and solid colors",
+    "a photograph or realistic image with natural textures",
+    "hand drawn artwork or digital illustration",
+    "3D rendered computer graphics with smooth surfaces",
+    "pixel art or low resolution retro graphics",
+]
+
+CONTENT_TYPES = [
+    "screen_capture",
+    "vector_art",
+    "photography",
+    "hand_drawn",
+    "3d_rendered",
+    "pixel_art",
+]
+
+
+def _init_clip() -> bool:
+    """Initialize CLIP model lazily."""
+    global _clip_model, _clip_preprocess, _clip_tokenizer, _clip_device
+
+    if not CLIP_AVAILABLE:
+        return False
+
+    if _clip_model is not None:
+        return True
+
+    try:
+        _clip_device = "cuda" if torch.cuda.is_available() else "cpu"
+        _clip_model, _, _clip_preprocess = open_clip.create_model_and_transforms(
+            "ViT-B-32", pretrained="openai"
+        )
+        _clip_model = _clip_model.to(_clip_device)
+        _clip_tokenizer = open_clip.get_tokenizer("ViT-B-32")
+        logger.info(f"CLIP model loaded on {_clip_device}")
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to load CLIP model: {e}")
+        return False
+
+
+def extract_clip_scores(frame: np.ndarray) -> dict[str, float]:
+    """Extract CLIP content classification scores from a frame.
+
+    Args:
+        frame: RGB numpy array (H, W, 3).
+
+    Returns:
+        Dict with 6 content type confidence scores.
+    """
+    if not _init_clip():
+        return {f"clip_{ct}": None for ct in CONTENT_TYPES}
+
+    try:
+        pil_image = Image.fromarray(frame)
+        image_input = _clip_preprocess(pil_image).unsqueeze(0).to(_clip_device)
+        text_inputs = _clip_tokenizer(CONTENT_QUERIES).to(_clip_device)
+
+        with torch.no_grad():
+            image_features = _clip_model.encode_image(image_input)
+            text_features = _clip_model.encode_text(text_inputs)
+
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            text_features /= text_features.norm(dim=-1, keepdim=True)
+            logits = image_features @ text_features.T
+            probs = logits.softmax(dim=-1).cpu().numpy()[0]
+
+        return {
+            f"clip_{ct}": float(prob)
+            for ct, prob in zip(CONTENT_TYPES, probs, strict=True)
+        }
+
+    except Exception as e:
+        logger.warning(f"CLIP classification failed: {e}")
+        return {f"clip_{ct}": None for ct in CONTENT_TYPES}
+
+
+def extract_features_for_storage(gif_path: Path) -> dict:
+    """Extract all features and return as dict ready for SQLite storage.
+
+    This is the main entry point for the unified pipeline.
+
+    Args:
+        gif_path: Path to the GIF file.
+
+    Returns:
+        Dict with all feature columns for gif_features table.
+    """
+    features = extract_gif_features(gif_path)
+
+    # Get representative frame for CLIP
+    frames = _extract_frames_for_analysis(gif_path, max_frames=1)
+    clip_scores = {}
+    if frames:
+        clip_scores = extract_clip_scores(frames[0])
+
+    return {
+        "gif_sha": features.gif_sha,
+        "gif_name": features.gif_name,
+        "file_path": str(gif_path),
+        "width": features.width,
+        "height": features.height,
+        "frame_count": features.frame_count,
+        "duration_ms": features.duration_ms,
+        "file_size_bytes": features.file_size_bytes,
+        "unique_colors": features.unique_colors,
+        "entropy": features.entropy,
+        "edge_density": features.edge_density,
+        "color_complexity": features.color_complexity,
+        "gradient_smoothness": features.gradient_smoothness,
+        "contrast_score": features.contrast_score,
+        "text_density": features.text_density,
+        "dct_energy_ratio": features.dct_energy_ratio,
+        "color_histogram_entropy": features.color_histogram_entropy,
+        "dominant_color_ratio": features.dominant_color_ratio,
+        "motion_intensity": features.motion_intensity,
+        "motion_smoothness": features.motion_smoothness,
+        "static_region_ratio": features.static_region_ratio,
+        "temporal_entropy": features.temporal_entropy,
+        "frame_similarity": features.frame_similarity,
+        "inter_frame_mse_mean": features.inter_frame_mse_mean,
+        "inter_frame_mse_std": features.inter_frame_mse_std,
+        "lossless_compression_ratio": features.lossless_compression_ratio,
+        "transparency_ratio": features.transparency_ratio,
+        "clip_screen_capture": clip_scores.get("clip_screen_capture"),
+        "clip_vector_art": clip_scores.get("clip_vector_art"),
+        "clip_photography": clip_scores.get("clip_photography"),
+        "clip_hand_drawn": clip_scores.get("clip_hand_drawn"),
+        "clip_3d_rendered": clip_scores.get("clip_3d_rendered"),
+        "clip_pixel_art": clip_scores.get("clip_pixel_art"),
+        "feature_extraction_version": FEATURE_EXTRACTOR_VERSION,
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+    }
