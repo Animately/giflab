@@ -99,46 +99,23 @@ exclude = [
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = [
-    "-ra",
-    "-q", 
-    "--strict-markers",
-    "--strict-config",
-    "--tb=short",
-    "--disable-warnings",
-    "--maxfail=5",
-    "-x",
-    "--durations=10"
-]
-testpaths = ["tests"]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config", "--tb=short"]
+testpaths = ["tests/smoke", "tests/functional"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 markers = [
-    "slow: long-running or external-binary tests",
-    "fast: tests safe to run quickly", 
+    "slow: requires >5s or loads ML models",
+    "fast: tests safe to run quickly",
+    "nightly: memory/perf tests, excluded from CI",
     "integration: long-running or external-binary integration tests",
-    "unit: marks tests as unit tests (fast)",
-    "external_tools: tests that require external tools to be installed",
+    "external_tools: requires external binaries installed",
     "performance: performance benchmark tests",
     "benchmark: performance benchmark tests",
-    "serial: tests that must run sequentially (not in parallel)",
-    "gradient_color_artifacts: tests for gradient color artifact detection",
-    "gradient_color_fixtures: tests for gradient color fixture generation",
-    "gradient_color_config: tests for gradient color configuration",
-    "gradient_color_integration: tests for gradient color integration",
-    "gradient_color_regression: tests for gradient color regression detection",
-    "gradient_color_extended: extended gradient color artifact tests",
-    "gradient_color_e2e: end-to-end gradient color tests",
+    "serial: must not run in parallel",
+    "unit: marks tests as unit tests (fast)",
+    "xdist_group: group tests for parallel execution",
 ]
-# Performance optimizations
-filterwarnings = [
-    "ignore::UserWarning",
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-]
-# Disable expensive features during testing
-cache_dir = ".pytest_cache"
 
 [tool.mypy]
 python_version = "3.11"

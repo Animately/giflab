@@ -14,7 +14,7 @@ CSV_PATH := $(CSV_DIR)/results_$(DATE).csv
 # TARGETS
 # -----------------------------------------------------------------------------
 
-.PHONY: data help clean-temp clean-testing-mess test-workspace test-fast test-integration test-full benchmark-baseline benchmark-compare benchmark-ci performance-status performance-baseline performance-monitor performance-ci
+.PHONY: data help clean-temp clean-testing-mess test-workspace test test-ci test-nightly test-file benchmark-baseline benchmark-compare benchmark-ci performance-status performance-baseline performance-monitor performance-ci
 
 data: ## Run compression pipeline on RAW_DIR and generate EDA artefacts
 	@echo "🎞️  Running GifLab compression pipeline (raw=$(RAW_DIR))…"
@@ -49,36 +49,18 @@ clean-testing-mess: ## Emergency cleanup of testing files in root directory
 	@rm -rf *png_export* *png_frames* *png_sequence* *png_from_* *png_fix*
 	@echo "✅ Root directory cleaned! Use 'make test-workspace' to create proper structure."
 
-test-fast: ## Run lightning-fast test suite (<10s, development workflow)
-	@echo "⚡ Running lightning-fast test suite for development..."
-	@echo "⏱️  Performance monitoring: Will alert if tests exceed 10s threshold"
-	@start_time=$$(date +%s); \
-	export GIFLAB_ULTRA_FAST=1 GIFLAB_MAX_PIPES=3 GIFLAB_MOCK_ALL_ENGINES=1; \
-	poetry run pytest -m "fast" tests/ -n auto --tb=short; \
-	test_result=$$?; \
-	end_time=$$(date +%s); \
-	duration=$$((end_time - start_time)); \
-	echo "⏱️  Test execution time: $${duration}s"; \
-	if [ $$duration -gt 10 ]; then \
-		echo "🚨 WARNING: Fast tests took $${duration}s (exceeds 10s threshold!)"; \
-		echo "💡 Consider investigating performance regression in test suite"; \
-		echo "📊 Expected: ≤10s | Actual: $${duration}s | Target met: ❌"; \
-	else \
-		echo "✅ Performance target met: $${duration}s ≤ 10s"; \
-	fi; \
-	exit $$test_result
+test: ## Fast feedback: smoke + functional (<30s)
+	poetry run pytest tests/smoke/ tests/functional/ -x -q
 
-test-integration: ## Run integration test suite (<5min, pre-commit validation)  
-	@echo "🔄 Running integration test suite for comprehensive validation..."
-	@export GIFLAB_MAX_PIPES=10; \
-	poetry run pytest -m "not slow" tests/ -n 4 --tb=short --durations=10
-	@echo "✅ Integration test suite complete! Use before committing changes."
+test-ci: ## CI: + integration with process isolation (<5min)
+	poetry run pytest tests/smoke/ tests/functional/ tests/integration/ \
+		-n auto --dist loadfile -q
 
-test-full: ## Run full test matrix (<30min, release validation)
-	@echo "🔍 Running full test matrix for complete coverage..."
-	@export GIFLAB_FULL_MATRIX=1; \
-	poetry run pytest tests/ --tb=short --durations=20 --maxfail=10
-	@echo "✅ Full test matrix complete! Use before major releases."
+test-nightly: ## Nightly: everything including perf/memory
+	poetry run pytest tests/ -n auto --dist loadfile
+
+test-file: ## Run a single test file: make test-file F=tests/functional/test_metrics.py
+	poetry run pytest $(F) -v
 
 benchmark-baseline: ## Run Phase 4.3 performance baseline measurements
 	@echo "📊 Running Phase 4.3 performance baseline measurements..."

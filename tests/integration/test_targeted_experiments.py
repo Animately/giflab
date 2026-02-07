@@ -21,6 +21,7 @@ from giflab.core.targeted_presets import (
     ExperimentPreset,
     SlotConfiguration,
 )
+from giflab.core.builtin_presets import register_builtin_presets  # noqa: F401 - triggers registration
 from giflab.dynamic_pipeline import generate_all_pipelines
 
 

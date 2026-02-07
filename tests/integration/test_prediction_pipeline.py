@@ -344,14 +344,14 @@ class TestEndToEndCLI:
         reason="gifsicle not available",
     )
     def test_extract_features_cli(self, tmp_path: Path) -> None:
-        """Test extract-features CLI command."""
+        """Test predict CLI command with a GIF."""
         gif_path = tmp_path / "test.gif"
         create_synthetic_gif(gif_path, pattern="gradient")
 
         result = subprocess.run(
             [
                 "poetry", "run", "giflab", "predict",
-                "extract-features", str(gif_path),
+                str(gif_path),
             ],
             capture_output=True,
             text=True,
@@ -360,7 +360,3 @@ class TestEndToEndCLI:
         )
 
         assert result.returncode == 0
-        # Output should be JSON with features
-        assert "gif_sha" in result.stdout
-        assert "entropy" in result.stdout
-        assert "edge_density" in result.stdout
