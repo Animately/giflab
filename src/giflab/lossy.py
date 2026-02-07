@@ -206,6 +206,7 @@ def apply_lossy_compression(
     output_path: Path,
     lossy_level: int,
     frame_keep_ratio: float = 1.0,
+    color_keep_count: int | None = None,
     engine: LossyEngine = LossyEngine.GIFSICLE,
 ) -> dict[str, Any]:
     """Apply lossy compression to a GIF using the specified engine.
@@ -215,6 +216,7 @@ def apply_lossy_compression(
         output_path: Path to save compressed GIF
         lossy_level: Lossy compression level (0 = lossless, higher = more lossy)
         frame_keep_ratio: Ratio of frames to keep (0.0 to 1.0), default 1.0 (all frames)
+        color_keep_count: Number of colors to keep (optional, None = no reduction)
         engine: Compression engine to use
 
     Returns:
@@ -239,11 +241,11 @@ def apply_lossy_compression(
     # Dispatch to appropriate engine
     if engine == LossyEngine.GIFSICLE:
         return compress_with_gifsicle(
-            input_path, output_path, lossy_level, frame_keep_ratio
+            input_path, output_path, lossy_level, frame_keep_ratio, color_keep_count
         )
     elif engine == LossyEngine.ANIMATELY:
         return compress_with_animately(
-            input_path, output_path, lossy_level, frame_keep_ratio
+            input_path, output_path, lossy_level, frame_keep_ratio, color_keep_count
         )
     else:
         raise ValueError(f"Unsupported engine: {engine}")

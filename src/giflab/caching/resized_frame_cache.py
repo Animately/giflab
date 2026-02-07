@@ -72,17 +72,18 @@ class FrameBufferPool:
             "releases": 0,
         }
     
-    def get_buffer(self, shape: Tuple[int, ...], dtype: np.dtype = np.uint8) -> np.ndarray:
+    def get_buffer(self, shape: Tuple[int, ...], dtype: np.dtype = np.dtype(np.uint8)) -> np.ndarray:
         """
         Get a buffer from the pool or allocate a new one.
-        
+
         Args:
             shape: Shape of the required buffer
-            dtype: Data type of the buffer
-            
+            dtype: Data type of the buffer (accepts np.dtype or numpy type like np.uint8)
+
         Returns:
             numpy array buffer
         """
+        dtype = np.dtype(dtype)
         with self._lock:
             pool_key = (*shape, dtype.num)
             

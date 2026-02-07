@@ -12,11 +12,11 @@ The GifLabRunner provides comprehensive pipeline testing with:
 - Quality metrics analysis
 - Intelligent sampling strategies
 - Result caching and resume functionality
+
+NOTE: elimination_cache has been replaced by giflab.storage (SQLite-based).
 """
 
 # Import modular components
-# Import cache and error components that were already extracted
-from ..elimination_cache import PipelineResultsCache, get_git_commit
 from ..elimination_errors import ErrorTypes
 
 # Import synthetic GIF components for backward compatibility
@@ -34,10 +34,8 @@ __all__ = [
     "PipelineSampler",
     "SAMPLING_STRATEGIES",
     "SamplingStrategy",
-    # Cache and error handling
-    "PipelineResultsCache",
+    # Error handling
     "ErrorTypes",
-    "get_git_commit",
     # Synthetic GIF components
     "SyntheticGifSpec",
 ]

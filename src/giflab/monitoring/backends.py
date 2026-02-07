@@ -299,11 +299,10 @@ class SQLiteBackend(MetricsBackend):
     def clear(self):
         """Clear all stored metrics."""
         with self.lock:
-            conn = sqlite3.connect(str(self.db_path))
+            conn = sqlite3.connect(str(self.db_path), isolation_level=None)
             try:
                 conn.execute("DELETE FROM metrics")
                 conn.execute("VACUUM")
-                conn.commit()
                 self.total_written = 0
             finally:
                 conn.close()
@@ -343,27 +342,26 @@ class SQLiteBackend(MetricsBackend):
     def _cleanup(self):
         """Clean up old metrics and manage database size."""
         cutoff_time = time.time() - (self.retention_days * 86400)
-        
-        conn = sqlite3.connect(str(self.db_path))
+
+        conn = sqlite3.connect(str(self.db_path), isolation_level=None)
         try:
             # Delete old metrics
             conn.execute("DELETE FROM metrics WHERE timestamp < ?", (cutoff_time,))
-            
+
             # Check database size
             db_size_mb = self.db_path.stat().st_size / (1024 * 1024)
             if db_size_mb > self.max_size_mb:
                 # Delete oldest 10% of metrics
                 conn.execute("""
-                    DELETE FROM metrics 
+                    DELETE FROM metrics
                     WHERE id IN (
-                        SELECT id FROM metrics 
-                        ORDER BY timestamp ASC 
+                        SELECT id FROM metrics
+                        ORDER BY timestamp ASC
                         LIMIT (SELECT COUNT(*) / 10 FROM metrics)
                     )
                 """)
-            
+
             conn.execute("VACUUM")
-            conn.commit()
             self.last_cleanup = time.time()
             
         except Exception as e:

@@ -129,26 +129,39 @@ def train_cmd(
 
     # Train lossy model
     click.echo(f"Training {engine} lossy model...")
-    lossy_features = [r.features for r in train_records]
-    lossy_curves = [
-        r.lossy_curve_gifsicle if engine == "gifsicle" else r.lossy_curve_animately
+    # Pair features with curves, filtering out records with None curves
+    lossy_paired = [
+        (
+            r.features,
+            r.lossy_curve_gifsicle
+            if engine == "gifsicle"
+            else r.lossy_curve_animately,
+        )
         for r in train_records
     ]
-    lossy_curves = [c for c in lossy_curves if c is not None]
+    lossy_paired = [(f, c) for f, c in lossy_paired if c is not None]
 
-    if lossy_curves:
+    if lossy_paired:
+        lossy_features, lossy_curves = zip(*lossy_paired)
         lossy_model = CurvePredictionModel(engine_enum, CurveType.LOSSY)
-        lossy_model.train(lossy_features[:len(lossy_curves)], lossy_curves)
+        lossy_model.train(list(lossy_features), list(lossy_curves))
 
-        # Validate
-        val_features = [r.features for r in val_records]
-        val_curves = [
-            r.lossy_curve_gifsicle if engine == "gifsicle" else r.lossy_curve_animately
+        # Validate - also pair features with curves correctly
+        val_lossy_paired = [
+            (
+                r.features,
+                r.lossy_curve_gifsicle
+                if engine == "gifsicle"
+                else r.lossy_curve_animately,
+            )
             for r in val_records
         ]
-        val_curves = [c for c in val_curves if c is not None]
-        if val_curves:
-            mape = lossy_model.validate(val_features[:len(val_curves)], val_curves)
+        val_lossy_paired = [
+            (f, c) for f, c in val_lossy_paired if c is not None
+        ]
+        if val_lossy_paired:
+            val_features, val_curves = zip(*val_lossy_paired)
+            mape = lossy_model.validate(list(val_features), list(val_curves))
             click.echo(f"  Validation MAPE: {mape:.2f}%")
 
         lossy_model.save(output / f"{engine}_lossy_v1.pkl")
@@ -156,23 +169,41 @@ def train_cmd(
 
     # Train color model
     click.echo(f"Training {engine} color model...")
-    color_curves = [
-        r.color_curve_gifsicle if engine == "gifsicle" else r.color_curve_animately
+    # Pair features with curves, filtering out records with None curves
+    color_paired = [
+        (
+            r.features,
+            r.color_curve_gifsicle
+            if engine == "gifsicle"
+            else r.color_curve_animately,
+        )
         for r in train_records
     ]
-    color_curves = [c for c in color_curves if c is not None]
+    color_paired = [(f, c) for f, c in color_paired if c is not None]
 
-    if color_curves:
+    if color_paired:
+        color_features, color_curves = zip(*color_paired)
         color_model = CurvePredictionModel(engine_enum, CurveType.COLORS)
-        color_model.train(lossy_features[:len(color_curves)], color_curves)
+        color_model.train(list(color_features), list(color_curves))
 
-        val_color_curves = [
-            r.color_curve_gifsicle if engine == "gifsicle" else r.color_curve_animately
+        # Validate - also pair features with curves correctly
+        val_color_paired = [
+            (
+                r.features,
+                r.color_curve_gifsicle
+                if engine == "gifsicle"
+                else r.color_curve_animately,
+            )
             for r in val_records
         ]
-        val_color_curves = [c for c in val_color_curves if c is not None]
-        if val_color_curves:
-            mape = color_model.validate(val_features[:len(val_color_curves)], val_color_curves)
+        val_color_paired = [
+            (f, c) for f, c in val_color_paired if c is not None
+        ]
+        if val_color_paired:
+            val_color_features, val_color_curves = zip(*val_color_paired)
+            mape = color_model.validate(
+                list(val_color_features), list(val_color_curves)
+            )
             click.echo(f"  Validation MAPE: {mape:.2f}%")
 
         color_model.save(output / f"{engine}_color_v1.pkl")

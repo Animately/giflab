@@ -80,6 +80,10 @@ class Ssimulacra2Validator:
         Returns:
             Normalized score between 0 and 1
         """
+        import math
+
+        if not math.isfinite(raw_score):
+            return 0.0
         if raw_score >= SSIMULACRA2_EXCELLENT_SCORE:
             return 1.0
         elif raw_score <= SSIMULACRA2_POOR_SCORE:
@@ -133,7 +137,12 @@ class Ssimulacra2Validator:
                 )
 
             # Parse the numeric score from output
+            # Handle both plain number format and "SSIMULACRA2 score: X.X" format
+            import re
             score_str = result.stdout.strip()
+            matches = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", score_str)
+            if matches:
+                return float(matches[-1])
             return float(score_str)
 
         except (subprocess.TimeoutExpired, ValueError) as e:

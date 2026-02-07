@@ -12,12 +12,16 @@ Constitution Compliance:
 
 import logging
 import pickle
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
+
+import giflab
 
 from giflab.prediction.schemas import (
     CompressionCurveV1,
@@ -28,6 +32,24 @@ from giflab.prediction.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _get_git_commit() -> str:
+    """Get short git commit hash, or 'unknown' if not in a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
 
 # Model version
 MODEL_VERSION = "1.0.0"
@@ -222,8 +244,10 @@ class CurvePredictionModel:
 
         y_pred = self.model.predict(X)
 
-        # Calculate MAPE
-        mape = np.mean(np.abs((y_true - y_pred) / (y_true + 1e-10))) * 100
+        # Calculate MAPE (absolute value in denominator for proper formula)
+        epsilon = 1e-10
+        mape = np.mean(np.abs((y_true - y_pred) / (np.abs(y_true) + epsilon)))
+        mape = float(mape * 100)
         self.validation_mape = float(mape)
 
         return self.validation_mape
@@ -256,8 +280,8 @@ class CurvePredictionModel:
             feature_importances=self.feature_importances,
             model_path=str(path),
             created_at=self.created_at,
-            giflab_version="0.1.0",
-            code_commit="unknown",
+            giflab_version=giflab.__version__,
+            code_commit=_get_git_commit(),
         )
 
         # Save metadata alongside model

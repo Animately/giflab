@@ -435,7 +435,9 @@ class EngineConfig:
     # Path to the animately executable.
     # Set this to the location of your animately binary.
     # Override with: GIFLAB_ANIMATELY_PATH
-    ANIMATELY_PATH: str = "animately"
+    ANIMATELY_PATH: str = (
+        "/Users/lachlants/repos/animately/animately-engine-releases/launcher"
+    )
 
     # Path to ImageMagick executable (magick or convert).
     # On most systems, "magick" should work (ImageMagick 7.x)
