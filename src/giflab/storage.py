@@ -323,8 +323,11 @@ class GifLabStorage:
 
         with self._connect() as conn:
             conn.execute(
-                """INSERT OR REPLACE INTO tools (name, variable, version, available)
-                   VALUES (?, ?, ?, ?)""",
+                """INSERT INTO tools (name, variable, version, available)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(name, variable) DO UPDATE SET
+                       version=excluded.version,
+                       available=excluded.available""",
                 (name, variable, version, available),
             )
             conn.commit()
@@ -359,9 +362,13 @@ class GifLabStorage:
             lossy_id = self._get_tool_id(conn, lossy_tool, "lossy_compression")
 
             conn.execute(
-                """INSERT OR REPLACE INTO pipelines
+                """INSERT INTO pipelines
                    (name, frame_tool_id, color_tool_id, lossy_tool_id)
-                   VALUES (?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                       frame_tool_id=excluded.frame_tool_id,
+                       color_tool_id=excluded.color_tool_id,
+                       lossy_tool_id=excluded.lossy_tool_id""",
                 (name, frame_id, color_id, lossy_id),
             )
             conn.commit()
@@ -551,22 +558,34 @@ class GifLabStorage:
         Returns:
             Tuple of (new_gifs, incomplete_gifs)
         """
+        existing_map: dict[str, bool] = {}
+        batch_size = 500  # Stay under SQLITE_MAX_VARIABLE_NUMBER
+
         with self._connect() as conn:
-            # Get all existing GIFs
-            placeholders = ",".join("?" * len(gif_shas))
-            existing = conn.execute(
-                f"""SELECT gif_sha, compression_complete 
-                    FROM gif_features 
-                    WHERE gif_sha IN ({placeholders})""",
-                gif_shas,
-            ).fetchall()
+            for i in range(0, len(gif_shas), batch_size):
+                batch = gif_shas[i : i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                rows = conn.execute(
+                    f"""SELECT gif_sha, compression_complete
+                        FROM gif_features
+                        WHERE gif_sha IN ({placeholders})""",
+                    batch,
+                ).fetchall()
 
-            existing_map = {
-                row["gif_sha"]: bool(row["compression_complete"]) for row in existing
-            }
+                for row in rows:
+                    existing_map[row["gif_sha"]] = bool(
+                        row["compression_complete"]
+                    )
 
-            new_gifs = [sha for sha in gif_shas if sha not in existing_map]
-            incomplete = [sha for sha, complete in existing_map.items() if not complete]
+            new_gifs = [
+                sha for sha in gif_shas
+                if sha not in existing_map
+            ]
+            incomplete = [
+                sha for sha, complete
+                in existing_map.items()
+                if not complete
+            ]
 
             return new_gifs, incomplete
 
@@ -624,10 +643,13 @@ class GifLabStorage:
         Args:
             features: Dict with all feature columns
         """
+        # NOTE: When adding a new column to gif_features, update all three
+        # places: the INSERT column list, the VALUES list, and the
+        # ON CONFLICT DO UPDATE SET clause below.
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT OR REPLACE INTO gif_features (
+                INSERT INTO gif_features (
                     gif_sha, gif_name, file_path,
                     width, height, frame_count, duration_ms, file_size_bytes, unique_colors,
                     entropy, edge_density, color_complexity, gradient_smoothness,
@@ -654,6 +676,41 @@ class GifLabStorage:
                     :clip_hand_drawn, :clip_3d_rendered, :clip_pixel_art,
                     :feature_extraction_version, :extracted_at, FALSE
                 )
+                ON CONFLICT(gif_sha) DO UPDATE SET
+                    gif_name=excluded.gif_name,
+                    file_path=excluded.file_path,
+                    width=excluded.width,
+                    height=excluded.height,
+                    frame_count=excluded.frame_count,
+                    duration_ms=excluded.duration_ms,
+                    file_size_bytes=excluded.file_size_bytes,
+                    unique_colors=excluded.unique_colors,
+                    entropy=excluded.entropy,
+                    edge_density=excluded.edge_density,
+                    color_complexity=excluded.color_complexity,
+                    gradient_smoothness=excluded.gradient_smoothness,
+                    contrast_score=excluded.contrast_score,
+                    text_density=excluded.text_density,
+                    dct_energy_ratio=excluded.dct_energy_ratio,
+                    color_histogram_entropy=excluded.color_histogram_entropy,
+                    dominant_color_ratio=excluded.dominant_color_ratio,
+                    motion_intensity=excluded.motion_intensity,
+                    motion_smoothness=excluded.motion_smoothness,
+                    static_region_ratio=excluded.static_region_ratio,
+                    temporal_entropy=excluded.temporal_entropy,
+                    frame_similarity=excluded.frame_similarity,
+                    inter_frame_mse_mean=excluded.inter_frame_mse_mean,
+                    inter_frame_mse_std=excluded.inter_frame_mse_std,
+                    lossless_compression_ratio=excluded.lossless_compression_ratio,
+                    transparency_ratio=excluded.transparency_ratio,
+                    clip_screen_capture=excluded.clip_screen_capture,
+                    clip_vector_art=excluded.clip_vector_art,
+                    clip_photography=excluded.clip_photography,
+                    clip_hand_drawn=excluded.clip_hand_drawn,
+                    clip_3d_rendered=excluded.clip_3d_rendered,
+                    clip_pixel_art=excluded.clip_pixel_art,
+                    feature_extraction_version=excluded.feature_extraction_version,
+                    extracted_at=excluded.extracted_at
             """,
                 features,
             )
@@ -908,6 +965,9 @@ class GifLabStorage:
                 return 0
 
             placeholders = ",".join("?" * len(shas))
+            conn.execute(
+                f"DELETE FROM compression_failures WHERE gif_sha IN ({placeholders})", shas
+            )
             conn.execute(
                 f"DELETE FROM compression_runs WHERE gif_sha IN ({placeholders})", shas
             )

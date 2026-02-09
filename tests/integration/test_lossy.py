@@ -82,10 +82,10 @@ class TestApplyLossyCompression:
         output_path = Path("output.gif")
 
         result = apply_lossy_compression(
-            input_path, output_path, 40, 1.0, LossyEngine.GIFSICLE  # frame_keep_ratio
+            input_path, output_path, 40, 1.0, engine=LossyEngine.GIFSICLE
         )
 
-        mock_compress.assert_called_once_with(input_path, output_path, 40, 1.0)
+        mock_compress.assert_called_once_with(input_path, output_path, 40, 1.0, None)
         assert result == {"render_ms": 100}
 
     @patch("giflab.lossy.compress_with_animately")
@@ -99,10 +99,10 @@ class TestApplyLossyCompression:
         output_path = Path("output.gif")
 
         result = apply_lossy_compression(
-            input_path, output_path, 120, 0.8, LossyEngine.ANIMATELY  # frame_keep_ratio
+            input_path, output_path, 120, 1.0, engine=LossyEngine.ANIMATELY
         )
 
-        mock_compress.assert_called_once_with(input_path, output_path, 120, 0.8)
+        mock_compress.assert_called_once_with(input_path, output_path, 120, 1.0, None)
         assert result == {"render_ms": 200}
 
     @patch("pathlib.Path.exists")
@@ -116,8 +116,8 @@ class TestApplyLossyCompression:
                 Path("input.gif"),
                 Path("output.gif"),
                 0,
-                1.0,  # frame_keep_ratio
-                "invalid_engine",  # type: ignore[arg-type]  # This will cause the error
+                1.0,
+                engine="invalid_engine",  # type: ignore[arg-type]  # This will cause the error
             )
 
 
@@ -165,6 +165,7 @@ class TestCompressWithGifsicle:
             DEFAULT_ENGINE_CONFIG.GIFSICLE_PATH,
             "--optimize",
             str(input_path.resolve()),
+            "--loopcount=0",
             "--output",
             str(output_path.resolve()),
         ]
@@ -219,6 +220,7 @@ class TestCompressWithGifsicle:
             "--optimize",
             "--lossy=40",
             str(input_path.resolve()),
+            "--loopcount=0",
             "--output",
             str(output_path.resolve()),
         ]
@@ -233,6 +235,7 @@ class TestCompressWithGifsicle:
         assert result["original_frames"] == 20
 
     @patch("giflab.lossy.get_gifsicle_version")
+    @patch("giflab.lossy._select_optimal_disposal_method")
     @patch("giflab.lossy.build_gifsicle_frame_args")
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
@@ -245,6 +248,7 @@ class TestCompressWithGifsicle:
         mock_run,
         mock_metadata,
         mock_frame_args,
+        mock_disposal,
         mock_version,
     ):
         """Test gifsicle compression with frame reduction."""
@@ -258,6 +262,9 @@ class TestCompressWithGifsicle:
 
         # Mock frame reduction arguments (new frame selection syntax)
         mock_frame_args.return_value = ["#0", "#2", "#4", "#6"]
+
+        # Mock disposal method selection
+        mock_disposal.return_value = "background"
 
         # Mock version detection
         mock_version.return_value = "1.94"
@@ -278,11 +285,13 @@ class TestCompressWithGifsicle:
         expected_cmd = [
             DEFAULT_ENGINE_CONFIG.GIFSICLE_PATH,
             "--optimize",
+            "--disposal=background",
             str(input_path.resolve()),
             "#0",
             "#2",
             "#4",
             "#6",
+            "--loopcount=0",
             "--output",
             str(output_path.resolve()),
         ]
@@ -394,6 +403,8 @@ class TestCompressWithAnimately:
             str(input_path.resolve()),
             "--output",
             str(output_path.resolve()),
+            "--loops",
+            "0",
         ]
 
         mock_run.assert_called_once_with(
@@ -431,16 +442,12 @@ class TestCompressWithAnimately:
         mock_exists.return_value = True
 
         result = compress_with_animately(
-            Path("input.gif"), Path("output.gif"), 120, 0.7
+            Path("input.gif"), Path("output.gif"), 120, 1.0
         )
-
-        # Should include frame reduction args
-        # Note: The exact command will depend on mock_frame_args, but we can't easily test the exact command here
-        # without more complex mocking, so we'll just verify the basic structure
 
         assert result["render_ms"] == 2000
         assert result["lossy_level"] == 120
-        assert result["frame_keep_ratio"] == 0.7
+        assert result["frame_keep_ratio"] == 1.0
         assert result["original_frames"] == 8
 
     @patch("giflab.lossy._is_executable")
@@ -484,21 +491,21 @@ class TestApplyCompressionWithAllParams:
             "render_ms": 300,
             "engine": "gifsicle",
             "lossy_level": 40,
-            "frame_keep_ratio": 0.8,
+            "frame_keep_ratio": 1.0,
             "color_keep_count": 64,
         }
 
         result = apply_compression_with_all_params(
-            Path("input.gif"), Path("output.gif"), 40, 0.8, 64, LossyEngine.GIFSICLE
+            Path("input.gif"), Path("output.gif"), 40, 1.0, 64, LossyEngine.GIFSICLE
         )
 
         # Should call compress_with_gifsicle with all params
         mock_compress.assert_called_once_with(
-            Path("input.gif"), Path("output.gif"), 40, 0.8, 64
+            Path("input.gif"), Path("output.gif"), 40, 1.0, 64
         )
 
         assert result["lossy_level"] == 40
-        assert result["frame_keep_ratio"] == 0.8
+        assert result["frame_keep_ratio"] == 1.0
         assert result["color_keep_count"] == 64
 
     @patch("giflab.lossy.compress_with_animately")
@@ -510,16 +517,16 @@ class TestApplyCompressionWithAllParams:
             "render_ms": 400,
             "engine": "animately",
             "lossy_level": 120,
-            "frame_keep_ratio": 0.7,
+            "frame_keep_ratio": 1.0,
             "color_keep_count": 128,
         }
 
         result = apply_compression_with_all_params(
-            Path("input.gif"), Path("output.gif"), 120, 0.7, 128, LossyEngine.ANIMATELY
+            Path("input.gif"), Path("output.gif"), 120, 1.0, 128, LossyEngine.ANIMATELY
         )
 
         mock_compress.assert_called_once_with(
-            Path("input.gif"), Path("output.gif"), 120, 0.7, 128
+            Path("input.gif"), Path("output.gif"), 120, 1.0, 128
         )
 
         assert result["engine"] == "animately"
@@ -529,7 +536,7 @@ class TestApplyCompressionWithAllParams:
         # Test invalid lossy level
         with pytest.raises(ValueError, match="must be non-negative"):
             apply_compression_with_all_params(
-                Path("input.gif"), Path("output.gif"), -1, 0.8, 64
+                Path("input.gif"), Path("output.gif"), -1, 1.0, 64
             )
 
         # Test invalid frame ratio
@@ -548,7 +555,7 @@ class TestApplyCompressionWithAllParams:
                 Path("input.gif"),
                 Path("output.gif"),
                 0,
-                0.8,
+                1.0,
                 4,  # 4 is not in supported counts [256, 128, 64, 32, 16, 8]
             )
 
@@ -569,14 +576,14 @@ class TestFrameKeepRatioValidation:
 
     def test_valid_frame_keep_ratios(self):
         """Test that all configured frame keep ratios are accepted."""
-        valid_ratios = [1.0, 0.9, 0.8, 0.7, 0.5]
+        from giflab.config import DEFAULT_COMPRESSION_CONFIG
 
         with patch("pathlib.Path.exists") as mock_exists:
             mock_exists.return_value = (
                 False  # Will fail with file not found, but validation should pass
             )
 
-            for ratio in valid_ratios:
+            for ratio in DEFAULT_COMPRESSION_CONFIG.FRAME_KEEP_RATIOS:
                 with pytest.raises(IOError, match="Input file not found"):
                     # Should pass validation but fail on file not found
                     apply_lossy_compression(
@@ -584,7 +591,7 @@ class TestFrameKeepRatioValidation:
                         Path("output.gif"),
                         0,
                         ratio,
-                        LossyEngine.GIFSICLE,
+                        engine=LossyEngine.GIFSICLE,
                     )
 
 
@@ -641,6 +648,7 @@ class TestColorIntegration:
             "64",
             "--no-dither",
             str(input_path.resolve()),
+            "--loopcount=0",
             "--output",
             str(output_path.resolve()),
         ]
@@ -681,7 +689,7 @@ class TestColorIntegration:
         mock_exists.return_value = True
 
         result = compress_with_animately(
-            Path("input.gif"), Path("output.gif"), 40, 0.8, 64
+            Path("input.gif"), Path("output.gif"), 40, 1.0, 64
         )
 
         # Verify color args function was called
@@ -710,16 +718,16 @@ class TestGetCompressionEstimate:
         estimate = get_compression_estimate(
             Path("test.gif"),
             40,  # lossy level
-            0.8,  # frame keep ratio (80% of frames)
+            1.0,  # frame keep ratio (100% of frames)
             128,  # color keep count
         )
 
         assert estimate["original_size_kb"] == 1000.0
         assert estimate["estimated_size_kb"] > 0
         assert estimate["estimated_compression_ratio"] > 1.0
-        assert estimate["frame_reduction_percent"] == 20.0  # 1 - 0.8 = 0.2 = 20%
+        assert estimate["frame_reduction_percent"] == 0.0  # 1 - 1.0 = 0.0 = 0%
         assert estimate["color_reduction_percent"] == 50.0  # (256 - 128) / 256 = 50%
-        assert estimate["target_frames"] == 16  # 80% of 20
+        assert estimate["target_frames"] == 20  # 100% of 20
         assert estimate["target_colors"] == 128
         assert estimate["lossy_level"] == 40
         assert estimate["quality_loss_estimate"] >= 0
@@ -731,7 +739,7 @@ class TestGetCompressionEstimate:
 
         with pytest.raises(ValueError, match="not in supported counts"):
             get_compression_estimate(
-                Path("test.gif"), 0, 0.8, 4
+                Path("test.gif"), 0, 1.0, 4
             )  # 4 is not in supported counts
 
     @patch("pathlib.Path.exists")
@@ -740,4 +748,4 @@ class TestGetCompressionEstimate:
         mock_exists.return_value = False
 
         with pytest.raises(IOError, match="Input file not found"):
-            get_compression_estimate(Path("missing.gif"), 0, 0.8, 128)
+            get_compression_estimate(Path("missing.gif"), 0, 1.0, 128)

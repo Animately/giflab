@@ -78,8 +78,8 @@ CONTENT_OPTIMIZED_SAMPLING = {
 ## Implementation Phases
 
 ### Phase A: Static Sampling (Current)
-- Environment variable `GIFLAB_MAX_PIPES=3` caps pipeline generation
-- **Result**: Consistent 3-pipeline subset for ultra-fast testing
+- Layer-specific conftest files cap pipeline generation
+- **Result**: Consistent pipeline subset for fast testing
 
 ### Phase B: Intelligent Sampling (Next)
 - Implement equivalence class selection
@@ -101,16 +101,14 @@ CONTENT_OPTIMIZED_SAMPLING = {
 
 ### Validation Process:
 ```bash
-# Weekly full-matrix validation
-export GIFLAB_FULL_MATRIX=1
-poetry run pytest tests/ --cov=src/giflab --cov-report=html
+# Full nightly validation
+make test-nightly
 
-# Compare against smart sampling coverage
-export GIFLAB_SMART_SAMPLING=1
+# Coverage report
 poetry run pytest tests/ --cov=src/giflab --cov-report=html
 
 # Generate coverage delta report
-python scripts/compare_coverage.py
+poetry run python scripts/compare_coverage.py
 ```
 
 ## Performance Targets
@@ -123,26 +121,24 @@ python scripts/compare_coverage.py
 
 ## Implementation Status
 
-- ✅ **Phase A**: Static pipeline capping implemented
-- ✅ **Environment variables**: `GIFLAB_MAX_PIPES`, `GIFLAB_ULTRA_FAST`
+- ✅ **Phase A**: Static pipeline capping via layer conftest isolation
 - 🎯 **Phase B**: Equivalence class implementation (next sprint)
 - ⏳ **Phase C**: Adaptive sampling (future enhancement)
 
 ## Usage Examples
 
 ```bash
-# Development: Ultra-fast feedback (<3s)
-make test-fast
+# Fast feedback: smoke + functional (<2min)
+make test
 
-# Pre-commit: Smart sampling coverage (<5min)  
-make test-integration
+# CI: + integration (<5min)
+make test-ci
 
-# Release: Full validation (<30min)
-make test-full
+# Everything including nightly
+make test-nightly
 
 # Custom sampling for specific content type
-export GIFLAB_CONTENT_FOCUS=gradient
-poetry run pytest tests/ -k "gradient" --smart-sample
+poetry run pytest tests/ -k "gradient"
 ```
 
 ## Success Metrics
@@ -154,6 +150,6 @@ poetry run pytest tests/ -k "gradient" --smart-sample
 
 ---
 
-**Last Updated**: January 2025  
+**Last Updated**: February 2026  
 **Owner**: Development Team  
 **Next Review**: After Phase 3.3 completion

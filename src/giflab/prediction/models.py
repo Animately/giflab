@@ -375,6 +375,18 @@ class CurvePredictionModel:
         confidence_scores: list[float],
     ) -> CompressionCurveV1:
         """Convert predictions to CompressionCurveV1."""
+        clamped = [
+            i for i, v in enumerate(predictions)
+            if float(v) <= 0.1
+        ]
+        if clamped:
+            logger.warning(
+                "Prediction clamped to 0.1 KB for %s at "
+                "indices %s (raw values: %s)",
+                gif_sha,
+                clamped,
+                [float(predictions[i]) for i in clamped],
+            )
         if self.curve_type == CurveType.LOSSY:
             return CompressionCurveV1(
                 gif_sha=gif_sha,

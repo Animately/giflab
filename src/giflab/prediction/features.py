@@ -44,7 +44,11 @@ MAX_FRAMES_FOR_FEATURES = 50
 LARGE_GIF_FRAME_THRESHOLD = 500
 
 
-def extract_gif_features(gif_path: Path) -> GifFeaturesV1:
+def extract_gif_features(
+    gif_path: Path,
+    precomputed_sha: str | None = None,
+    frames: list[np.ndarray] | None = None,
+) -> GifFeaturesV1:
     """Extract all visual features from a GIF for compression prediction.
 
     This is the main entry point for feature extraction. It combines:
@@ -55,6 +59,9 @@ def extract_gif_features(gif_path: Path) -> GifFeaturesV1:
 
     Args:
         gif_path: Path to the GIF file to analyze.
+        precomputed_sha: Optional pre-computed SHA256 hash to skip
+            re-hashing the file.
+        frames: Optional pre-extracted frames to skip re-decoding.
 
     Returns:
         GifFeaturesV1 schema with all extracted features.
@@ -70,10 +77,11 @@ def extract_gif_features(gif_path: Path) -> GifFeaturesV1:
 
     # Get basic metadata
     metadata = extract_gif_metadata(gif_path)
-    gif_sha = metadata.gif_sha
+    gif_sha = precomputed_sha or metadata.gif_sha
 
-    # Extract frames for analysis
-    frames = _extract_frames_for_analysis(gif_path)
+    # Extract frames for analysis (reuse if provided)
+    if frames is None:
+        frames = _extract_frames_for_analysis(gif_path)
     if not frames:
         raise ValueError(f"Could not extract frames from GIF: {gif_path}")
 
@@ -578,21 +586,31 @@ def extract_clip_scores(frame: np.ndarray) -> dict[str, float]:
         return {f"clip_{ct}": None for ct in CONTENT_TYPES}
 
 
-def extract_features_for_storage(gif_path: Path) -> dict:
+def extract_features_for_storage(
+    gif_path: Path,
+    precomputed_sha: str | None = None,
+) -> dict:
     """Extract all features and return as dict ready for SQLite storage.
 
     This is the main entry point for the unified pipeline.
 
     Args:
         gif_path: Path to the GIF file.
+        precomputed_sha: Optional pre-computed SHA256 hash to
+            skip re-hashing the file.
 
     Returns:
         Dict with all feature columns for gif_features table.
     """
-    features = extract_gif_features(gif_path)
+    # Extract frames once and reuse for features + CLIP
+    frames = _extract_frames_for_analysis(gif_path)
+    features = extract_gif_features(
+        gif_path,
+        precomputed_sha=precomputed_sha,
+        frames=frames,
+    )
 
-    # Get representative frame for CLIP
-    frames = _extract_frames_for_analysis(gif_path, max_frames=1)
+    # Reuse already-extracted frames for CLIP scoring
     clip_scores = {}
     if frames:
         clip_scores = extract_clip_scores(frames[0])

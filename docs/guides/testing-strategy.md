@@ -16,10 +16,12 @@
 
 | Directory | Status | Purpose | Size Limit |
 |-----------|--------|---------|------------|
+| `tests/smoke/` | ✅ Committed | Imports, types, pure logic | N/A |
+| `tests/functional/` | ✅ Committed | Mocked engines, synthetic GIFs | N/A |
+| `tests/integration/` | ✅ Committed | Real engines, real metrics | N/A |
+| `tests/nightly/` | ✅ Committed | Memory, perf, stress, golden | N/A |
 | `tests/fixtures/` | ✅ Committed | Essential minimal fixtures | ~24KB total |
-| `test_fixes/` | ❌ Ignored | Debug/development files | 4.3MB (excluded) |
-| `test_elimination/` | ❌ Ignored | Pipeline testing | Variable (excluded) |
-| `test_debug/` | ❌ Ignored | Debug outputs | Variable (excluded) |
+| `test-workspace/` | ❌ Ignored | Manual testing & debugging | Variable (excluded) |
 
 ## Best Practices
 

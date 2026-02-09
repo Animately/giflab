@@ -413,7 +413,7 @@ class TestWrapperValidationIntegration:
     @pytest.fixture
     def test_gif(self):
         """Path to a simple test GIF fixture."""
-        return Path(__file__).parent / "fixtures" / "simple_4frame.gif"
+        return Path(__file__).parent.parent / "fixtures" / "simple_4frame.gif"
 
     def test_gifsicle_color_reducer_validation_integration(self, test_gif):
         """Test validation integration with GifsicleColorReducer."""

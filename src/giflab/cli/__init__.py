@@ -13,6 +13,7 @@ from pathlib import Path
 
 import click
 
+from giflab import __version__
 from giflab.prediction_runner import run_prediction_pipeline
 
 
@@ -21,7 +22,7 @@ DEFAULT_DB_PATH = Path("data/giflab.db")
 
 
 @click.group()
-@click.version_option(version="1.0.0", prog_name="giflab")
+@click.version_option(version=__version__, prog_name="giflab")
 def main() -> None:
     """🎞️ GifLab — GIF compression prediction training data generator."""
     pass
@@ -90,17 +91,10 @@ def run_cmd(
 @click.option("--lossy-tool", type=str, default=None, help="Filter by lossy tool")
 def train(db: str, lossy_tool: str | None) -> None:
     """Train prediction models from the database."""
-    click.echo("🚀 Training prediction models...")
-    click.echo(f"   Database: {db}")
-
-    # Import training function from prediction module
-    try:
-        from giflab.prediction.cli import train_models
-
-        train_models(Path(db), lossy_tool=lossy_tool)
-    except ImportError:
-        click.echo("❌ Training module not available")
-        raise SystemExit(1)
+    # TODO: Remove or implement as part of CLI refactor
+    click.echo("⚠️  'giflab train' is not yet implemented.")
+    click.echo("   Use 'giflab prediction train' instead.")
+    raise SystemExit(1)
 
 
 @main.command()
@@ -127,17 +121,9 @@ def predict(gif_path: str, db: str) -> None:
 @click.option("--output", "-o", type=click.Path(), default="models/")
 def export(db: str, output: str) -> None:
     """Export trained models as .pkl files for Animately."""
-    click.echo(f"📦 Exporting models...")
-    click.echo(f"   Database: {db}")
-    click.echo(f"   Output: {output}")
-
-    try:
-        from giflab.prediction.cli import export_models
-
-        export_models(Path(db), Path(output))
-    except ImportError:
-        click.echo("❌ Export module not available")
-        raise SystemExit(1)
+    # TODO: Remove or implement as part of CLI refactor
+    click.echo("⚠️  'giflab export' is not yet implemented.")
+    raise SystemExit(1)
 
 
 @main.command()

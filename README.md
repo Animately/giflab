@@ -523,7 +523,7 @@ GifLab includes platform-specific binaries for tools not available via package m
 poetry run python -c "from giflab.system_tools import get_available_tools; print(get_available_tools())"
 
 # Run smoke tests to verify functionality
-poetry run python -m pytest tests/test_engine_smoke.py -v
+poetry run pytest tests/smoke/ -v
 ```
 
 ## 📈 Machine-Learning Dataset Best Practices  
@@ -582,14 +582,17 @@ poetry run pytest -m "not slow and not external_tools"
 
 ### Quick Commands
 ```bash
-# Development Testing (⚡ <30s, rapid iteration)
-make test-fast
+# Fast feedback: smoke + functional (<2min)
+make test
 
-# Pre-commit Testing (🔄 <5min, comprehensive validation)  
-make test-integration
+# CI: + integration (<5min)
+make test-ci
 
-# Release Testing (🔍 <30min, full coverage)
-make test-full
+# Everything including nightly
+make test-nightly
+
+# Single file
+make test-file F=tests/functional/test_metrics.py
 
 # Create test workspace
 make test-workspace

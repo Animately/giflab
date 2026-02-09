@@ -258,7 +258,7 @@ class TestQualityValidationRealScenarios:
     @pytest.fixture
     def test_gif(self):
         """Path to test GIF fixture."""
-        return Path(__file__).parent / "fixtures" / "test_4_frames.gif"
+        return Path(__file__).parent.parent / "fixtures" / "test_4_frames.gif"
 
     def test_quality_validation_with_gifsicle(self, test_gif):
         """Test quality validation with actual Gifsicle compression."""

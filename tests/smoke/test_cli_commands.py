@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from giflab import __version__
 from giflab.cli import main
 
 
@@ -27,7 +28,7 @@ class TestMainCLI:
         result = runner.invoke(main, ["--version"])
 
         assert result.exit_code == 0
-        assert "giflab, version 1.0.0" in result.output
+        assert f"giflab, version {__version__}" in result.output
 
     def test_main_invalid_command(self):
         """Test main CLI with invalid command."""

@@ -102,28 +102,25 @@ def test_integration(self, mock_class, tmp_path):
 
 ## Final Architecture
 
-### Three-Tier Testing Strategy
+### Four-Layer Test Architecture
 
-| **Tier** | **Target Time** | **Use Case** | **Coverage** | **Trigger** |
+| **Layer** | **Path** | **Purpose** | **Time budget** | **When to run** |
 |---|---|---|---|---|
-| **⚡ Lightning** | <30s | Development iteration | Core functionality | Every commit |
-| **🔄 Integration** | <5min | Pre-commit validation | 95%+ code paths | PR merge |
-| **🔍 Full Matrix** | <30min | Release validation | 100% combinations | Nightly/Release |
+| **smoke** | `tests/smoke/` | Imports, types, pure logic | <5s | Every save |
+| **functional** | `tests/functional/` | Mocked engines, synthetic GIFs | <2min | Every commit |
+| **integration** | `tests/integration/` | Real engines, real metrics | <5min | CI / pre-merge |
+| **nightly** | `tests/nightly/` | Memory, perf, stress, golden | No limit | Nightly schedule |
 
 ### Developer Commands
 ```bash
-make test-fast          # <30s, run constantly during development
-make test-integration   # <5min, run before committing  
-make test-full         # <30min, run before major releases
+make test           # smoke + functional (<2min)
+make test-ci        # + integration (<5min)
+make test-nightly   # everything including perf/memory
+make test-file F=tests/functional/test_metrics.py
 ```
 
-### Environment Variable Controls
-```bash
-export GIFLAB_ULTRA_FAST=1      # Minimum viable testing
-export GIFLAB_MAX_PIPES=3       # Pipeline matrix capped
-export GIFLAB_MOCK_ALL_ENGINES=1 # External engines mocked
-export GIFLAB_FULL_MATRIX=1     # Complete coverage on demand
-```
+### Test Isolation
+The env-var control system (`GIFLAB_ULTRA_FAST`, `GIFLAB_MAX_PIPES`, `GIFLAB_MOCK_ALL_ENGINES`, `GIFLAB_FULL_MATRIX`) was replaced by directory-based isolation with layer-specific conftest files. Each layer's conftest handles its own mocking and setup, eliminating fragile environment variable gates.
 
 ## Key Insights & Patterns
 

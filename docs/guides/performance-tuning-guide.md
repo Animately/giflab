@@ -318,16 +318,16 @@ See [Configuration Reference](../reference/configuration-reference.md) for compl
 
 ```bash
 # Quick performance test
-poetry run python tests/performance/benchmark_comprehensive.py --quick
+poetry run python tests/scripts/benchmarks/benchmark_comprehensive.py --quick
 
 # Full benchmark suite
-poetry run python tests/performance/benchmark_comprehensive.py
+poetry run python tests/scripts/benchmarks/benchmark_comprehensive.py
 
 # Memory stability test
-poetry run python tests/performance/test_memory_stability.py
+poetry run pytest tests/nightly/test_memory_stability.py
 
 # Specific scenario test
-poetry run pytest tests/performance/ -k "test_large_gif_performance"
+poetry run pytest tests/nightly/ -k "test_large_gif_performance"
 ```
 
 ## Appendix C: Optimization Decision Tree

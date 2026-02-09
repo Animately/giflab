@@ -239,7 +239,7 @@ DEFAULT_TOOLS = {
 Create comprehensive tests:
 
 ```python
-# tests/test_your_tool.py
+# tests/functional/test_your_tool.py
 import pytest
 from pathlib import Path
 from src.giflab.tools.your_tool_wrapper import YourToolWrapper
@@ -336,11 +336,11 @@ poetry run python -m giflab run --strategies your_tool
 
 ### Automated Testing
 ```bash
-# Run tool-specific tests
-poetry run pytest tests/test_your_tool.py
+# Run tool-specific tests (functional layer)
+poetry run pytest tests/functional/test_your_tool.py
 
 # Run integration tests
-poetry run pytest tests/test_experimental_integration.py
+poetry run pytest tests/integration/test_experimental_integration.py
 ```
 
 ### Performance Benchmarking
@@ -401,7 +401,7 @@ jobs:
           # Tool installation commands
       - name: Run tests
         run: |
-          poetry run pytest tests/test_your_tool.py
+          poetry run pytest tests/functional/test_your_tool.py
 ```
 
 ### Performance Monitoring

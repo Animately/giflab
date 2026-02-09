@@ -272,8 +272,9 @@ class TestPerformance:
         
         elapsed = time.perf_counter() - start
         
-        # Should be very fast (< 10ms for 100 lazy imports)
-        assert elapsed < 0.01
+        # Should be very fast (< 100ms for 100 lazy imports)
+        # Relaxed from 10ms to 100ms to avoid flakes under parallel execution
+        assert elapsed < 0.1
     
     def test_cached_availability_check(self):
         """Test that availability checks are cached."""

@@ -5,11 +5,9 @@ are working correctly and provide expected performance characteristics.
 """
 
 import tempfile
-import time
 from pathlib import Path
 
 import numpy as np
-import pytest
 from giflab.synthetic_gifs import (
     SyntheticFrameGenerator,
     SyntheticGifGenerator,
@@ -177,64 +175,6 @@ class TestSyntheticGifGeneratorIntegration:
         assert gif_path.stat().st_size > 0
 
 
-class TestPerformanceCharacteristics:
-    """Lightweight performance tests to verify vectorization benefits."""
-
-    def setup_method(self):
-        """Setup test fixtures."""
-        self.generator = SyntheticFrameGenerator()
-
-    def test_large_image_performance_reasonable(self):
-        """Test that large images generate in reasonable time."""
-        large_size = (500, 500)  # The size mentioned in the refactor doc
-
-        start_time = time.time()
-        img = self.generator.create_frame("gradient", large_size, 0, 8)
-        end_time = time.time()
-
-        generation_time = end_time - start_time
-
-        # Should generate large images quickly (within 0.1 seconds)
-        assert (
-            generation_time < 0.1
-        ), f"Large image took {generation_time:.3f}s, expected < 0.1s"
-        assert isinstance(img, Image.Image)
-        assert img.size == large_size
-
-    def test_multiple_frames_performance(self):
-        """Test that generating multiple frames is efficient."""
-        size = (200, 200)
-        num_frames = 10
-
-        start_time = time.time()
-        for frame_idx in range(num_frames):
-            img = self.generator.create_frame("noise", size, frame_idx, num_frames)
-            assert isinstance(img, Image.Image)
-        end_time = time.time()
-
-        total_time = end_time - start_time
-        avg_time_per_frame = total_time / num_frames
-
-        # Should generate frames quickly
-        assert (
-            avg_time_per_frame < 0.01
-        ), f"Average frame time {avg_time_per_frame:.3f}s too slow"
-
-    def test_different_content_types_all_fast(self):
-        """Test that all vectorized content types perform well."""
-        content_types = ["gradient", "complex_gradient", "noise", "texture", "solid"]
-        size = (150, 150)
-
-        for content_type in content_types:
-            start_time = time.time()
-            img = self.generator.create_frame(content_type, size, 0, 5)
-            end_time = time.time()
-
-            generation_time = end_time - start_time
-            assert generation_time < 0.05, f"{content_type} took {generation_time:.3f}s"
-            assert isinstance(img, Image.Image)
-
-
 class TestBackwardCompatibility:
     """Test that vectorized implementations maintain backward compatibility."""
 
@@ -269,40 +209,3 @@ class TestBackwardCompatibility:
         assert np.array_equal(arr1, arr2)
 
 
-@pytest.mark.performance
-class TestPerformanceRegression:
-    """Performance regression tests to ensure optimizations are maintained."""
-
-    def test_no_performance_regression_medium_size(self):
-        """Test that medium-sized images generate quickly (regression test)."""
-        generator = SyntheticFrameGenerator()
-        size = (200, 200)
-
-        times = []
-        for i in range(5):
-            start = time.time()
-            generator.create_frame("gradient", size, i, 5)
-            times.append(time.time() - start)
-
-        avg_time = sum(times) / len(times)
-
-        # Based on our benchmark, should be much faster than 0.01s
-        assert avg_time < 0.01, f"Performance regression: avg {avg_time:.4f}s > 0.01s"
-
-    def test_vectorization_still_active(self):
-        """Test that vectorized operations are still being used."""
-        generator = SyntheticFrameGenerator()
-
-        # Generate a complex gradient which uses heavy numpy operations
-        start_time = time.time()
-        img = generator.create_frame("complex_gradient", (300, 300), 0, 8)
-        elapsed = time.time() - start_time
-
-        # If vectorization is working, this should be very fast
-        assert (
-            elapsed < 0.02
-        ), f"Vectorization may not be working: {elapsed:.4f}s too slow"
-
-        # Verify the image has the expected complex characteristics
-        img_array = np.array(img)
-        assert img_array.std() > 30  # Should have high variation from complex math

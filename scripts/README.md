@@ -93,15 +93,10 @@ If performance alerts trigger:
 
 2. **Profile Slow Tests**:
    ```bash
-   poetry run pytest -m "fast" tests/ --durations=0 | head -20
+   poetry run pytest tests/smoke/ tests/functional/ --durations=0 | head -20
    ```
 
-3. **Verify Environment Variables**:
-   ```bash
-   echo $GIFLAB_ULTRA_FAST $GIFLAB_MAX_PIPES $GIFLAB_MOCK_ALL_ENGINES
-   ```
-
-4. **Check Mock Patterns**:
+3. **Check Mock Patterns**:
    - Review `tests/conftest.py` for proper mock application
    - Ensure external engine mocking is working correctly
 

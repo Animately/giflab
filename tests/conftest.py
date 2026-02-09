@@ -11,6 +11,18 @@ import pytest
 from PIL import Image
 
 
+def pytest_collection_modifyitems(items):
+    """Enforce serial execution for tests marked with @pytest.mark.serial.
+
+    Maps the custom ``serial`` marker to ``xdist_group("serial")`` so that
+    pytest-xdist schedules all serial-marked tests on the same worker,
+    preventing CPU-contention issues for tight timing assertions.
+    """
+    for item in items:
+        if item.get_closest_marker("serial"):
+            item.add_marker(pytest.mark.xdist_group("serial"))
+
+
 def _create_dummy_gif(path: Path, frames: int = 1, colors: int = 2) -> None:
     """Create a small dummy GIF at *path* with *frames* and *colors*."""
     path.parent.mkdir(parents=True, exist_ok=True)

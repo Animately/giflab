@@ -187,12 +187,16 @@ class PredictionRunner:
         # Extract features if needed
         if status is None or self.force:
             self.logger.debug(f"Extracting features for {gif_path.name}")
-            features = extract_features_for_storage(gif_path)
+            features = extract_features_for_storage(
+                gif_path, precomputed_sha=gif_sha
+            )
             self.storage.save_gif_features(features)
         elif self.upgrade:
             if status["feature_version"] != FEATURE_EXTRACTION_VERSION:
                 self.logger.debug(f"Upgrading features for {gif_path.name}")
-                features = extract_features_for_storage(gif_path)
+                features = extract_features_for_storage(
+                    gif_path, precomputed_sha=gif_sha
+                )
                 self.storage.save_gif_features(features)
 
         # Get missing compression runs

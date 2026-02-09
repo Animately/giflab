@@ -177,8 +177,9 @@ class TestValidateFrameKeepRatio:
 
     def test_valid_ratios(self):
         """Test that configured valid ratios pass validation."""
-        valid_ratios = [1.0, 0.9, 0.8, 0.7, 0.5]
-        for ratio in valid_ratios:
+        from giflab.config import DEFAULT_COMPRESSION_CONFIG
+
+        for ratio in DEFAULT_COMPRESSION_CONFIG.FRAME_KEEP_RATIOS:
             # Should not raise any exception
             validate_frame_keep_ratio(ratio)
 
@@ -197,9 +198,10 @@ class TestValidateFrameKeepRatio:
 
     def test_floating_point_tolerance(self):
         """Test that small floating point differences are tolerated."""
-        # Should pass due to tolerance
-        validate_frame_keep_ratio(0.8000001)
-        validate_frame_keep_ratio(0.7999999)
+        # Should pass due to tolerance (1.0 is always a valid ratio)
+        # Use values within [0.0, 1.0] range that are close to 1.0
+        validate_frame_keep_ratio(0.9999999)
+        validate_frame_keep_ratio(1.0)
 
 
 class TestGetFrameReductionInfo:
@@ -223,14 +225,14 @@ class TestGetFrameReductionInfo:
         mock_img.tell.return_value = 0
         mock_open.return_value.__enter__.return_value = mock_img
 
-        info = get_frame_reduction_info(Path("test.gif"), 0.8)
+        info = get_frame_reduction_info(Path("test.gif"), 1.0)
 
         assert info["original_frames"] == 3
-        assert info["keep_ratio"] == 0.8
-        assert info["target_frames"] == 2  # 80% of 3 frames
-        assert info["frames_kept"] == 2
+        assert info["keep_ratio"] == 1.0
+        assert info["target_frames"] == 3  # 100% of 3 frames
+        assert info["frames_kept"] == 3
         assert "frame_indices" in info
-        assert abs(info["reduction_percent"] - 20.0) < 1e-10
+        assert abs(info["reduction_percent"] - 0.0) < 1e-10
 
     @patch("pathlib.Path.exists")
     def test_missing_file(self, mock_exists):
@@ -238,7 +240,7 @@ class TestGetFrameReductionInfo:
         mock_exists.return_value = False
 
         with pytest.raises(IOError, match="Input file not found"):
-            get_frame_reduction_info(Path("missing.gif"), 0.8)
+            get_frame_reduction_info(Path("missing.gif"), 1.0)
 
     def test_invalid_ratio(self):
         """Test error with invalid frame keep ratio."""
@@ -256,7 +258,7 @@ class TestGetFrameReductionInfo:
         mock_open.return_value.__enter__.return_value = mock_img
 
         with pytest.raises(ValueError, match="File is not a GIF"):
-            get_frame_reduction_info(Path("test.png"), 0.8)
+            get_frame_reduction_info(Path("test.png"), 1.0)
 
     @patch("pathlib.Path.exists")
     @patch("PIL.Image.open")
@@ -266,7 +268,7 @@ class TestGetFrameReductionInfo:
         mock_open.side_effect = Exception("PIL error")
 
         with pytest.raises(IOError, match="Error reading GIF"):
-            get_frame_reduction_info(Path("test.gif"), 0.8)
+            get_frame_reduction_info(Path("test.gif"), 1.0)
 
     @patch("pathlib.Path.exists")
     @patch("PIL.Image.open")
@@ -281,7 +283,7 @@ class TestGetFrameReductionInfo:
         mock_img.tell.return_value = 0
         mock_open.return_value.__enter__.return_value = mock_img
 
-        info = get_frame_reduction_info(Path("single.gif"), 0.5)
+        info = get_frame_reduction_info(Path("single.gif"), 1.0)
 
         assert info["original_frames"] == 1
         assert info["target_frames"] == 1

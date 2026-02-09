@@ -35,19 +35,19 @@ from giflab.tool_wrappers import (  # Dithering-specific wrappers; All Bayer sca
 @pytest.fixture
 def test_gif():
     """Path to a simple test GIF fixture."""
-    return Path(__file__).parent / "fixtures" / "simple_4frame.gif"
+    return Path(__file__).parent.parent / "fixtures" / "simple_4frame.gif"
 
 
 @pytest.fixture
 def single_frame_gif():
     """Path to a single-frame test GIF fixture."""
-    return Path(__file__).parent / "fixtures" / "single_frame.gif"
+    return Path(__file__).parent.parent / "fixtures" / "single_frame.gif"
 
 
 @pytest.fixture
 def many_colors_gif():
     """Path to a many-color test GIF fixture."""
-    return Path(__file__).parent / "fixtures" / "many_colors.gif"
+    return Path(__file__).parent.parent / "fixtures" / "many_colors.gif"
 
 
 # ---------------------------------------------------------------------------

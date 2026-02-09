@@ -32,14 +32,21 @@ poetry run python -c "from giflab.metrics import calculate_metrics"
 
 ### Testing
 ```bash
-# Fast development tests
-poetry run pytest -m "fast" tests/ -n auto --tb=short
+# Fast feedback (default: smoke + functional, <2min)
+make test
 
-# Integration tests  
-poetry run pytest -m "not slow" tests/ -n 4 --tb=short
+# CI (+ integration, <5min)
+make test-ci
 
-# Full test suite
-poetry run pytest tests/ --tb=short
+# Everything including nightly
+make test-nightly
+
+# Single file
+make test-file F=tests/functional/test_metrics.py
+
+# Direct pytest (layer-specific)
+poetry run pytest tests/smoke/ tests/functional/ -x -q
+poetry run pytest tests/integration/ -n auto -q
 ```
 
 ### GifLab Operations
@@ -70,7 +77,7 @@ poetry run jupyter notebook
 ## Project Structure Notes
 
 - **Source code**: `src/giflab/` (package structure)
-- **Tests**: `tests/` (pytest-based)
+- **Tests**: `tests/` (4-layer: smoke, functional, integration, nightly)
 - **Configuration**: `pyproject.toml` (Poetry + tool config)
 - **Dependencies**: Managed entirely through Poetry
 - **Scripts**: Defined in `[tool.poetry.scripts]` section
@@ -95,9 +102,11 @@ poetry run python -c "import giflab; print('✅ GifLab ready!')"
 The project includes a Makefile that properly uses Poetry. You can also use:
 
 ```bash
-make test-fast      # Development testing
-make test-integration  # Pre-commit validation
-make data          # Run compression pipeline
+make test           # Fast feedback: smoke + functional (<2min)
+make test-ci        # CI: + integration (<5min)
+make test-nightly   # Everything including perf/memory
+make test-file F=tests/functional/test_metrics.py  # Single file
+make data           # Run compression pipeline
 ```
 
 All Makefile targets internally use `poetry run` commands.
@@ -161,19 +170,34 @@ animately --input source.gif --output processed.gif --scale 0.5 --crop "100,100,
 - **Cause**: Trying to use `giflab` directly instead of module syntax
 - **Fix**: Use `poetry run python -m giflab` or `poetry run giflab`
 
-## Test Suite Information
+## Test Architecture (4-Layer)
+
+Tests are organized into four layers. New tests MUST go in the correct layer — never in `tests/` root.
+
+| Layer | Path | Purpose | Time budget |
+|-------|------|---------|-------------|
+| smoke | `tests/smoke/` | Imports, types, pure logic | <5s |
+| functional | `tests/functional/` | Mocked engines, synthetic GIFs | <2min |
+| integration | `tests/integration/` | Real engines, real metrics | <5min |
+| nightly | `tests/nightly/` | Memory, perf, stress, golden | No limit |
+
+### Where to Put New Tests
+- **Pure logic, schemas, imports** → `tests/smoke/`
+- **Needs mocks or synthetic GIFs** → `tests/functional/`
+- **Needs real compression engines** → `tests/integration/`
+- **Performance, memory, stress** → `tests/nightly/`
 
 ### Intentionally Skipped Tests (Normal Behavior)
 These tests are **correctly skipped** during normal test runs:
 
-1. **Golden Results Test** - `tests/test_gradient_color_regression.py`
+1. **Golden Results Test** - `tests/nightly/test_gradient_color_regression.py`
    - **Skip reason**: "Use --update-golden to save new golden results"
-   - **How to run**: `poetry run pytest --update-golden tests/test_gradient_color_regression.py::*golden*`
+   - **How to run**: `poetry run pytest --update-golden tests/nightly/test_gradient_color_regression.py::*golden*`
    - **Purpose**: Generates reference data for regression testing
 
-2. **Stress Tests** - `tests/test_gradient_color_performance.py`
+2. **Stress Tests** - `tests/nightly/test_gradient_color_performance.py`
    - **Skip reason**: "Stress tests require GIFLAB_STRESS_TESTS=1"
-   - **How to run**: `GIFLAB_STRESS_TESTS=1 poetry run pytest tests/test_gradient_color_performance.py::TestStressTesting`
+   - **How to run**: `GIFLAB_STRESS_TESTS=1 poetry run pytest tests/nightly/test_gradient_color_performance.py::TestStressTesting`
    - **Purpose**: Performance testing with large images and many frames
 
 ### Test Troubleshooting

@@ -10,16 +10,22 @@ This document establishes clear guidelines for testing in GifLab to maintain a c
 
 ```
 giflab/
-├── tests/                    # ✅ Unit & integration tests (pytest)
+├── tests/                    # ✅ Automated tests (4-layer architecture)
+│   ├── smoke/               # Imports, types, pure logic (<5s)
+│   ├── functional/          # Mocked engines, synthetic GIFs (<2min)
+│   ├── integration/         # Real engines, real metrics (<5min)
+│   ├── nightly/             # Memory, perf, stress, golden (no limit)
 │   ├── fixtures/            # Test GIF files for automated tests
-│   └── test_*.py           # Automated test files
+│   └── conftest.py          # Shared fixtures only
 ├── test-workspace/          # ✅ Manual testing & debugging
 │   ├── manual/             # Manual testing sessions
-│   ├── debug/              # Debug investigations  
+│   ├── debug/              # Debug investigations
 │   ├── temp/               # Temporary files (auto-cleaned)
 │   └── samples/            # Test samples & reference files
 └── docs/guides/            # ✅ Testing documentation
 ```
+
+New test files MUST go in the appropriate layer directory, never in `tests/` root.
 
 ### ❌ NEVER Put Testing Files In:
 - **Root directory** (`/`) - Keep it clean!
@@ -28,22 +34,19 @@ giflab/
 
 ## 🔧 Testing Workflows
 
-### 1. **Unit/Integration Tests** (`tests/`)
+### 1. **Automated Tests** (`tests/`)
 ```bash
-# Development: Lightning-fast tests (<30s)
-make test-fast
+# Fast feedback: smoke + functional (<2min)
+make test
 
-# Pre-commit: Comprehensive integration tests (<5min)
-make test-integration
+# CI: + integration (<5min)
+make test-ci
 
-# Release: Full test matrix (<30min)  
-make test-full
+# Everything including nightly
+make test-nightly
 
-# Add new test files
-pytest tests/test_new_feature.py
-
-# Run specific tests
-pytest tests/test_new_feature.py
+# Single file
+make test-file F=tests/functional/test_metrics.py
 ```
 
 ### 2. **Manual Testing** (`test-workspace/manual/`)
@@ -126,10 +129,11 @@ python scripts/clean_testing_workspace.py --interactive
 
 ### Makefile Targets
 ```bash
-# Testing Commands
-make test-fast           # Lightning-fast tests (<30s, development workflow)
-make test-integration    # Integration tests (<5min, pre-commit validation)
-make test-full           # Full test matrix (<30min, release validation)
+# Testing Commands (4-Layer Architecture)
+make test               # Fast feedback: smoke + functional (<2min)
+make test-ci            # CI: + integration (<5min)
+make test-nightly       # Everything including perf/memory
+make test-file F=...    # Single file
 
 # Workspace Management
 make test-workspace      # Create proper test workspace structure

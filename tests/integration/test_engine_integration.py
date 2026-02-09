@@ -282,14 +282,17 @@ class TestEngineIntegrationFast:
             assert result["ssim"] == 1.0  # Perfect similarity in fast mode
             assert result["lossy_level"] == 50
 
-    @patch("giflab.lossy.validate_frame_keep_ratio")
     @patch("giflab.lossy.compress_with_gifsicle")
-    def test_apply_lossy_compression_gifsicle_fast(self, mock_gifsicle, _mock_validate):
+    def test_apply_lossy_compression_gifsicle_fast(self, mock_gifsicle):
         """Test apply_lossy_compression with gifsicle engine using fast fixture."""
 
         # Configure mock to copy file and return expected results
         def mock_compress(
-            input_path, output_path, lossy_level=0, frame_keep_ratio=1.0, **kwargs
+            input_path,
+            output_path,
+            lossy_level=0,
+            frame_keep_ratio=1.0,
+            color_keep_count=None,
         ):
             import shutil
 
@@ -315,7 +318,7 @@ class TestEngineIntegrationFast:
                 input_path=input_path,
                 output_path=output_path,
                 lossy_level=40,
-                frame_keep_ratio=0.8,
+                frame_keep_ratio=1.0,
                 engine=LossyEngine.GIFSICLE,
             )
 
@@ -324,7 +327,7 @@ class TestEngineIntegrationFast:
             assert "render_ms" in result
             assert "engine" in result
             assert result["engine"] == "noop"
-            assert result["frame_keep_ratio"] == 0.8
+            assert result["frame_keep_ratio"] == 1.0
             assert result["lossy_level"] == 40
 
     @patch("giflab.lossy.compress_with_animately")
@@ -333,7 +336,11 @@ class TestEngineIntegrationFast:
 
         # Configure mock to copy file and return expected results
         def mock_compress(
-            input_path, output_path, lossy_level=0, frame_keep_ratio=1.0, **kwargs
+            input_path,
+            output_path,
+            lossy_level=0,
+            frame_keep_ratio=1.0,
+            color_keep_count=None,
         ):
             import shutil
 

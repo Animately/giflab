@@ -347,7 +347,7 @@ def process_validation_aware_result(result: dict):
 ### Unit Testing Pattern
 
 ```python
-# tests/test_your_new_wrapper.py
+# tests/functional/test_your_new_wrapper.py
 import pytest
 from pathlib import Path
 from giflab.tool_wrappers import YourNewWrapper
@@ -522,4 +522,4 @@ When adding validation to a new wrapper:
 For validation integration questions:
 1. Check the [Troubleshooting Guide](validation-troubleshooting.md)
 2. Review existing wrapper implementations in `src/giflab/tool_wrappers.py`
-3. Run validation tests: `poetry run pytest tests/test_*validation*.py`
+3. Run validation tests: `poetry run pytest tests/functional/ -k validation`

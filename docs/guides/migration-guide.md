@@ -62,10 +62,10 @@ poetry install
 poetry run pytest tests/ -v
 
 # Run performance benchmarks
-poetry run python tests/performance/benchmark_comprehensive.py
+poetry run python tests/scripts/benchmarks/benchmark_comprehensive.py
 
 # Verify memory stability
-poetry run python tests/performance/test_memory_stability.py
+poetry run pytest tests/nightly/test_memory_stability.py
 ```
 
 #### 1.3 Compare Results

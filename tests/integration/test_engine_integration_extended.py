@@ -35,7 +35,7 @@ from giflab.tool_wrappers import (
 )
 
 # Test fixtures paths
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 SIMPLE_4FRAME = FIXTURES_DIR / "simple_4frame.gif"
 SINGLE_FRAME = FIXTURES_DIR / "single_frame.gif"
 MANY_COLORS = FIXTURES_DIR / "many_colors.gif"

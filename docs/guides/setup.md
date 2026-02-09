@@ -206,7 +206,7 @@ for name, info in tools.items():
 "
 
 # Run smoke tests to verify functionality
-poetry run python -m pytest tests/test_engine_smoke.py -v
+poetry run pytest tests/smoke/ -v
 
 # Test with sample processing
 mkdir -p data/raw

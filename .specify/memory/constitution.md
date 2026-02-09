@@ -1,9 +1,9 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 1.1.0
-Modified principles: IV. Test-Driven Quality → IV. Test-First Development (NON-NEGOTIABLE)
-Added sections: Explicit coverage requirements (≥90% core logic), synthetic GIF testing approach
+Version change: 1.1.0 → 1.2.0
+Modified principles: IV. Test-First Development — added 4-layer test architecture and test discipline rules
+Added sections: Test Architecture (4-Layer), Test Discipline
 Removed sections: None
 Templates requiring updates: ✅ None
 Follow-up TODOs: None
@@ -62,6 +62,24 @@ All features MUST have tests written before or alongside implementation. Test co
 - PRs without adequate test coverage MUST NOT be merged
 - `poetry run pytest --cov` MUST be run before any merge
 
+**Test Architecture (4-Layer)**:
+Tests are organized into four layers with strict placement rules:
+
+| Layer | Path | Purpose | Time budget | When to run |
+|-------|------|---------|-------------|-------------|
+| smoke | `tests/smoke/` | Imports, types, pure logic | <5s total | Every save |
+| functional | `tests/functional/` | Mocked engines, synthetic GIFs | <2min total | Every commit |
+| integration | `tests/integration/` | Real engines, real metrics | <5min total | CI / pre-merge |
+| nightly | `tests/nightly/` | Memory, perf, stress, golden | No limit | Nightly schedule |
+
+**Test Discipline**:
+- New test files MUST be placed in the correct layer. No test files in `tests/` root.
+- Each test MUST cover a **distinct failure mode**. Permutation tests, parameter exhaustion, and internal-function tests are prohibited.
+- Prefer adding assertions to existing tests over creating new test functions.
+- Test count growth MUST be justified: if a file exceeds 30 tests, review for consolidation.
+- `make test` (smoke + functional) MUST complete in <2 minutes. PRs that break this budget MUST NOT be merged.
+- Layer-specific conftest files handle isolation. The root conftest provides only shared fixtures.
+
 **Quality Metrics**: The 11-metric quality system (SSIM, MS-SSIM, PSNR, FSIM, GMSD, CHIST, Edge Similarity, Texture Similarity, Sharpness Similarity, Temporal Consistency, Composite Quality) is the source of truth for compression quality. Calculations MUST match documented formulas.
 
 ### V. Extensible Tool Interfaces
@@ -117,4 +135,4 @@ This constitution supersedes all other development practices. Amendments require
 
 Runtime development guidance is in `CLAUDE.md`. Architecture details are in `SCOPE.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2025-06-26 | **Last Amended**: 2025-01-26
+**Version**: 1.2.0 | **Ratified**: 2025-06-26 | **Last Amended**: 2026-02-09
