@@ -34,6 +34,7 @@ try:
 except ImportError:
     Phase3FixtureGenerator = None
 
+
 @pytest.fixture
 def fixture_generator():
     """Create fixture generator for tests."""
@@ -43,6 +44,7 @@ def fixture_generator():
     with tempfile.TemporaryDirectory() as tmpdir:
         generator = Phase3FixtureGenerator(Path(tmpdir))
         yield generator
+
 
 class TestUIHeavyContentScenarios:
     """Test scenarios with UI-heavy content types."""
@@ -247,6 +249,7 @@ class TestUIHeavyContentScenarios:
         # OCR analysis is optional without OCR libraries
         # The bilateral filter may reduce edge sharpness but UI should still be detected
 
+
 class TestTextHeavyContentScenarios:
     """Test scenarios with text-heavy content."""
 
@@ -370,7 +373,9 @@ class TestTextHeavyContentScenarios:
             # Simulate compression affecting text sharpness
             text_regions = frame > 100  # Find text regions
             if np.any(text_regions):
-                comp_frame = cv2.GaussianBlur(comp_frame, (3, 3), 0.5)  # Use odd kernel size
+                comp_frame = cv2.GaussianBlur(
+                    comp_frame, (3, 3), 0.5
+                )  # Use odd kernel size
                 # Restore some background contrast
                 comp_frame[~text_regions] = frame[~text_regions]
 
@@ -386,7 +391,7 @@ class TestTextHeavyContentScenarios:
         else:
             # Without OCR, edge detection should still find some edge density
             assert result["text_ui_edge_density"] > 0.01  # Lowered threshold for test
-        
+
         # Sharpness metrics may not be available without OCR or if text detection fails
         # Just verify the basic metrics are present
         assert "text_ui_edge_density" in result
@@ -475,6 +480,7 @@ class TestTextHeavyContentScenarios:
         assert (
             result["text_ui_edge_density"] > 0.045
         )  # Adjusted to match actual edge density from simulated UI
+
 
 class TestNonTextContentValidation:
     """Test validation with non-text content to ensure no false positives."""
@@ -567,7 +573,7 @@ class TestNonTextContentValidation:
         # Abstract animations may trigger validation due to edge patterns
         # but should find minimal or no text-like components
         assert result["text_ui_component_count"] <= 2  # Minimal false positives
-        
+
         # If no components are found, it shouldn't matter if validation ran
         if result["text_ui_component_count"] == 0:
             # No actual text/UI components found - success regardless of has_text_ui_content
@@ -616,6 +622,7 @@ class TestNonTextContentValidation:
         # If validation runs, should find minimal components
         result = calculate_text_ui_metrics(orig_frames, comp_frames)
         assert result["text_ui_component_count"] <= 2  # Allow minimal noise components
+
 
 class TestSsimulacra2QualityScenarios:
     """Test SSIMULACRA2 with various quality scenarios."""
@@ -738,6 +745,7 @@ class TestSsimulacra2QualityScenarios:
             # Should detect quality issues
             assert result["ssimulacra2_mean"] < 0.5
             assert result["ssimulacra2_triggered"] == 1.0
+
 
 class TestCombinedScenarios:
     """Test combined scenarios with both text/UI and quality metrics."""
@@ -883,7 +891,9 @@ class TestCombinedScenarios:
         comp_frames = [compressed_frame for _ in range(3)]
 
         # Mock Phase 3 components with realistic responses
-        with patch("giflab.text_ui_validation.calculate_text_ui_metrics") as mock_text_ui, patch(
+        with patch(
+            "giflab.text_ui_validation.calculate_text_ui_metrics"
+        ) as mock_text_ui, patch(
             "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
         ) as mock_ssim2, patch(
             "giflab.text_ui_validation.should_validate_text_ui", return_value=(True, {})
@@ -912,7 +922,9 @@ class TestCombinedScenarios:
                 "ssimulacra2_triggered": 1.0,
             }
 
-            result = calculate_comprehensive_metrics_from_frames(orig_frames, comp_frames, config)
+            result = calculate_comprehensive_metrics_from_frames(
+                orig_frames, comp_frames, config
+            )
 
             # Should include all Phase 3 metrics
             assert result["has_text_ui_content"]
@@ -924,6 +936,7 @@ class TestCombinedScenarios:
                 assert 0.0 <= composite <= 1.0
                 # Should be reasonable for good quality with slight degradation
                 assert composite > 0.5
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

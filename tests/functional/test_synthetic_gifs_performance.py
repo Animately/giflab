@@ -207,5 +207,3 @@ class TestBackwardCompatibility:
         arr1 = np.array(img1)
         arr2 = np.array(img2)
         assert np.array_equal(arr1, arr2)
-
-

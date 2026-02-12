@@ -529,7 +529,6 @@ class TestEdgeCases:
         )  # Single frame is perfectly consistent
 
 
-
 # =============================================================================
 # Additional Metrics - Representative tests (3 metrics + ordering)
 # =============================================================================
@@ -703,7 +702,6 @@ class TestNormalizeMetric:
         # SSIM-like metric (higher is better)
         normalized = normalize_metric("ssim_mean", 0.75, min_val=0.0, max_val=1.0)
         assert normalized == 0.75
-
 
 
 class TestEnhancedCompositeQuality:

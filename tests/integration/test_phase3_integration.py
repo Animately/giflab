@@ -220,9 +220,7 @@ class TestMetricsPipelineIntegration:
     def test_enhanced_composite_quality_integration(self):
         """Test integration with enhanced composite quality calculation."""
         # Create simple test frames that are identical (for predictable metrics)
-        frames = [
-            np.ones((100, 100, 3), dtype=np.uint8) * 128 for _ in range(3)
-        ]
+        frames = [np.ones((100, 100, 3), dtype=np.uint8) * 128 for _ in range(3)]
 
         config = MetricsConfig()
         config.USE_ENHANCED_COMPOSITE_QUALITY = True
@@ -241,7 +239,9 @@ class TestMetricsPipelineIntegration:
         assert 0.0 <= composite_quality <= 1.0
 
         # With identical frames, quality should be very high
-        assert composite_quality > 0.9, f"Expected high quality for identical frames, got {composite_quality}"
+        assert (
+            composite_quality > 0.9
+        ), f"Expected high quality for identical frames, got {composite_quality}"
 
     def test_cross_metric_interactions(self):
         """Test interactions between Phase 3 and other phase metrics."""
@@ -254,20 +254,22 @@ class TestMetricsPipelineIntegration:
             np.clip(f + np.random.randint(-5, 5, f.shape), 0, 255).astype(np.uint8)
             for f in frames_orig
         ]
-        
+
         config = MetricsConfig()
         config.ENABLE_DEEP_PERCEPTUAL = False  # Disable to avoid needing LPIPS model
         config.ENABLE_SSIMULACRA2 = False  # Disable to avoid needing ssimulacra2
         config.ENABLE_TEXT_UI_VALIDATION = False  # Disable text UI validation
 
         # Calculate metrics
-        result = calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp, config)
+        result = calculate_comprehensive_metrics_from_frames(
+            frames_orig, frames_comp, config
+        )
 
         # Verify basic metrics are present
         assert "ssim" in result
         assert "psnr" in result
         assert "composite_quality" in result
-        
+
         # Verify values are in expected ranges
         assert 0.0 <= result["ssim"] <= 1.0
         assert 0.0 <= result["composite_quality"] <= 1.0
@@ -451,8 +453,6 @@ class TestValidationSystemIntegration:
         """Test proper categorization of Phase 3 validation issues."""
         # This test documents expected issue categories for Phase 3 metrics
 
-
-
         # These categories should be recognized by the validation system
         # Implementation depends on validation system structure
 
@@ -591,7 +591,7 @@ class TestCrossPhaseInteractions:
         # and can interact in the composite quality calculation
         assert "flicker_score" in result or "temporal_consistency" in result
         assert "composite_quality" in result
-        
+
         # Composite quality should integrate temporal and spatial aspects
         composite = result["composite_quality"]
         assert 0.0 <= composite <= 1.0
@@ -612,11 +612,11 @@ class TestCrossPhaseInteractions:
 
         # Verify that quality metrics from different phases are present
         assert "composite_quality" in result
-        
+
         # Verify perceptual quality metrics exist (even if fallback)
         if "lpips_quality_mean" in result:
             assert 0.0 <= result["lpips_quality_mean"] <= 1.0
-        
+
         # Composite quality should integrate all available metrics
         assert 0.0 <= result["composite_quality"] <= 1.0
 
@@ -631,7 +631,7 @@ class TestCrossPhaseInteractions:
             np.clip(f + np.random.randint(-10, 10, f.shape), 0, 255).astype(np.uint8)
             for f in frames_orig
         ]
-        
+
         config = MetricsConfig()
         config.USE_COMPREHENSIVE_METRICS = True
         config.ENABLE_DEEP_PERCEPTUAL = False  # Disable to avoid needing LPIPS model
@@ -639,22 +639,24 @@ class TestCrossPhaseInteractions:
         config.ENABLE_TEXT_UI_VALIDATION = False  # Disable text UI validation
 
         # Calculate metrics normally without mocking
-        result = calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp, config)
+        result = calculate_comprehensive_metrics_from_frames(
+            frames_orig, frames_comp, config
+        )
 
         # Should include metrics from all phases
         # Phase 1: Basic quality metrics
         assert "ssim" in result
         assert "psnr" in result
-        
+
         # Phase 1: Gradient and color metrics
         assert "deltae_mean" in result or "color_histogram_similarity_mean" in result
         assert "banding_score_mean" in result
-        
+
         # Composite quality should incorporate all available metrics
         assert "composite_quality" in result
         composite = result["composite_quality"]
         assert 0.0 <= composite <= 1.0
-        
+
         # Check that we have a reasonable number of metrics
         assert len(result) > 50  # Should have many metrics from all phases
 
@@ -820,7 +822,7 @@ class TestValidationFlowIntegration:
             orig_n_colors=256,
             orig_frames=8,
             orig_fps=15.0,
-            orig_kilobytes=100.0
+            orig_kilobytes=100.0,
         )
 
         # Test different content types
@@ -962,7 +964,9 @@ class TestValidationSystemIntegrationE2E:
         config.ENABLE_SSIMULACRA2 = True
 
         # Mock Phase 3 components for consistent test
-        with patch("giflab.text_ui_validation.calculate_text_ui_metrics") as mock_text_ui, patch(
+        with patch(
+            "giflab.text_ui_validation.calculate_text_ui_metrics"
+        ) as mock_text_ui, patch(
             "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
         ) as mock_ssim2, patch(
             "giflab.text_ui_validation.should_validate_text_ui", return_value=(True, {})
@@ -989,7 +993,9 @@ class TestValidationSystemIntegrationE2E:
             }
 
             # Calculate metrics
-            metrics = calculate_comprehensive_metrics_from_frames(orig_frames, comp_frames, config)
+            metrics = calculate_comprehensive_metrics_from_frames(
+                orig_frames, comp_frames, config
+            )
 
         # Step 2: Create validation metadata
         original_metadata = GifMetadata(
@@ -1000,7 +1006,7 @@ class TestValidationSystemIntegrationE2E:
             orig_n_colors=256,
             orig_frames=3,
             orig_fps=10.0,
-            orig_kilobytes=90.0
+            orig_kilobytes=90.0,
         )
 
         # Step 3: Run validation
@@ -1069,7 +1075,7 @@ class TestValidationSystemIntegrationE2E:
                 orig_n_colors=256,
                 orig_frames=5,
                 orig_fps=15.0,
-                orig_kilobytes=100.0
+                orig_kilobytes=100.0,
             )
 
             result = checker.validate_compression_result(
@@ -1114,7 +1120,7 @@ class TestValidationSystemIntegrationE2E:
             orig_n_colors=256,
             orig_frames=5,
             orig_fps=12.0,
-            orig_kilobytes=80.0
+            orig_kilobytes=80.0,
         )
 
         # Should handle missing Phase 3 metrics gracefully
@@ -1182,7 +1188,7 @@ class TestValidationSystemIntegrationE2E:
             orig_n_colors=256,
             orig_frames=8,
             orig_fps=15.0,
-            orig_kilobytes=110.0
+            orig_kilobytes=110.0,
         )
 
         # Measure validation time

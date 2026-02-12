@@ -24,6 +24,7 @@ class SyntheticGifSpec:
     content_type: str
     description: str
 
+
 class SyntheticGifGenerator:
     """Generator for synthetic test GIFs with diverse characteristics.
 
@@ -354,6 +355,7 @@ class SyntheticGifGenerator:
                 duration=100,  # 100ms per frame
                 loop=0,
             )
+
 
 class SyntheticFrameGenerator:
     """Generator for individual synthetic frames based on content type."""
@@ -948,31 +950,32 @@ class SyntheticFrameGenerator:
         )
         return img
 
+
 def generate_gradient_frames(num_frames: int, width: int, height: int) -> list:
     """
     Compatibility function for existing benchmarking code.
-    
+
     Generates a sequence of gradient frames using the SyntheticFrameGenerator.
-    
+
     Args:
         num_frames: Number of frames to generate
         width: Frame width in pixels
         height: Frame height in pixels
-        
+
     Returns:
         list of numpy arrays representing frames
     """
     generator = SyntheticFrameGenerator()
     frames = []
-    
+
     for frame_idx in range(num_frames):
         pil_frame = generator.create_frame(
             content_type="gradient",
             size=(width, height),
             frame=frame_idx,
-            total_frames=num_frames
+            total_frames=num_frames,
         )
         # Convert PIL to numpy array for compatibility
         frames.append(np.array(pil_frame))
-    
+
     return frames

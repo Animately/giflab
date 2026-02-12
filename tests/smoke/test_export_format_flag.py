@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-
 from giflab.cli import main
 
 
@@ -35,9 +34,9 @@ def test_invalid_format_is_rejected() -> None:
     """An invalid format like 'xml' should be rejected by Click (exit code 2)."""
     runner = CliRunner()
     result = runner.invoke(main, ["export", "--output", "out.xml", "--format", "xml"])
-    assert result.exit_code == 2, (
-        f"Expected exit code 2 for invalid format, got {result.exit_code}"
-    )
+    assert (
+        result.exit_code == 2
+    ), f"Expected exit code 2 for invalid format, got {result.exit_code}"
     assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 
 

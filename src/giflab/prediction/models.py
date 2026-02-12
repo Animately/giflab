@@ -344,8 +344,7 @@ class CurvePredictionModel:
         for curve in curves_list:
             if self.curve_type == CurveType.LOSSY:
                 row = [
-                    getattr(curve, f"size_at_lossy_{level}")
-                    for level in LOSSY_LEVELS
+                    getattr(curve, f"size_at_lossy_{level}") for level in LOSSY_LEVELS
                 ]
             else:
                 row = [
@@ -367,14 +366,10 @@ class CurvePredictionModel:
         confidence_scores: list[float],
     ) -> CompressionCurveV1:
         """Convert predictions to CompressionCurveV1."""
-        clamped = [
-            i for i, v in enumerate(predictions)
-            if float(v) <= 0.1
-        ]
+        clamped = [i for i, v in enumerate(predictions) if float(v) <= 0.1]
         if clamped:
             logger.warning(
-                "Prediction clamped to 0.1 KB for %s at "
-                "indices %s (raw values: %s)",
+                "Prediction clamped to 0.1 KB for %s at " "indices %s (raw values: %s)",
                 gif_sha,
                 clamped,
                 [float(predictions[i]) for i in clamped],
@@ -443,8 +438,7 @@ def predict_lossy_curve(
 
     if not model_path.exists():
         raise FileNotFoundError(
-            f"Model not found: {model_path}. "
-            "Run `giflab predict train` first."
+            f"Model not found: {model_path}. " "Run `giflab predict train` first."
         )
 
     model = CurvePredictionModel.load(model_path)
@@ -473,8 +467,7 @@ def predict_color_curve(
 
     if not model_path.exists():
         raise FileNotFoundError(
-            f"Model not found: {model_path}. "
-            "Run `giflab predict train` first."
+            f"Model not found: {model_path}. " "Run `giflab predict train` first."
         )
 
     model = CurvePredictionModel.load(model_path)

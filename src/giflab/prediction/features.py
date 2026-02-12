@@ -241,9 +241,7 @@ def _extract_temporal_features(frames: list[np.ndarray]) -> dict[str, float]:
     mse_values = []
 
     for i in range(len(frames) - 1):
-        diff = np.abs(
-            frames[i].astype(np.float32) - frames[i + 1].astype(np.float32)
-        )
+        diff = np.abs(frames[i].astype(np.float32) - frames[i + 1].astype(np.float32))
         frame_diffs.append(diff)
 
         mse = np.mean(diff**2)
@@ -436,9 +434,7 @@ def _calculate_color_histogram_entropy(pixels: np.ndarray) -> float:
     quantized = pixels // 32
 
     # Create color codes
-    color_codes = (
-        quantized[:, 0] * 64 + quantized[:, 1] * 8 + quantized[:, 2]
-    )
+    color_codes = quantized[:, 0] * 64 + quantized[:, 1] * 8 + quantized[:, 2]
 
     # Calculate histogram
     hist, _ = np.histogram(color_codes, bins=512, range=(0, 512))

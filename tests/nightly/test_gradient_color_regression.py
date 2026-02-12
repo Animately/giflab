@@ -29,6 +29,7 @@ class GoldenTestCase:
     frames_original: list[np.ndarray] = None
     frames_compressed: list[np.ndarray] = None
 
+
 class TestRegressionPrevention:
     """Regression tests to maintain detection accuracy."""
 
@@ -561,6 +562,7 @@ class TestRegressionPrevention:
 
         return original_frames, shifted_frames
 
+
 # Custom pytest configuration for golden test updates
 def pytest_addoption(parser):
     """Add custom pytest options."""
@@ -571,8 +573,8 @@ def pytest_addoption(parser):
         help="Update golden test results",
     )
 
+
 @pytest.fixture
 def current_test_config():
     """Provide access to current test configuration."""
     return pytest
-

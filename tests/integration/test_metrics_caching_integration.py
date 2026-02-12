@@ -130,7 +130,9 @@ class TestValidationCacheMetricsIntegration:
 
         with patch("giflab.caching.metrics_integration.VALIDATION_CACHE", cache_config):
             with patch("giflab.config.VALIDATION_CACHE", cache_config):
-                with patch("giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics") as mock_lpips:
+                with patch(
+                    "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics"
+                ) as mock_lpips:
                     mock_lpips.return_value = {"lpips_quality_mean": 0.12}
 
                     # First call should calculate
@@ -162,7 +164,9 @@ class TestValidationCacheMetricsIntegration:
                     "frame_scores": [0.8, 0.85, 0.9],
                 }
 
-                with patch("giflab.gradient_color_artifacts.calculate_gradient_color_metrics") as mock_calc:
+                with patch(
+                    "giflab.gradient_color_artifacts.calculate_gradient_color_metrics"
+                ) as mock_calc:
                     mock_calc.return_value = mock_result
 
                     # First call should calculate
@@ -189,7 +193,9 @@ class TestValidationCacheMetricsIntegration:
                     "std_score": 2.5,
                 }
 
-                with patch("giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics") as mock_calc:
+                with patch(
+                    "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
+                ) as mock_calc:
                     mock_calc.return_value = mock_result
 
                     # First call should calculate
@@ -211,7 +217,9 @@ class TestValidationCacheMetricsIntegration:
             "cache_ms_ssim": True,
         }
 
-        with patch("giflab.caching.metrics_integration.VALIDATION_CACHE", disabled_config):
+        with patch(
+            "giflab.caching.metrics_integration.VALIDATION_CACHE", disabled_config
+        ):
             with patch("giflab.metrics.calculate_ms_ssim") as mock_ms_ssim:
                 mock_ms_ssim.return_value = 0.95
 
@@ -262,20 +270,14 @@ class TestValidationCacheMetricsIntegration:
                     mock_ms_ssim.return_value = 0.95
 
                     # Same frames but different indices should calculate separately
-                    calculate_ms_ssim_cached(
-                        frame1, frame2, frame_indices=(0, 1)
-                    )
+                    calculate_ms_ssim_cached(frame1, frame2, frame_indices=(0, 1))
                     assert mock_ms_ssim.call_count == 1
 
-                    calculate_ms_ssim_cached(
-                        frame1, frame2, frame_indices=(5, 6)
-                    )
+                    calculate_ms_ssim_cached(frame1, frame2, frame_indices=(5, 6))
                     assert mock_ms_ssim.call_count == 2  # New calculation
 
                     # Same indices should use cache
-                    calculate_ms_ssim_cached(
-                        frame1, frame2, frame_indices=(0, 1)
-                    )
+                    calculate_ms_ssim_cached(frame1, frame2, frame_indices=(0, 1))
                     assert mock_ms_ssim.call_count == 2  # No new calculation
 
     def test_integrate_validation_cache(self, cache_config):
@@ -288,7 +290,9 @@ class TestValidationCacheMetricsIntegration:
                 integrate_validation_cache_with_metrics()
                 assert hasattr(mock_metrics, "_original_calculate_ms_ssim")
 
-    def test_validation_cache_performance_improvement(self, sample_frames, cache_config):
+    def test_validation_cache_performance_improvement(
+        self, sample_frames, cache_config
+    ):
         """Test that validation caching provides performance improvement."""
         frame1, frame2 = sample_frames[0], sample_frames[1]
 
@@ -299,7 +303,9 @@ class TestValidationCacheMetricsIntegration:
                     time.sleep(0.01)  # 10ms delay
                     return 0.95
 
-                with patch("giflab.metrics.calculate_ms_ssim", side_effect=slow_calculation):
+                with patch(
+                    "giflab.metrics.calculate_ms_ssim", side_effect=slow_calculation
+                ):
                     # First call (with calculation)
                     start1 = time.time()
                     result1 = calculate_ms_ssim_cached(frame1, frame2)
@@ -526,7 +532,7 @@ class TestResizeCacheIntegrationWithMetrics:
 
     @pytest.mark.skipif(
         not pytest.importorskip("lpips", reason="LPIPS not available"),
-        reason="LPIPS required for this test"
+        reason="LPIPS required for this test",
     )
     def test_lpips_downscale_uses_cache(self):
         """Test that LPIPS downscaling uses the resize cache."""
@@ -537,10 +543,7 @@ class TestResizeCacheIntegrationWithMetrics:
             np.random.randint(0, 255, (1024, 1024, 3), dtype=np.uint8) for _ in range(3)
         ]
 
-        validator = DeepPerceptualValidator(
-            downscale_size=512,
-            use_resize_cache=True
-        )
+        validator = DeepPerceptualValidator(downscale_size=512, use_resize_cache=True)
 
         cache = get_resize_cache()
         cache.clear()
@@ -601,8 +604,7 @@ class TestResizeCacheIntegrationWithMetrics:
         threads = []
         for i in range(0, len(frames), 2):
             t = threading.Thread(
-                target=calculate_metrics,
-                args=(frames[i], frames[i + 1])
+                target=calculate_metrics, args=(frames[i], frames[i + 1])
             )
             threads.append(t)
             t.start()
@@ -616,9 +618,7 @@ class TestResizeCacheIntegrationWithMetrics:
         stats = cache.get_stats()
         assert stats["entries"] > 0
 
-    @patch('giflab.config.FRAME_CACHE', {
-        'resize_cache_enabled': False
-    })
+    @patch("giflab.config.FRAME_CACHE", {"resize_cache_enabled": False})
     def test_metrics_work_with_cache_disabled(self, test_frames):
         """Test that metrics still work when resize cache is disabled globally."""
         frame1, frame2 = test_frames[0], test_frames[1]

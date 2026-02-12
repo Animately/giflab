@@ -26,7 +26,5 @@ def tiny_gif_multiframe(tmp_path):
     for i in range(4):
         val = int(i * 255 / 3)
         frames.append(Image.new("RGB", (10, 10), (val, 0, 255 - val)))
-    frames[0].save(
-        path, save_all=True, append_images=frames[1:], duration=100, loop=0
-    )
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=100, loop=0)
     return path

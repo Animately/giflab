@@ -336,9 +336,7 @@ class TestSsimulacra2Validator:
             np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8) for _ in range(3)
         ]
 
-        with patch.object(
-            validator, "normalize_score", side_effect=[0.75, 0.70]
-        ):
+        with patch.object(validator, "normalize_score", side_effect=[0.75, 0.70]):
             result = validator.calculate_ssimulacra2_metrics(
                 orig_frames, comp_frames, config
             )
@@ -1009,9 +1007,7 @@ class TestSsimulacra2RobustnessAndSafety:
                 "_export_frame_to_png",
                 side_effect=Exception("Export failed"),
             ):
-                result = validator.calculate_ssimulacra2_metrics(
-                    frames, frames, config
-                )
+                result = validator.calculate_ssimulacra2_metrics(frames, frames, config)
 
                 # Should use fallback score for the failed frame
                 assert result["ssimulacra2_mean"] == 0.5

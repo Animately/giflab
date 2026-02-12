@@ -40,10 +40,12 @@ SIMPLE_4FRAME = FIXTURES_DIR / "simple_4frame.gif"
 SINGLE_FRAME = FIXTURES_DIR / "single_frame.gif"
 MANY_COLORS = FIXTURES_DIR / "many_colors.gif"
 
+
 def get_gif_color_count(gif_path: Path) -> int:
     """Get the color count from GIF metadata using giflab's analysis."""
     metadata = extract_gif_metadata(gif_path)
     return metadata.orig_n_colors
+
 
 def validate_metadata(result: dict[str, Any], expected_engine: str) -> None:
     """Validate metadata completeness and correctness."""
@@ -75,9 +77,11 @@ def validate_metadata(result: dict[str, Any], expected_engine: str) -> None:
             result["engine_version"], str
         ), "engine_version should be a string"
 
+
 # =============================================================================
 # Color Reduction Tests
 # =============================================================================
+
 
 class TestColorReduction:
     """Test color reduction functionality for all engines."""
@@ -168,9 +172,11 @@ class TestColorReduction:
             # Validate metadata
             validate_metadata(result, "animately-standard")
 
+
 # =============================================================================
 # Frame Reduction Tests
 # =============================================================================
+
 
 class TestFrameReduction:
     """Test frame reduction functionality for all engines."""
@@ -312,9 +318,11 @@ class TestFrameReduction:
             # Validate metadata
             validate_metadata(result, "animately-standard")
 
+
 # =============================================================================
 # Lossy Compression Tests
 # =============================================================================
+
 
 class TestLossyCompression:
     """Test lossy compression functionality for all engines."""
@@ -481,9 +489,11 @@ class TestLossyCompression:
             # Validate metadata
             validate_metadata(result, "animately-standard")
 
+
 # =============================================================================
 # Edge Cases and Error Handling
 # =============================================================================
+
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
@@ -565,9 +575,11 @@ class TestEdgeCases:
             with pytest.raises(ValueError, match="params must include 'colors'"):
                 reducer.apply(SIMPLE_4FRAME, output_path, params=None)
 
+
 # =============================================================================
 # Cross-Engine Consistency Tests
 # =============================================================================
+
 
 class TestCrossEngineConsistency:
     """Test consistency across different engines."""
@@ -682,9 +694,11 @@ class TestCrossEngineConsistency:
                 with pytest.raises(ValueError):
                     reducer.apply(SIMPLE_4FRAME, output_path, params=None)
 
+
 # =============================================================================
 # Performance and Quality Tests
 # =============================================================================
+
 
 class TestPerformanceAndQuality:
     """Test performance thresholds and quality expectations."""
@@ -788,9 +802,11 @@ class TestPerformanceAndQuality:
             # Frame count should be preserved (no frame reduction)
             assert output_metadata.orig_frames == input_metadata.orig_frames
 
+
 # =============================================================================
 # Quality Degradation Tests (PSNR and Perceptual Quality)
 # =============================================================================
+
 
 class TestQualityDegradation:
     """Test quality degradation and PSNR validation for lossy compression."""

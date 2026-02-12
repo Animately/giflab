@@ -82,7 +82,9 @@ class TestEngineConfig:
 
         assert config.GIFSICLE_PATH == "gifsicle"
         # Animately path is set to local development path by default
-        assert "launcher" in config.ANIMATELY_PATH or config.ANIMATELY_PATH == "animately"
+        assert (
+            "launcher" in config.ANIMATELY_PATH or config.ANIMATELY_PATH == "animately"
+        )
         assert config.IMAGEMAGICK_PATH == "magick"
         assert config.FFMPEG_PATH == "ffmpeg"
         assert config.FFPROBE_PATH == "ffprobe"
@@ -142,7 +144,10 @@ class TestEngineConfig:
             assert config.FFMPEG_PATH == "/env/ffmpeg"
 
             # Default paths (not overridden) - Animately uses dev path
-            assert "launcher" in config.ANIMATELY_PATH or config.ANIMATELY_PATH == "animately"
+            assert (
+                "launcher" in config.ANIMATELY_PATH
+                or config.ANIMATELY_PATH == "animately"
+            )
             assert config.IMAGEMAGICK_PATH == "magick"
             assert config.FFPROBE_PATH == "ffprobe"
             assert config.GIFSKI_PATH == "gifski"
@@ -181,8 +186,10 @@ def test_default_configurations():
     # Verify engine config defaults
     assert DEFAULT_ENGINE_CONFIG.GIFSICLE_PATH == "gifsicle"
     # Animately uses local dev path or default
-    assert "launcher" in DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH or \
-           DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH == "animately"
+    assert (
+        "launcher" in DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
+        or DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH == "animately"
+    )
     assert DEFAULT_ENGINE_CONFIG.IMAGEMAGICK_PATH == "magick"
     assert DEFAULT_ENGINE_CONFIG.FFMPEG_PATH == "ffmpeg"
     assert DEFAULT_ENGINE_CONFIG.FFPROBE_PATH == "ffprobe"

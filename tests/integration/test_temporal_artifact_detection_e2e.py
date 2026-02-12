@@ -58,7 +58,6 @@ class TestTemporalArtifactDetectionE2E:
             temporal_consistency_threshold=0.6,  # Relaxed for real compression
         )
 
-
     def test_gifsicle_lossy_compression_temporal_artifacts(
         self, validation_config, tmp_path
     ):

@@ -58,6 +58,7 @@ from giflab.synthetic_gifs import SyntheticFrameGenerator, SyntheticGifGenerator
 # Full Pipeline Integration Tests (from test_phase5_full_pipeline.py)
 # ---------------------------------------------------------------------------
 
+
 class TestFullPipelineIntegration:
     """Integration tests for full metric calculation pipeline."""
 
@@ -87,7 +88,7 @@ class TestFullPipelineIntegration:
         frame_count: int = 10,
         size: tuple[int, int] = (200, 200),
         quality: str = "medium",
-        content: str = "mixed"
+        content: str = "mixed",
     ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Generate test GIF frames with specific characteristics.
 
@@ -115,28 +116,33 @@ class TestFullPipelineIntegration:
                 x = np.linspace(0, 255, width)
                 y = np.linspace(0, 255, height)
                 xx, yy = np.meshgrid(x, y)
-                frame = np.stack([
-                    (xx * (1 + i * 0.1) % 256).astype(np.uint8),
-                    (yy * (1 + i * 0.1) % 256).astype(np.uint8),
-                    ((xx + yy) / 2 % 256).astype(np.uint8)
-                ], axis=-1)
+                frame = np.stack(
+                    [
+                        (xx * (1 + i * 0.1) % 256).astype(np.uint8),
+                        (yy * (1 + i * 0.1) % 256).astype(np.uint8),
+                        ((xx + yy) / 2 % 256).astype(np.uint8),
+                    ],
+                    axis=-1,
+                )
             elif content == "text":
                 frame = np.ones((height, width, 3), dtype=np.uint8) * 255
                 for j in range(3):
                     y_pos = 30 + j * 40
                     x_pos = 20 + (i * 5) % 50
                     if y_pos + 20 < height and x_pos + 100 < width:
-                        frame[y_pos:y_pos + 20, x_pos:x_pos + 100] = 0
+                        frame[y_pos : y_pos + 20, x_pos : x_pos + 100] = 0
             elif content == "animation":
                 frame = np.zeros((height, width, 3), dtype=np.uint8)
                 center_x = int(width * (0.5 + 0.3 * np.sin(i * 0.3)))
                 center_y = int(height * (0.5 + 0.3 * np.cos(i * 0.3)))
                 y_grid, x_grid = np.ogrid[:height, :width]
-                mask = (x_grid - center_x)**2 + (y_grid - center_y)**2 <= (min(width, height) // 6)**2
+                mask = (x_grid - center_x) ** 2 + (y_grid - center_y) ** 2 <= (
+                    min(width, height) // 6
+                ) ** 2
                 frame[mask] = [255, 100, 100]
             else:  # mixed
                 frame = np.random.randint(50, 200, (height, width, 3), dtype=np.uint8)
-                frame[height // 3:2 * height // 3, width // 3:2 * width // 3] = 220
+                frame[height // 3 : 2 * height // 3, width // 3 : 2 * width // 3] = 220
 
             frames_orig.append(frame)
 
@@ -159,9 +165,9 @@ class TestFullPipelineIntegration:
 
     def test_pipeline_all_optimizations_enabled(self):
         """Test full pipeline with all optimizations enabled."""
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'true'
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'true'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "true"
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "true"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         scenarios = [
             (10, (200, 200), "high", "static"),
@@ -176,8 +182,7 @@ class TestFullPipelineIntegration:
 
             start_time = time.perf_counter()
             metrics = calculate_comprehensive_metrics_from_frames(
-                frames_orig,
-                frames_comp
+                frames_orig, frames_comp
             )
             elapsed = time.perf_counter() - start_time
 
@@ -191,10 +196,14 @@ class TestFullPipelineIntegration:
                     frames_orig[:5], frames_comp[:5]
                 )
                 if quality_tier == "HIGH":
-                    print(f"High quality GIF correctly identified, tier: {quality_tier}")
+                    print(
+                        f"High quality GIF correctly identified, tier: {quality_tier}"
+                    )
 
-            print(f"Scenario ({frame_count} frames, {size}, {quality}, {content}): "
-                  f"{elapsed:.3f}s, {len(metrics)} metrics")
+            print(
+                f"Scenario ({frame_count} frames, {size}, {quality}, {content}): "
+                f"{elapsed:.3f}s, {len(metrics)} metrics"
+            )
 
     def test_pipeline_accuracy_validation(self):
         """Test that optimized pipeline maintains accuracy."""
@@ -203,45 +212,58 @@ class TestFullPipelineIntegration:
         )
 
         # Calculate baseline (no optimizations)
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'false'
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'false'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'false'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "false"
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "false"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "false"
 
         baseline_metrics = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
 
         cleanup_all_validators()
 
         # Calculate with optimizations
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'true'
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'false'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "true"
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "false"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         optimized_metrics = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
 
         tolerance = 0.001  # 0.1% tolerance
-        timing_keys = {"render_ms", "elapsed_ms", "total_time_ms", "computation_time_ms"}
+        timing_keys = {
+            "render_ms",
+            "elapsed_ms",
+            "total_time_ms",
+            "computation_time_ms",
+        }
 
         for key in baseline_metrics:
-            if key in optimized_metrics and key not in timing_keys and not key.endswith("_ms"):
+            if (
+                key in optimized_metrics
+                and key not in timing_keys
+                and not key.endswith("_ms")
+            ):
                 baseline_val = baseline_metrics[key]
                 optimized_val = optimized_metrics[key]
 
                 if isinstance(baseline_val, int | float):
                     if baseline_val != 0:
-                        relative_diff = abs(optimized_val - baseline_val) / abs(baseline_val)
-                        assert relative_diff < tolerance, \
-                            f"Metric {key} differs: baseline={baseline_val}, optimized={optimized_val}, diff={relative_diff:.4%}"
+                        relative_diff = abs(optimized_val - baseline_val) / abs(
+                            baseline_val
+                        )
+                        assert (
+                            relative_diff < tolerance
+                        ), f"Metric {key} differs: baseline={baseline_val}, optimized={optimized_val}, diff={relative_diff:.4%}"
                     else:
-                        assert abs(optimized_val) < tolerance, \
-                            f"Metric {key} differs from zero: {optimized_val}"
+                        assert (
+                            abs(optimized_val) < tolerance
+                        ), f"Metric {key} differs from zero: {optimized_val}"
 
-        print(f"Accuracy validation passed: {len(baseline_metrics)} metrics within {tolerance:.1%} tolerance")
+        print(
+            f"Accuracy validation passed: {len(baseline_metrics)} metrics within {tolerance:.1%} tolerance"
+        )
 
     def test_pipeline_deterministic_results(self):
         """Test that results are deterministic with same input."""
@@ -249,15 +271,14 @@ class TestFullPipelineIntegration:
             15, (250, 250), "medium", "gradient"
         )
 
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'true'
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'true'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "true"
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "true"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         results = []
         for _ in range(3):
             metrics = calculate_comprehensive_metrics_from_frames(
-                frames_orig,
-                frames_comp
+                frames_orig, frames_comp
             )
             results.append(metrics)
             cleanup_all_validators()
@@ -269,10 +290,13 @@ class TestFullPipelineIntegration:
                     vali = results[i][key]
 
                     if isinstance(val0, int | float):
-                        assert abs(val0 - vali) < 1e-6, \
-                            f"Non-deterministic result for {key}: run 1={val0}, run {i + 1}={vali}"
+                        assert (
+                            abs(val0 - vali) < 1e-6
+                        ), f"Non-deterministic result for {key}: run 1={val0}, run {i + 1}={vali}"
 
-        print(f"Deterministic validation passed: {len(results)} runs produced identical results")
+        print(
+            f"Deterministic validation passed: {len(results)} runs produced identical results"
+        )
 
     def test_pipeline_error_handling(self):
         """Test pipeline error handling and recovery."""
@@ -286,17 +310,16 @@ class TestFullPipelineIntegration:
         frames_comp = frames_comp[:5]
 
         try:
-            result = calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
+            result = calculate_comprehensive_metrics_from_frames(
+                frames_orig, frames_comp
+            )
         except (ValueError, IndexError, AssertionError):
             pass
 
         cleanup_all_validators()
 
         frames_orig, frames_comp = self.generate_test_gif_frames(10, (200, 200))
-        metrics = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
-        )
+        metrics = calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         assert metrics is not None, "Pipeline failed to recover after error"
 
         print("Error handling validation passed")
@@ -319,15 +342,14 @@ class TestFullPipelineIntegration:
         ]
 
         for parallel, conditional, cache, description in configs:
-            os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = str(parallel).lower()
-            os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = str(conditional).lower()
-            os.environ['GIFLAB_USE_MODEL_CACHE'] = str(cache).lower()
+            os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = str(parallel).lower()
+            os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = str(conditional).lower()
+            os.environ["GIFLAB_USE_MODEL_CACHE"] = str(cache).lower()
 
             try:
                 start_time = time.perf_counter()
                 metrics = calculate_comprehensive_metrics_from_frames(
-                    frames_orig,
-                    frames_comp
+                    frames_orig, frames_comp
                 )
                 elapsed = time.perf_counter() - start_time
 
@@ -348,15 +370,12 @@ class TestFullPipelineIntegration:
             10, (100, 100), "high", "static"
         )
 
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'true'
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'true'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "true"
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "true"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         start_time = time.perf_counter()
-        calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
-        )
+        calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         small_time = time.perf_counter() - start_time
 
         assert small_time < 2.0, f"Small GIF took too long: {small_time:.3f}s"
@@ -366,48 +385,48 @@ class TestFullPipelineIntegration:
         )
 
         start_time = time.perf_counter()
-        calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
-        )
+        calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         large_time = time.perf_counter() - start_time
 
         assert large_time < 180.0, f"Large GIF took too long: {large_time:.3f}s"
 
-        print(f"Performance thresholds met: Small={small_time:.3f}s, Large={large_time:.3f}s")
+        print(
+            f"Performance thresholds met: Small={small_time:.3f}s, Large={large_time:.3f}s"
+        )
 
     def test_pipeline_cache_effectiveness(self):
         """Test that model cache is working effectively."""
         cache = LPIPSModelCache()
         cache.cleanup(force=True)
 
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         frames_orig, frames_comp = self.generate_test_gif_frames(
             20, (300, 300), "low", "mixed"
         )
 
         initial_info = cache.get_cache_info()
-        calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
-        )
+        calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         after_first = cache.get_cache_info()
 
-        calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
-        )
+        calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         after_second = cache.get_cache_info()
 
-        models_loaded_first = after_first.get("models_loaded", 0) - initial_info.get("models_loaded", 0)
-        models_loaded_second = after_second.get("models_loaded", 0) - after_first.get("models_loaded", 0)
+        models_loaded_first = after_first.get("models_loaded", 0) - initial_info.get(
+            "models_loaded", 0
+        )
+        models_loaded_second = after_second.get("models_loaded", 0) - after_first.get(
+            "models_loaded", 0
+        )
 
-        assert models_loaded_second <= models_loaded_first, \
-            f"Cache not effective: first run loaded {models_loaded_first}, second loaded {models_loaded_second}"
+        assert (
+            models_loaded_second <= models_loaded_first
+        ), f"Cache not effective: first run loaded {models_loaded_first}, second loaded {models_loaded_second}"
 
-        print(f"Cache effectiveness validated: First run loaded {models_loaded_first} models, "
-              f"second run loaded {models_loaded_second} models")
+        print(
+            f"Cache effectiveness validated: First run loaded {models_loaded_first} models, "
+            f"second run loaded {models_loaded_second} models"
+        )
 
     def test_pipeline_conditional_skip_validation(self):
         """Test that conditional processing correctly skips metrics."""
@@ -415,28 +434,29 @@ class TestFullPipelineIntegration:
             20, (400, 400), "high", "static"
         )
 
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'true'
-        os.environ['GIFLAB_FORCE_ALL_METRICS'] = 'false'
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "true"
+        os.environ["GIFLAB_FORCE_ALL_METRICS"] = "false"
 
         metrics_conditional = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
 
-        os.environ['GIFLAB_FORCE_ALL_METRICS'] = 'true'
+        os.environ["GIFLAB_FORCE_ALL_METRICS"] = "true"
 
         cleanup_all_validators()
 
         metrics_all = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
 
         metrics_skipped = len(metrics_all) - len(metrics_conditional)
-        assert metrics_skipped > 0, \
-            f"Conditional processing didn't skip any metrics: all={len(metrics_all)}, conditional={len(metrics_conditional)}"
+        assert (
+            metrics_skipped > 0
+        ), f"Conditional processing didn't skip any metrics: all={len(metrics_all)}, conditional={len(metrics_conditional)}"
 
-        print(f"Conditional skip validation passed: {metrics_skipped} metrics skipped for high quality GIF")
+        print(
+            f"Conditional skip validation passed: {metrics_skipped} metrics skipped for high quality GIF"
+        )
 
     def test_pipeline_parallel_speedup_validation(self):
         """Test that parallel processing provides speedup for large GIFs."""
@@ -444,45 +464,50 @@ class TestFullPipelineIntegration:
             100, (600, 600), "medium", "animation"
         )
 
-        os.environ['GIFLAB_ENABLE_CONDITIONAL_METRICS'] = 'false'
-        os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
+        os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "false"
+        os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
 
         # Sequential processing
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'false'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "false"
 
         start_time = time.perf_counter()
         metrics_seq = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
         seq_time = time.perf_counter() - start_time
 
         cleanup_all_validators()
 
         # Parallel processing
-        os.environ['GIFLAB_ENABLE_PARALLEL_METRICS'] = 'true'
-        os.environ['GIFLAB_MAX_PARALLEL_WORKERS'] = '4'
+        os.environ["GIFLAB_ENABLE_PARALLEL_METRICS"] = "true"
+        os.environ["GIFLAB_MAX_PARALLEL_WORKERS"] = "4"
 
         start_time = time.perf_counter()
         metrics_par = calculate_comprehensive_metrics_from_frames(
-            frames_orig,
-            frames_comp
+            frames_orig, frames_comp
         )
         par_time = time.perf_counter() - start_time
 
-        assert len(metrics_seq) == len(metrics_par), \
-            f"Different metrics: sequential={len(metrics_seq)}, parallel={len(metrics_par)}"
+        assert len(metrics_seq) == len(
+            metrics_par
+        ), f"Different metrics: sequential={len(metrics_seq)}, parallel={len(metrics_par)}"
 
         speedup = seq_time / par_time if par_time > 0 else 1.0
 
-        print(f"Parallel speedup: {speedup:.2f}x (sequential={seq_time:.3f}s, parallel={par_time:.3f}s)")
+        print(
+            f"Parallel speedup: {speedup:.2f}x (sequential={seq_time:.3f}s, parallel={par_time:.3f}s)"
+        )
 
         if speedup < 1.0:
-            print("WARNING: Parallel processing slower than sequential - may be due to system load or small workload")
+            print(
+                "WARNING: Parallel processing slower than sequential - may be due to system load or small workload"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Validation Pipeline Tests (from test_validation_pipeline.py)
 # ---------------------------------------------------------------------------
+
 
 class TestFullPipelineValidation:
     """Test Phase 2 metrics integration within the complete validation pipeline."""
@@ -781,6 +806,7 @@ class TestFullPipelineValidation:
         assert borderline_result.metrics.lpips_quality_mean is not None
         assert borderline_result.metrics.deep_perceptual_frame_count is not None
 
+
 class TestRegressionPrevention:
     """Test regression prevention with golden reference comparisons."""
 
@@ -899,6 +925,7 @@ class TestRegressionPrevention:
         assert (
             quality_failure_detected
         ), f"Expected quality issues to be detected with catastrophic metrics. Categories: {issue_categories}"
+
 
 class TestValidationSystemIntegrationPipeline:
     """Test validation system integration with Phase 2 metrics."""
@@ -1044,9 +1071,11 @@ class TestValidationSystemIntegrationPipeline:
         assert isinstance(result_invalid, ValidationResult)
         assert result_invalid.status != ValidationStatus.UNKNOWN
 
+
 # ---------------------------------------------------------------------------
 # Performance Integration Tests (from test_performance_integration.py)
 # ---------------------------------------------------------------------------
+
 
 class TestPerformanceIntegration:
     """Integration tests for performance improvements."""
@@ -1212,6 +1241,7 @@ class TestPerformanceIntegration:
                 elapsed < max_time
             ), f"{content_type} took {elapsed:.4f}s, expected < {max_time}s"
             assert img.size == size
+
 
 @pytest.mark.integration
 class TestRealWorldPerformance:

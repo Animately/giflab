@@ -39,32 +39,67 @@ FRAME_RATIOS = [1.0]  # Can expand later
 # Used for schema migration, INSERT statements, and result extraction.
 QUALITY_METRIC_COLUMNS: list[str] = [
     # Base metrics with aggregations
-    "ssim_mean", "ssim_std", "ssim_min", "ssim_max",
-    "ms_ssim_mean", "ms_ssim_std", "ms_ssim_min", "ms_ssim_max",
-    "psnr_mean", "psnr_std", "psnr_min", "psnr_max",
-    "mse_mean", "mse_std", "mse_min", "mse_max",
-    "rmse_mean", "rmse_std", "rmse_min", "rmse_max",
-    "fsim_mean", "fsim_std", "fsim_min", "fsim_max",
-    "gmsd_mean", "gmsd_std", "gmsd_min", "gmsd_max",
+    "ssim_mean",
+    "ssim_std",
+    "ssim_min",
+    "ssim_max",
+    "ms_ssim_mean",
+    "ms_ssim_std",
+    "ms_ssim_min",
+    "ms_ssim_max",
+    "psnr_mean",
+    "psnr_std",
+    "psnr_min",
+    "psnr_max",
+    "mse_mean",
+    "mse_std",
+    "mse_min",
+    "mse_max",
+    "rmse_mean",
+    "rmse_std",
+    "rmse_min",
+    "rmse_max",
+    "fsim_mean",
+    "fsim_std",
+    "fsim_min",
+    "fsim_max",
+    "gmsd_mean",
+    "gmsd_std",
+    "gmsd_min",
+    "gmsd_max",
     # Perceptual
-    "chist_mean", "edge_similarity_mean",
-    "texture_similarity_mean", "sharpness_similarity_mean",
+    "chist_mean",
+    "edge_similarity_mean",
+    "texture_similarity_mean",
+    "sharpness_similarity_mean",
     # Temporal
-    "temporal_consistency", "temporal_consistency_pre",
-    "temporal_consistency_post", "temporal_consistency_delta",
+    "temporal_consistency",
+    "temporal_consistency_pre",
+    "temporal_consistency_post",
+    "temporal_consistency_delta",
     # Disposal artifacts
-    "disposal_artifacts", "disposal_artifacts_delta",
+    "disposal_artifacts",
+    "disposal_artifacts_delta",
     # Enhanced temporal
-    "flicker_excess", "flicker_frame_ratio", "temporal_pumping_score",
+    "flicker_excess",
+    "flicker_frame_ratio",
+    "temporal_pumping_score",
     # Gradient/color
-    "banding_score_mean", "banding_score_p95",
-    "deltae_mean", "deltae_p95", "deltae_max",
+    "banding_score_mean",
+    "banding_score_p95",
+    "deltae_mean",
+    "deltae_p95",
+    "deltae_max",
     # Deep perceptual
-    "lpips_quality_mean", "lpips_quality_p95",
+    "lpips_quality_mean",
+    "lpips_quality_p95",
     # SSIMULACRA2
-    "ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min",
+    "ssimulacra2_mean",
+    "ssimulacra2_p95",
+    "ssimulacra2_min",
     # Text/UI
-    "edge_sharpness_score", "mtf50_ratio_mean",
+    "edge_sharpness_score",
+    "mtf50_ratio_mean",
     # Composite
     "composite_quality",
 ]
@@ -287,9 +322,7 @@ class GifLabStorage:
             # Idempotent migration: add any new metric columns
             for col in QUALITY_METRIC_COLUMNS:
                 try:
-                    conn.execute(
-                        f"ALTER TABLE compression_runs ADD COLUMN {col} REAL"
-                    )
+                    conn.execute(f"ALTER TABLE compression_runs ADD COLUMN {col} REAL")
                 except sqlite3.OperationalError:
                     pass  # column already exists
 
@@ -356,7 +389,7 @@ class GifLabStorage:
                 break
             except sqlite3.OperationalError as e:
                 if "database is locked" in str(e) and attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
+                    delay = base_delay * (2**attempt)
                     logging.warning(
                         "Database locked (attempt %d/%d), retrying in %.1fs",
                         attempt + 1,
@@ -365,9 +398,7 @@ class GifLabStorage:
                     )
                     time.sleep(delay)
                 elif "database is locked" in str(e):
-                    raise RuntimeError(
-                        "Database locked after 5 retry attempts"
-                    ) from e
+                    raise RuntimeError("Database locked after 5 retry attempts") from e
                 else:
                     raise
 
@@ -797,8 +828,11 @@ class GifLabStorage:
                  'size_kb', quality metrics, etc.
         """
         fixed_cols = [
-            "gif_sha", "pipeline_id", "param_preset_id",
-            "size_kb", "compression_ratio",
+            "gif_sha",
+            "pipeline_id",
+            "param_preset_id",
+            "size_kb",
+            "compression_ratio",
         ]
         tail_cols = ["render_ms", "giflab_version", "created_at"]
         all_cols = fixed_cols + QUALITY_METRIC_COLUMNS + tail_cols
@@ -823,8 +857,11 @@ class GifLabStorage:
             return
 
         fixed_cols = [
-            "gif_sha", "pipeline_id", "param_preset_id",
-            "size_kb", "compression_ratio",
+            "gif_sha",
+            "pipeline_id",
+            "param_preset_id",
+            "size_kb",
+            "compression_ratio",
         ]
         tail_cols = ["render_ms", "giflab_version", "created_at"]
         all_cols = fixed_cols + QUALITY_METRIC_COLUMNS + tail_cols

@@ -18,7 +18,7 @@ import logging
 import subprocess
 import tempfile
 import time
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -346,16 +346,18 @@ class PredictionRunner:
 
         # Build result from QUALITY_METRIC_COLUMNS (single source of truth)
         result = {col: metrics.get(col) for col in QUALITY_METRIC_COLUMNS}
-        result.update({
-            "gif_sha": gif_sha,
-            "pipeline_id": pipeline_id,
-            "param_preset_id": param_preset_id,
-            "size_kb": size_kb,
-            "compression_ratio": compression_ratio,
-            "render_ms": render_ms,
-            "giflab_version": giflab.__version__,
-            "created_at": datetime.now(UTC).isoformat(),
-        })
+        result.update(
+            {
+                "gif_sha": gif_sha,
+                "pipeline_id": pipeline_id,
+                "param_preset_id": param_preset_id,
+                "size_kb": size_kb,
+                "compression_ratio": compression_ratio,
+                "render_ms": render_ms,
+                "giflab_version": giflab.__version__,
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        )
         return result
 
     def _execute_pipeline(

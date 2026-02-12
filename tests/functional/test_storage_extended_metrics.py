@@ -108,9 +108,9 @@ class TestSaveCompressionBatchExtended:
         for i, col in enumerate(QUALITY_METRIC_COLUMNS):
             expected = float(i) / 100.0
             actual = row[col]
-            assert actual == pytest.approx(expected, abs=1e-9), (
-                f"Column {col}: expected {expected}, got {actual}"
-            )
+            assert actual == pytest.approx(
+                expected, abs=1e-9
+            ), f"Column {col}: expected {expected}, got {actual}"
 
     def test_stores_run_with_null_metrics(self, storage: GifLabStorage) -> None:
         """Metrics set to None are stored as NULL (no error)."""

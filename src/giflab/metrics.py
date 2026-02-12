@@ -247,27 +247,30 @@ def extract_gif_frames(
     # Check if caching is available and enabled
     # Try dynamic import if runtime config is enabled but modules weren't loaded
     global get_frame_cache, CACHING_ENABLED
-    
+
     runtime_enabled = FRAME_CACHE.get("enabled", False)
     caching_available = CACHING_ENABLED and get_frame_cache is not None
-    
+
     # If runtime enabled but caching not available, try dynamic import
     if runtime_enabled and not caching_available:
         try:
             # Attempt dynamic import for testing scenarios
             from .caching import get_frame_cache as _get_frame_cache
+
             get_frame_cache = _get_frame_cache
             caching_available = True
             CACHING_ENABLED = True
-            logger.debug("✅ Dynamic caching import successful for runtime-enabled cache")
+            logger.debug(
+                "✅ Dynamic caching import successful for runtime-enabled cache"
+            )
         except ImportError:
             logger.debug("❌ Dynamic caching import failed, cache unavailable")
             caching_available = False
-    
+
     use_cache = caching_available and runtime_enabled
 
     # Try to get from cache first (only if caching is enabled)
-    
+
     if use_cache:
         frame_cache = get_frame_cache()
         cached = frame_cache.get(gif_path, max_frames)

@@ -139,6 +139,7 @@ class Ssimulacra2Validator:
             # Parse the numeric score from output
             # Handle both plain number format and "SSIMULACRA2 score: X.X" format
             import re
+
             score_str = result.stdout.strip()
             matches = re.findall(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", score_str)
             if matches:

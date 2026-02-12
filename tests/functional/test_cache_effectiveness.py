@@ -45,8 +45,7 @@ class TestCacheEffectivenessMonitor:
     def test_monitor_initialization(self):
         """Test cache effectiveness monitor initialization."""
         monitor = CacheEffectivenessMonitor(
-            max_operations_history=1000,
-            time_window_minutes=30
+            max_operations_history=1000, time_window_minutes=30
         )
 
         assert monitor.max_operations_history == 1000
@@ -62,7 +61,7 @@ class TestCacheEffectivenessMonitor:
             cache_type="frame_cache",
             operation=CacheOperationType.HIT,
             key="test_key_1",
-            processing_time_ms=50.0
+            processing_time_ms=50.0,
         )
 
         assert len(monitor._operations) == 1
@@ -120,11 +119,13 @@ class TestCacheEffectivenessMonitor:
             for i in range(10):
                 monitor.record_operation(cache_type, CacheOperationType.HIT, f"key_{i}")
             for i in range(5):
-                monitor.record_operation(cache_type, CacheOperationType.MISS, f"miss_{i}")
+                monitor.record_operation(
+                    cache_type, CacheOperationType.MISS, f"miss_{i}"
+                )
 
         summary = monitor.get_system_effectiveness_summary()
         assert summary["total_operations"] == 30  # 15 ops * 2 cache types
-        assert summary["overall_hit_rate"] == 20/30  # 20 hits out of 30 total
+        assert summary["overall_hit_rate"] == 20 / 30  # 20 hits out of 30 total
         assert summary["cache_types"] == 2
 
 
@@ -134,8 +135,7 @@ class TestPerformanceBaselineFramework:
     def test_framework_initialization(self):
         """Test baseline framework initialization."""
         framework = PerformanceBaselineFramework(
-            test_mode=BaselineTestMode.AB_TESTING,
-            ab_split_ratio=0.2
+            test_mode=BaselineTestMode.AB_TESTING, ab_split_ratio=0.2
         )
 
         assert framework.test_mode == BaselineTestMode.AB_TESTING
@@ -151,7 +151,7 @@ class TestPerformanceBaselineFramework:
             processing_time_ms=100.0,
             cache_enabled=True,
             memory_usage_mb=50.0,
-            metadata={"file_size": "large"}
+            metadata={"file_size": "large"},
         )
 
         measurements = framework._measurements["gif_processing"]
@@ -165,7 +165,9 @@ class TestPerformanceBaselineFramework:
 
     def test_baseline_statistics_calculation(self):
         """Test baseline statistics calculation."""
-        framework = PerformanceBaselineFramework(min_samples_for_analysis=15)  # Lower threshold for testing
+        framework = PerformanceBaselineFramework(
+            min_samples_for_analysis=15
+        )  # Lower threshold for testing
 
         # Record cached measurements
         for i in range(20):
@@ -186,20 +188,26 @@ class TestPerformanceBaselineFramework:
 class TestCacheEffectivenessAnalyzer:
     """Test cache effectiveness analysis and recommendation generation."""
 
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_baseline_framework')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker')
-    def test_insufficient_data_analysis(self, mock_memory, mock_baseline, mock_effectiveness):
+    @patch(
+        "src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor"
+    )
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_baseline_framework")
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker")
+    def test_insufficient_data_analysis(
+        self, mock_memory, mock_baseline, mock_effectiveness
+    ):
         """Test analysis with insufficient data."""
         # Mock insufficient data scenario
         mock_effectiveness.return_value.get_all_cache_stats.return_value = {}
         mock_effectiveness.return_value.get_system_effectiveness_summary.return_value = {
             "total_operations": 10,  # Too few operations
             "overall_hit_rate": 0.0,
-            "monitoring_duration_hours": 0.5  # Too short duration
+            "monitoring_duration_hours": 0.5,  # Too short duration
         }
         mock_baseline.return_value.get_all_baseline_statistics.return_value = {}
-        mock_baseline.return_value.generate_performance_report.return_value = {"performance_analysis": {}}
+        mock_baseline.return_value.generate_performance_report.return_value = {
+            "performance_analysis": {}
+        }
         mock_memory.return_value.get_system_effectiveness_summary.return_value = {}
 
         analyzer = CacheEffectivenessAnalyzer()
@@ -209,10 +217,14 @@ class TestCacheEffectivenessAnalyzer:
         assert analysis.confidence_score < 0.2
         assert len(analysis.optimization_recommendations) > 0
 
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_baseline_framework')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker')
-    def test_excellent_performance_analysis(self, mock_memory, mock_baseline, mock_effectiveness):
+    @patch(
+        "src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor"
+    )
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_baseline_framework")
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker")
+    def test_excellent_performance_analysis(
+        self, mock_memory, mock_baseline, mock_effectiveness
+    ):
         """Test analysis with excellent cache performance."""
         # Mock excellent performance data
         mock_cache_stats = {
@@ -224,15 +236,17 @@ class TestCacheEffectivenessAnalyzer:
                 evictions=10,
                 puts=200,
                 total_data_cached_mb=100.0,
-                cache_turnover_rate=0.05
+                cache_turnover_rate=0.05,
             )
         }
 
-        mock_effectiveness.return_value.get_all_cache_stats.return_value = mock_cache_stats
+        mock_effectiveness.return_value.get_all_cache_stats.return_value = (
+            mock_cache_stats
+        )
         mock_effectiveness.return_value.get_system_effectiveness_summary.return_value = {
             "total_operations": 1000,
             "overall_hit_rate": 0.9,
-            "monitoring_duration_hours": 5.0
+            "monitoring_duration_hours": 5.0,
         }
 
         mock_baseline_stats = {
@@ -242,11 +256,13 @@ class TestCacheEffectivenessAnalyzer:
                 statistical_significance=True,
                 min_samples_met=True,
                 cached_samples=100,
-                non_cached_samples=100
+                non_cached_samples=100,
             )
         }
 
-        mock_baseline.return_value.get_all_baseline_statistics.return_value = mock_baseline_stats
+        mock_baseline.return_value.get_all_baseline_statistics.return_value = (
+            mock_baseline_stats
+        )
         mock_baseline.return_value.generate_performance_report.return_value = {
             "performance_analysis": {"average_improvement": 0.4}
         }
@@ -267,9 +283,11 @@ class TestCacheEffectivenessAnalyzer:
 class TestIntegration:
     """Test integration between cache effectiveness components."""
 
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_baseline_framework')
-    @patch('src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker')
+    @patch(
+        "src.giflab.monitoring.effectiveness_analysis.get_cache_effectiveness_monitor"
+    )
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_baseline_framework")
+    @patch("src.giflab.monitoring.effectiveness_analysis.get_cache_memory_tracker")
     def test_end_to_end_analysis(self, mock_memory, mock_baseline, mock_effectiveness):
         """Test end-to-end cache effectiveness analysis."""
         # Setup mock data representing a realistic scenario
@@ -282,15 +300,17 @@ class TestIntegration:
                 evictions=25,
                 puts=100,
                 total_data_cached_mb=75.0,
-                cache_turnover_rate=0.25
+                cache_turnover_rate=0.25,
             )
         }
 
-        mock_effectiveness.return_value.get_all_cache_stats.return_value = mock_cache_stats
+        mock_effectiveness.return_value.get_all_cache_stats.return_value = (
+            mock_cache_stats
+        )
         mock_effectiveness.return_value.get_system_effectiveness_summary.return_value = {
             "total_operations": 500,
             "overall_hit_rate": 0.7,
-            "monitoring_duration_hours": 3.0
+            "monitoring_duration_hours": 3.0,
         }
 
         mock_baseline_stats = {
@@ -300,11 +320,13 @@ class TestIntegration:
                 statistical_significance=True,
                 min_samples_met=True,
                 cached_samples=50,
-                non_cached_samples=50
+                non_cached_samples=50,
             )
         }
 
-        mock_baseline.return_value.get_all_baseline_statistics.return_value = mock_baseline_stats
+        mock_baseline.return_value.get_all_baseline_statistics.return_value = (
+            mock_baseline_stats
+        )
         mock_baseline.return_value.generate_performance_report.return_value = {
             "performance_analysis": {"average_improvement": 0.25}
         }
@@ -317,7 +339,10 @@ class TestIntegration:
         analysis = analyze_cache_effectiveness()
 
         # Verify results
-        assert analysis.recommendation in [CacheRecommendation.ENABLE_PRODUCTION, CacheRecommendation.ENABLE_WITH_MONITORING]
+        assert analysis.recommendation in [
+            CacheRecommendation.ENABLE_PRODUCTION,
+            CacheRecommendation.ENABLE_WITH_MONITORING,
+        ]
         assert analysis.confidence_score > 0.6
         assert analysis.overall_hit_rate == 0.7
         assert analysis.average_performance_improvement == 0.25

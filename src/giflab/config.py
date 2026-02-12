@@ -209,6 +209,7 @@ class MetricsConfig:
         if self.POSITIONAL_METRICS is None:
             self.POSITIONAL_METRICS = ["ssim", "mse", "fsim", "chist"]
 
+
 # Frame cache configuration (added for performance optimization)
 # EXPERIMENTAL: Caching disabled by default due to performance degradation found in Phase 4.3 benchmarking
 ENABLE_EXPERIMENTAL_CACHING = False
@@ -277,21 +278,18 @@ MONITORING = {
     "buffer_size": 10000,  # In-memory ring buffer size for recent metrics
     "flush_interval": 10.0,  # Seconds between automatic metric flushes
     "sampling_rate": 1.0,  # Fraction of metrics to collect (1.0 = all)
-    
     # SQLite backend configuration
     "sqlite": {
         "db_path": None,  # Path to metrics database (None for ~/.giflab_cache/metrics.db)
         "retention_days": 7.0,  # Days to retain metrics before cleanup
         "max_size_mb": 100.0,  # Maximum database size in MB
     },
-    
     # StatsD backend configuration (optional, requires statsd library)
     "statsd": {
         "host": "localhost",  # StatsD server host
         "port": 8125,  # StatsD server port
         "prefix": "giflab",  # Metric name prefix
     },
-    
     # Alert thresholds for monitoring
     "alerts": {
         "cache_hit_rate_warning": 0.4,  # Warn if cache hit rate drops below 40%
@@ -301,7 +299,6 @@ MONITORING = {
         "eviction_rate_spike": 3.0,  # Alert if eviction rate > 3x normal
         "response_time_degradation": 1.5,  # Alert if response time > 1.5x baseline
     },
-    
     # Per-system monitoring configuration
     "systems": {
         "frame_cache": True,  # Monitor FrameCache performance
@@ -312,39 +309,33 @@ MONITORING = {
         "metrics_calculation": True,  # Monitor core metrics calculation
         "memory_pressure": True,  # Monitor system memory pressure
     },
-    
     # Memory pressure monitoring configuration
     "memory_pressure": {
         "enabled": True,  # Enable memory pressure monitoring
         "update_interval": 5.0,  # Seconds between memory checks
         "auto_eviction": True,  # Enable automatic cache eviction under pressure
         "eviction_policy": "conservative",  # Eviction policy: "conservative", "aggressive"
-        
         # Memory pressure thresholds (fractions of system memory)
         "thresholds": {
-            "warning": 0.70,    # Warning level at 70% system memory
-            "critical": 0.80,   # Critical level at 80% system memory
+            "warning": 0.70,  # Warning level at 70% system memory
+            "critical": 0.80,  # Critical level at 80% system memory
             "emergency": 0.95,  # Emergency level at 95% system memory
         },
-        
         # Eviction targets as fraction of process memory to free
         "eviction_targets": {
-            "warning": 0.15,    # Free 15% of process memory at warning
-            "critical": 0.30,   # Free 30% of process memory at critical
+            "warning": 0.15,  # Free 15% of process memory at warning
+            "critical": 0.30,  # Free 30% of process memory at critical
             "emergency": 0.50,  # Free 50% of process memory at emergency
         },
-        
         # Hysteresis to prevent eviction thrashing
         "hysteresis": {
-            "enable_delta": 0.05,   # Re-enable pressure monitoring 5% below threshold
+            "enable_delta": 0.05,  # Re-enable pressure monitoring 5% below threshold
             "eviction_cooldown": 30.0,  # Minimum seconds between evictions
         },
-        
         # Integration with existing cache limits
         "respect_cache_limits": True,  # Don't evict below configured cache minimums
         "fallback_when_unavailable": True,  # Graceful degradation without psutil
     },
-    
     # Phase 7: Performance regression monitoring configuration
     "performance": {
         "enabled": False,  # Disabled by default, enable with GIFLAB_ENABLE_PERFORMANCE_MONITORING=true
@@ -353,36 +344,33 @@ MONITORING = {
         "monitoring_interval": 3600,  # Seconds between continuous monitoring checks (1 hour)
         "max_history_days": 30,  # Days to retain performance history
         "baseline_min_samples": 3,  # Minimum samples needed to establish baseline
-        
         # Scenarios for continuous monitoring (lightweight subset)
         "continuous_scenarios": [
             "continuous_small_gif",  # Small GIF for regular monitoring
         ],
-        
         # Performance data storage
         "data_directory": "performance_data",  # Directory for baselines and history
         "baseline_file": "performance_baselines.json",  # Baseline storage file
         "history_directory": "performance_history",  # History storage directory
-        
         # Alert configuration
         "alert_on_regression": True,  # Send alerts via AlertManager
         "alert_severities": {
-            "minor_regression": 0.10,     # 10%+ regression = INFO
-            "major_regression": 0.25,     # 25%+ regression = WARNING
+            "minor_regression": 0.10,  # 10%+ regression = INFO
+            "major_regression": 0.25,  # 25%+ regression = WARNING
             "critical_regression": 0.50,  # 50%+ regression = CRITICAL
         },
-        
         # CI/CD integration
         "fail_ci_on_regression": True,  # Fail CI/CD on significant regression
         "ci_regression_threshold": 0.15,  # 15%+ regression fails CI/CD
-        "ci_scenarios": ["small_gif_basic", "medium_gif_comprehensive"],  # Scenarios for CI
-        
+        "ci_scenarios": [
+            "small_gif_basic",
+            "medium_gif_comprehensive",
+        ],  # Scenarios for CI
         # Phase 6 optimization validation
         "validate_phase6": True,  # Monitor Phase 6 optimization effectiveness
         "phase6_baseline_speedup": 5.04,  # Expected Phase 6 speedup (5.04x)
         "phase6_regression_alert": 0.20,  # Alert if Phase 6 speedup drops 20%+
     },
-    
     "verbose": False,  # Enable verbose monitoring logs
 }
 

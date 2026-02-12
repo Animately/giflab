@@ -6,7 +6,6 @@ import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from giflab.storage import GifLabStorage
 
 
@@ -57,9 +56,7 @@ class TestConnectRetryLogic:
         self, mock_connect, mock_sleep, storage
     ):
         """Should raise RuntimeError after 5 failed attempts."""
-        mock_connect.side_effect = sqlite3.OperationalError(
-            "database is locked"
-        )
+        mock_connect.side_effect = sqlite3.OperationalError("database is locked")
 
         with pytest.raises(
             RuntimeError, match="Database locked after 5 retry attempts"
@@ -97,9 +94,7 @@ class TestConnectRetryLogic:
         self, mock_connect, mock_sleep, storage
     ):
         """Verify exact exponential backoff: 0.1, 0.2, 0.4, 0.8, then fail."""
-        mock_connect.side_effect = sqlite3.OperationalError(
-            "database is locked"
-        )
+        mock_connect.side_effect = sqlite3.OperationalError("database is locked")
 
         with pytest.raises(RuntimeError):
             with storage._connect():
@@ -123,9 +118,7 @@ class TestConnectRetryLogic:
 
     @patch("giflab.storage.time.sleep")
     @patch("giflab.storage.sqlite3.connect")
-    def test_connect_succeeds_on_last_attempt(
-        self, mock_connect, mock_sleep, storage
-    ):
+    def test_connect_succeeds_on_last_attempt(self, mock_connect, mock_sleep, storage):
         """Connection should succeed even on the 5th (last) attempt."""
         good_conn = MagicMock(spec=sqlite3.Connection)
         good_conn.execute = MagicMock()

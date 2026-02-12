@@ -88,17 +88,15 @@ class TestLPIPSInfrastructureSharing:
         """Test that LPIPS model is efficiently reused between temporal and spatial analysis."""
         # Test now verifies that the model cache is properly shared
         from giflab.model_cache import LPIPSModelCache, cleanup_model_cache
-        
+
         # Clean cache to start fresh
         cleanup_model_cache(force=True)
-        
+
         # Initialize both systems
         temporal_detector = TemporalArtifactDetector(
             device="cpu", force_mse_fallback=False
         )
-        spatial_validator = DeepPerceptualValidator(
-            device="cpu", force_fallback=False
-        )
+        spatial_validator = DeepPerceptualValidator(device="cpu", force_fallback=False)
 
         # Force model initialization
         temporal_model = temporal_detector._get_lpips_model()
@@ -106,13 +104,17 @@ class TestLPIPSInfrastructureSharing:
 
         # Both should get the same cached model instance
         if temporal_model is not None and spatial_model is not None:
-            assert temporal_model is spatial_model, "Models should be the same cached instance"
-        
+            assert (
+                temporal_model is spatial_model
+            ), "Models should be the same cached instance"
+
         # Verify cache info shows single model
         cache_info = LPIPSModelCache.get_cache_info()
         if cache_info["models_cached"] > 0:
             # Should have at most one model cached
-            assert cache_info["models_cached"] <= 1, "Should reuse the same cached model"
+            assert (
+                cache_info["models_cached"] <= 1
+            ), "Should reuse the same cached model"
 
     @pytest.mark.slow
     def test_memory_management_across_modules(self, test_frames):

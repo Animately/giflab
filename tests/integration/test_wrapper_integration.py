@@ -223,9 +223,7 @@ class TestFFmpegWrapperIntegration:
         with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
             output_path = Path(tmp.name)
 
-            result = wrapper.apply(
-                test_gif, output_path, params={"lossy_level": 50}
-            )
+            result = wrapper.apply(test_gif, output_path, params={"lossy_level": 50})
 
             # Validate metadata
             assert result["engine"] == "ffmpeg"

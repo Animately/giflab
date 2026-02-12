@@ -52,7 +52,7 @@ class TestMemoryLeakPrevention:
         """Test that model cache is a proper singleton."""
         cache1 = LPIPSModelCache()
         cache2 = LPIPSModelCache()
-        
+
         # Should be the same instance
         assert cache1 is cache2
 
@@ -63,11 +63,11 @@ class TestMemoryLeakPrevention:
         model1 = LPIPSModelCache.get_model()
         model2 = LPIPSModelCache.get_model()
         model3 = LPIPSModelCache.get_model()
-        
+
         # Should be the same model instance
         assert model1 is model2
         assert model2 is model3
-        
+
         # Cache info should show only one model
         info = get_model_cache_info()
         assert info["models_cached"] == 1
@@ -79,29 +79,30 @@ class TestMemoryLeakPrevention:
         # Start memory tracking
         tracemalloc.start()
         snapshot1 = tracemalloc.take_snapshot()
-        
+
         # Create test frames
         frames = [
-            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-            for _ in range(3)
+            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8) for _ in range(3)
         ]
-        
+
         # Run multiple iterations
         for _ in range(10):
             calculate_comprehensive_metrics_from_frames(
                 frames, frames, config=MetricsConfig()
             )
-        
+
         # Take second snapshot
         snapshot2 = tracemalloc.take_snapshot()
-        top_stats = snapshot2.compare_to(snapshot1, 'lineno')
-        
+        top_stats = snapshot2.compare_to(snapshot1, "lineno")
+
         # Check for memory growth
-        total_growth = sum(stat.size_diff for stat in top_stats[:10] if stat.size_diff > 0)
+        total_growth = sum(
+            stat.size_diff for stat in top_stats[:10] if stat.size_diff > 0
+        )
         total_growth_mb = total_growth / (1024 * 1024)
-        
+
         tracemalloc.stop()
-        
+
         # Should have minimal memory growth (< 10MB)
         assert total_growth_mb < 10, f"Memory grew by {total_growth_mb:.1f}MB"
 
@@ -109,66 +110,69 @@ class TestMemoryLeakPrevention:
     def test_memory_usage_with_cache_vs_without(self):
         """Compare memory usage with and without caching."""
         process = psutil.Process(os.getpid())
-        
+
         # Test with cache enabled
         os.environ["GIFLAB_USE_MODEL_CACHE"] = "true"
         cleanup_model_cache(force=True)
         gc.collect()
-        
+
         initial_memory = process.memory_info().rss
-        
+
         frames = [
-            np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8)
-            for _ in range(2)
+            np.random.randint(0, 255, (64, 64, 3), dtype=np.uint8) for _ in range(2)
         ]
-        
+
         # Run multiple times with cache
         for _ in range(5):
             calculate_comprehensive_metrics_from_frames(
                 frames, frames, config=MetricsConfig()
             )
-        
+
         cached_memory = process.memory_info().rss
         cached_increase = (cached_memory - initial_memory) / (1024 * 1024)
-        
+
         # Memory increase with caching should be < 500MB
         # (LPIPS AlexNet model is ~475MB, so this accounts for the model + overhead)
-        assert cached_increase < 500, f"Cached memory increased by {cached_increase:.1f}MB"
+        assert (
+            cached_increase < 500
+        ), f"Cached memory increased by {cached_increase:.1f}MB"
 
     @pytest.mark.fast
     def test_cache_cleanup(self):
         """Test that cache cleanup properly frees memory."""
         process = psutil.Process(os.getpid())
-        
+
         # Get initial memory
         initial_memory = process.memory_info().rss
-        
+
         # Load models into cache
         for _i in range(3):
             model = LPIPSModelCache.get_model(device="cpu")
             assert model is not None
-        
+
         # Memory should increase after loading model (or already be loaded)
         loaded_memory = process.memory_info().rss
         # Skip the assertion if model was already in memory from a previous test
         # The important test is whether cleanup doesn't increase memory significantly
-        
+
         # Clean cache and all validators
         cleanup_all_validators()
         gc.collect()
         time.sleep(0.1)  # Give GC time to work
-        
+
         # Memory should decrease after cleanup (or at least not increase significantly)
         cleaned_memory = process.memory_info().rss
         (loaded_memory - cleaned_memory) / (1024 * 1024)
-        
+
         # Should not increase memory after cleanup
         # Note: Due to Python memory management, we might not see immediate freeing
         # The threshold is set high because Python may not release memory immediately
-        memory_increase_after_cleanup = (cleaned_memory - initial_memory) / (1024 * 1024)
-        assert memory_increase_after_cleanup < 500, (
-            f"Memory still high after cleanup: {memory_increase_after_cleanup:.1f}MB"
+        memory_increase_after_cleanup = (cleaned_memory - initial_memory) / (
+            1024 * 1024
         )
+        assert (
+            memory_increase_after_cleanup < 500
+        ), f"Memory still high after cleanup: {memory_increase_after_cleanup:.1f}MB"
 
     @pytest.mark.fast
     def test_reference_counting(self):
@@ -177,17 +181,17 @@ class TestMemoryLeakPrevention:
         LPIPSModelCache.get_model()
         info = get_model_cache_info()
         assert info["total_references"] == 1
-        
+
         # Get same model again
         LPIPSModelCache.get_model()
         info = get_model_cache_info()
         assert info["total_references"] == 2
-        
+
         # Release references
         LPIPSModelCache.release_model()
         info = get_model_cache_info()
         assert info["total_references"] == 1
-        
+
         LPIPSModelCache.release_model()
         info = get_model_cache_info()
         assert info["total_references"] == 0
@@ -197,24 +201,23 @@ class TestMemoryLeakPrevention:
     def test_performance_with_caching(self):
         """Test that caching improves performance."""
         frames = [
-            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-            for _ in range(3)
+            np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8) for _ in range(3)
         ]
-        
+
         # First call (model loading)
         start_time = time.perf_counter()
         calculate_comprehensive_metrics_from_frames(
             frames, frames, config=MetricsConfig()
         )
         first_call_time = time.perf_counter() - start_time
-        
+
         # Second call (should use cached model)
         start_time = time.perf_counter()
         calculate_comprehensive_metrics_from_frames(
             frames, frames, config=MetricsConfig()
         )
         second_call_time = time.perf_counter() - start_time
-        
+
         # Second call should be faster (cached model)
         # Allow generous variance for system timing jitter
         assert second_call_time <= first_call_time * 2.0, (
@@ -226,31 +229,31 @@ class TestMemoryLeakPrevention:
     def test_concurrent_access(self):
         """Test that cache handles concurrent access correctly."""
         import threading
-        
+
         results = []
         errors = []
-        
+
         def get_model():
             try:
                 model = LPIPSModelCache.get_model()
                 results.append(model)
             except Exception as e:
                 errors.append(e)
-        
+
         # Create multiple threads
         threads = []
         for _ in range(10):
             t = threading.Thread(target=get_model)
             threads.append(t)
             t.start()
-        
+
         # Wait for all threads
         for t in threads:
             t.join()
-        
+
         # Should have no errors
         assert len(errors) == 0, f"Concurrent access errors: {errors}"
-        
+
         # All should get the same model
         assert len(results) == 10
         first_model = results[0]
@@ -264,19 +267,19 @@ class TestMemoryLeakPrevention:
         info = get_model_cache_info()
         assert info["models_cached"] == 0
         assert info["total_references"] == 0
-        
+
         # Add a model
         LPIPSModelCache.get_model()
         info = get_model_cache_info()
         assert info["models_cached"] == 1
         assert info["total_references"] == 1
-        
+
         # Add another reference
         LPIPSModelCache.get_model()
         info = get_model_cache_info()
         assert info["models_cached"] == 1  # Still one model
         assert info["total_references"] == 2  # Two references
-        
+
         # Different device should create new model
         LPIPSModelCache.get_model(device="cpu", spatial=True)
         info = get_model_cache_info()

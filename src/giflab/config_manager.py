@@ -47,6 +47,7 @@ from .config import (
 
 logger = logging.getLogger(__name__)
 
+
 class ConfigProfile(Enum):
     """Available configuration profiles for different environments."""
 
@@ -58,15 +59,18 @@ class ConfigProfile(Enum):
     INTERACTIVE = "interactive"
     TESTING = "testing"
 
+
 class ConfigValidationError(Exception):
     """Raised when configuration validation fails."""
 
     pass
 
+
 class ConfigReloadError(Exception):
     """Raised when configuration reload fails."""
 
     pass
+
 
 @dataclass
 class ConfigChange:
@@ -79,6 +83,7 @@ class ConfigChange:
     profile: ConfigProfile | None = None
     source: str = "manual"  # manual, file_watch, signal, api
 
+
 @dataclass
 class ConfigMetadata:
     """Metadata about configuration state."""
@@ -90,6 +95,7 @@ class ConfigMetadata:
     overrides: dict[str, Any] = field(default_factory=dict)
     validation_errors: list[str] = field(default_factory=list)
     checksum: str | None = None
+
 
 class ConfigValidator:
     """Validates configuration values and relationships."""
@@ -153,9 +159,7 @@ class ConfigValidator:
         """Validate that a value is a positive integer."""
         return isinstance(value, int) and value > 0
 
-    def _validate_cache_memory_relationship(
-        self, config: dict[str, Any]
-    ) -> str | None:
+    def _validate_cache_memory_relationship(self, config: dict[str, Any]) -> str | None:
         """Validate cache memory relationships."""
         frame_cache = config.get("FRAME_CACHE", {})
         validation_cache = config.get("VALIDATION_CACHE", {})
@@ -257,6 +261,7 @@ class ConfigValidator:
 
         return value
 
+
 class ConfigFileWatcher(FileSystemEventHandler):
     """Watches configuration files for changes."""
 
@@ -288,6 +293,7 @@ class ConfigFileWatcher(FileSystemEventHandler):
             self.config_manager.reload_config(source="file_watch")
         except Exception as e:
             logger.error(f"Failed to reload configuration: {e}")
+
 
 class ConfigManager:
     """Manages application configuration with profiles and dynamic reloading."""
@@ -921,8 +927,10 @@ class ConfigManager:
         """Get the current configuration (read-only)."""
         return copy.deepcopy(self._config)
 
+
 # Global instance
 _config_manager: ConfigManager | None = None
+
 
 def get_config_manager() -> ConfigManager:
     """Get the global configuration manager instance."""
@@ -930,6 +938,7 @@ def get_config_manager() -> ConfigManager:
     if _config_manager is None:
         _config_manager = ConfigManager()
     return _config_manager
+
 
 def load_profile(profile: str | ConfigProfile):
     """Convenience function to load a configuration profile."""
@@ -939,10 +948,12 @@ def load_profile(profile: str | ConfigProfile):
     manager = get_config_manager()
     manager.load_profile(profile)
 
+
 def get_config(path: str, default: Any = None) -> Any:
     """Convenience function to get a configuration value."""
     manager = get_config_manager()
     return manager.get(path, default)
+
 
 def set_config(path: str, value: Any, validate: bool = True):
     """Convenience function to set a configuration value."""

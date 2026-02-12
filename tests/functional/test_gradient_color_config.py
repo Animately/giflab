@@ -639,5 +639,3 @@ class TestAdvancedConfiguration:
                 frame[:, x] = [intensity, intensity // 2, 255 - intensity]
             frames.append(frame)
         return frames
-
-

@@ -149,6 +149,7 @@ class TestGradientColorE2E:
 
         # Calculate color validation metrics - force calculation even for high quality
         import os
+
         old_env = os.environ.get("GIFLAB_FORCE_GRADIENT_METRICS")
         try:
             os.environ["GIFLAB_FORCE_GRADIENT_METRICS"] = "true"

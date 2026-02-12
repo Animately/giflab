@@ -190,8 +190,7 @@ class TestTemporalFeatures:
     def test_temporal_features_different_frames(self) -> None:
         """Test temporal features with different frames."""
         frames = [
-            np.random.randint(0, 256, (50, 50, 3), dtype=np.uint8)
-            for _ in range(5)
+            np.random.randint(0, 256, (50, 50, 3), dtype=np.uint8) for _ in range(5)
         ]
         features = _extract_temporal_features(frames)
 

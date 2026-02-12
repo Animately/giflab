@@ -342,7 +342,9 @@ def _process_chunk_worker(
         "sharpness_similarity": sharpness_similarity,
     }
 
-    results: dict[str, list[tuple[int, float]]] = {name: [] for name in metric_functions}
+    results: dict[str, list[tuple[int, float]]] = {
+        name: [] for name in metric_functions
+    }
 
     for idx, (orig_frame, comp_frame) in chunk:
         # Calculate each metric

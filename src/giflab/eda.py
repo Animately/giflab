@@ -108,6 +108,7 @@ def generate_eda(
     try:
         # Import PCA only when needed (lazy loading for performance)
         from sklearn.decomposition import PCA
+
         pca = PCA()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)

@@ -81,9 +81,7 @@ def fast_compress(monkeypatch):
             "color_keep_count": kwargs.get("color_keep_count", None),
         }
 
-    monkeypatch.setattr(
-        "giflab.lossy.compress_with_gifsicle", _noop_copy, raising=True
-    )
+    monkeypatch.setattr("giflab.lossy.compress_with_gifsicle", _noop_copy, raising=True)
     monkeypatch.setattr(
         "giflab.lossy.compress_with_animately", _noop_copy, raising=True
     )

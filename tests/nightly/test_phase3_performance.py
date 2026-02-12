@@ -417,7 +417,9 @@ class TestPhase3PipelinePerformance:
         config_with_phase3.ENABLE_SSIMULACRA2 = True
 
         # Mock Phase 3 components for consistent timing
-        with patch("giflab.text_ui_validation.calculate_text_ui_metrics") as mock_text_ui, patch(
+        with patch(
+            "giflab.text_ui_validation.calculate_text_ui_metrics"
+        ) as mock_text_ui, patch(
             "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
         ) as mock_ssim2, patch(
             "giflab.text_ui_validation.should_validate_text_ui", return_value=(True, {})
@@ -436,12 +438,18 @@ class TestPhase3PipelinePerformance:
 
             # Measure without Phase 3
             _, time_without = measure_execution_time(
-                calculate_comprehensive_metrics_from_frames, frames, frames, config_without_phase3
+                calculate_comprehensive_metrics_from_frames,
+                frames,
+                frames,
+                config_without_phase3,
             )
 
             # Measure with Phase 3
             _, time_with = measure_execution_time(
-                calculate_comprehensive_metrics_from_frames, frames, frames, config_with_phase3
+                calculate_comprehensive_metrics_from_frames,
+                frames,
+                frames,
+                config_with_phase3,
             )
 
         # Phase 3 overhead should be reasonable
@@ -467,7 +475,10 @@ class TestPhase3PipelinePerformance:
 
         # Measure time when both components should be skipped
         _, execution_time = measure_execution_time(
-            calculate_comprehensive_metrics_from_frames, smooth_frames, smooth_frames, config
+            calculate_comprehensive_metrics_from_frames,
+            smooth_frames,
+            smooth_frames,
+            config,
         )
 
         # Should complete quickly when Phase 3 components are skipped
@@ -496,7 +507,9 @@ class TestPhase3PipelinePerformance:
         config = MetricsConfig()
 
         # Mock Phase 3 components to simulate processing time
-        with patch("giflab.text_ui_validation.calculate_text_ui_metrics") as mock_text_ui, patch(
+        with patch(
+            "giflab.text_ui_validation.calculate_text_ui_metrics"
+        ) as mock_text_ui, patch(
             "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
         ) as mock_ssim2, patch(
             "giflab.text_ui_validation.should_validate_text_ui", return_value=(True, {})
@@ -518,13 +531,17 @@ class TestPhase3PipelinePerformance:
             # Test sequential processing
             start_time = time.perf_counter()
             for orig_frames, comp_frames in frame_pairs:
-                calculate_comprehensive_metrics_from_frames(orig_frames, comp_frames, config)
+                calculate_comprehensive_metrics_from_frames(
+                    orig_frames, comp_frames, config
+                )
             sequential_time = time.perf_counter() - start_time
 
             # Test parallel processing simulation
             def process_pair(pair):
                 orig_frames, comp_frames = pair
-                return calculate_comprehensive_metrics_from_frames(orig_frames, comp_frames, config)
+                return calculate_comprehensive_metrics_from_frames(
+                    orig_frames, comp_frames, config
+                )
 
             start_time = time.perf_counter()
             with ThreadPoolExecutor(max_workers=3) as executor:
@@ -564,7 +581,9 @@ class TestPhase3PipelinePerformance:
                 # Measure batch processing time
                 start_time = time.perf_counter()
                 for orig_frames, comp_frames in frame_sequences:
-                    calculate_comprehensive_metrics_from_frames(orig_frames, comp_frames, config)
+                    calculate_comprehensive_metrics_from_frames(
+                        orig_frames, comp_frames, config
+                    )
                 batch_time = time.perf_counter() - start_time
 
                 # Performance should scale reasonably
@@ -670,8 +689,9 @@ class TestPerformanceRegression:
         """Test that performance is consistent across multiple runs."""
         # Clean up any existing global instances before testing
         from giflab.metrics import cleanup_all_validators
+
         cleanup_all_validators()
-        
+
         frames = [
             np.random.randint(0, 255, (90, 90, 3), dtype=np.uint8) for _ in range(3)
         ]
@@ -681,7 +701,7 @@ class TestPerformanceRegression:
         _, _ = measure_execution_time(
             calculate_comprehensive_metrics_from_frames, frames, frames, config
         )
-        
+
         # Run multiple iterations
         times = []
         for _i in range(20):
@@ -728,7 +748,10 @@ class TestStressTestingPhase3:
 
         # Should handle large images without crashing
         _, execution_time = measure_execution_time(
-            calculate_comprehensive_metrics_from_frames, large_frames, large_frames, config
+            calculate_comprehensive_metrics_from_frames,
+            large_frames,
+            large_frames,
+            config,
         )
 
         # May be slow but should complete
@@ -751,7 +774,10 @@ class TestStressTestingPhase3:
 
         # Should handle many frames efficiently due to sampling
         _, execution_time = measure_execution_time(
-            calculate_comprehensive_metrics_from_frames, many_frames, many_frames, config
+            calculate_comprehensive_metrics_from_frames,
+            many_frames,
+            many_frames,
+            config,
         )
 
         # Should be efficient due to frame sampling
