@@ -5,24 +5,25 @@ This module provides wrappers and utilities to integrate the ValidationCache
 with various metric calculation functions like SSIM, MS-SSIM, LPIPS, etc.
 """
 
+import hashlib
+import json
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
-from .validation_cache import get_validation_cache, ValidationCache
 from ..config import VALIDATION_CACHE
+from .validation_cache import ValidationCache, get_validation_cache
 
 logger = logging.getLogger(__name__)
 
-
-def _get_metric_config(metric_type: str) -> Dict[str, Any]:
+def _get_metric_config(metric_type: str) -> dict[str, Any]:
     """
     Get relevant configuration for a specific metric type.
     
     Args:
-        metric_type: Type of metric
+        metric_type: type of metric
         
     Returns:
         Configuration dictionary for the metric
@@ -42,13 +43,12 @@ def _get_metric_config(metric_type: str) -> Dict[str, Any]:
     
     return config
 
-
 def calculate_ms_ssim_cached(
     frame1: np.ndarray,
     frame2: np.ndarray,
     scales: int = 5,
     use_validation_cache: bool = True,
-    frame_indices: Optional[Tuple[int, int]] = None,
+    frame_indices: tuple[int, int] | None = None,
 ) -> float:
     """
     Calculate MS-SSIM with ValidationCache support.
@@ -89,12 +89,11 @@ def calculate_ms_ssim_cached(
     
     return value
 
-
 def calculate_ssim_cached(
     frame1: np.ndarray,
     frame2: np.ndarray,
     use_validation_cache: bool = True,
-    frame_indices: Optional[Tuple[int, int]] = None,
+    frame_indices: tuple[int, int] | None = None,
 ) -> float:
     """
     Calculate SSIM with ValidationCache support.
@@ -135,8 +134,8 @@ def calculate_ssim_cached(
         return float(cached_value)
     
     # Calculate and cache
-    from skimage.metrics import structural_similarity as ssim
     import cv2
+    from skimage.metrics import structural_similarity as ssim
     
     # Convert to grayscale if needed
     if len(frame1.shape) == 3:
@@ -154,14 +153,13 @@ def calculate_ssim_cached(
     
     return value
 
-
 def calculate_lpips_cached(
     frame1: np.ndarray,
     frame2: np.ndarray,
     net: str = "alex",
     version: str = "0.1",
     use_validation_cache: bool = True,
-    frame_indices: Optional[Tuple[int, int]] = None,
+    frame_indices: tuple[int, int] | None = None,
 ) -> float:
     """
     Calculate LPIPS with ValidationCache support.
@@ -205,12 +203,11 @@ def calculate_lpips_cached(
     
     return value
 
-
 def calculate_gradient_color_cached(
     frames1: list[np.ndarray],
     frames2: list[np.ndarray],
     use_validation_cache: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Calculate gradient and color artifacts with ValidationCache support.
     
@@ -232,10 +229,10 @@ def calculate_gradient_color_cached(
     # For gradient_color, we cache the entire result as it processes all frames together
     # Create a composite hash for all frames
     all_frames_hash = hashlib.md5()
-    for f1, f2 in zip(frames1, frames2):
+    for f1, f2 in zip(frames1, frames2, strict=True):
         all_frames_hash.update(cache.get_frame_hash(f1).encode())
         all_frames_hash.update(cache.get_frame_hash(f2).encode())
-    
+
     cache_key = all_frames_hash.hexdigest()[:32]
     config = {"enable_gradient": True, "enable_color": True}
     
@@ -279,12 +276,11 @@ def calculate_gradient_color_cached(
     
     return result
 
-
 def calculate_ssimulacra2_cached(
     frames1: list[np.ndarray],
     frames2: list[np.ndarray],
     use_validation_cache: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Calculate SSIMulacra2 metrics with ValidationCache support.
     
@@ -304,12 +300,11 @@ def calculate_ssimulacra2_cached(
     cache = get_validation_cache()
     
     # Similar to gradient_color, cache the entire result
-    import hashlib
     all_frames_hash = hashlib.md5()
-    for f1, f2 in zip(frames1, frames2):
+    for f1, f2 in zip(frames1, frames2, strict=True):
         all_frames_hash.update(cache.get_frame_hash(f1).encode())
         all_frames_hash.update(cache.get_frame_hash(f2).encode())
-    
+
     cache_key = all_frames_hash.hexdigest()[:32]
     config = {"enable_gpu": False}
     
@@ -350,7 +345,6 @@ def calculate_ssimulacra2_cached(
     
     return result
 
-
 def integrate_validation_cache_with_metrics() -> None:
     """
     Monkey-patch the metrics module to use cached versions.
@@ -364,6 +358,7 @@ def integrate_validation_cache_with_metrics() -> None:
     
     try:
         import sys
+
         from .. import metrics
         
         # Store original functions
@@ -387,9 +382,3 @@ def integrate_validation_cache_with_metrics() -> None:
         
     except Exception as e:
         logger.warning(f"Failed to integrate ValidationCache: {e}")
-
-
-# Missing imports that need to be added at the top
-import hashlib
-import json
-import time

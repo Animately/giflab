@@ -1,17 +1,17 @@
 """Integration tests for frame sampling with metrics calculation."""
 
-import pytest
-import numpy as np
 import time
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import numpy as np
+import pytest
+from giflab.config import DEFAULT_METRICS_CONFIG, FRAME_SAMPLING
 from giflab.sampling.metrics_integration import (
-    calculate_metrics_with_sampling,
     apply_sampling_to_frames,
+    calculate_metrics_with_sampling,
     estimate_sampling_speedup,
 )
-from giflab.config import DEFAULT_METRICS_CONFIG, FRAME_SAMPLING
 
 
 class TestMetricsSamplingIntegration:

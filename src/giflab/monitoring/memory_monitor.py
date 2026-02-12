@@ -13,7 +13,7 @@ Key Components:
 Architecture Overview:
     The memory monitoring system uses a three-tier approach:
     1. Collection: SystemMemoryMonitor gathers real-time memory statistics
-    2. Analysis: MemoryPressureManager evaluates pressure using configurable policies  
+    2. Analysis: MemoryPressureManager evaluates pressure using configurable policies
     3. Action: Automatic cache eviction via registered callbacks in priority order
 
 Memory Pressure Levels:
@@ -113,8 +113,8 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Any, Protocol
 from enum import Enum
+from typing import Any, Optional, Protocol
 
 from ..lazy_imports import check_import_available
 
@@ -140,14 +140,12 @@ def _get_psutil():
     
     return _psutil if _psutil_available else None
 
-
 class MemoryPressureLevel(Enum):
     """Memory pressure severity levels."""
     NORMAL = "normal"        # < 70% usage
-    WARNING = "warning"      # 70-80% usage  
+    WARNING = "warning"      # 70-80% usage
     CRITICAL = "critical"    # 80-95% usage
     EMERGENCY = "emergency"  # > 95% usage
-
 
 @dataclass
 class MemoryStats:
@@ -161,8 +159,7 @@ class MemoryStats:
     pressure_level: MemoryPressureLevel
     timestamp: float
 
-
-@dataclass  
+@dataclass
 class CacheMemoryUsage:
     """Memory usage breakdown by cache type."""
     frame_cache_mb: float = 0.0
@@ -182,7 +179,6 @@ class EvictionPolicy(Protocol):
         """Calculate target memory to free via eviction."""
         ...
 
-
 class ConservativeEvictionPolicy:
     """Conservative eviction policy that maintains system stability."""
     
@@ -200,10 +196,9 @@ class ConservativeEvictionPolicy:
             # Critical: free 50% of cache memory
             return memory_stats.process_memory_mb * 0.3
         elif memory_stats.system_memory_percent >= self.warning_threshold:
-            # Warning: free 25% of cache memory  
+            # Warning: free 25% of cache memory
             return memory_stats.process_memory_mb * 0.15
         return 0.0
-
 
 class SystemMemoryMonitor:
     """Cross-platform system memory monitoring with pressure detection.
@@ -217,7 +212,7 @@ class SystemMemoryMonitor:
     
     Memory pressure levels are calculated based on system memory usage:
     - NORMAL: < 70% system memory used
-    - WARNING: 70-80% system memory used  
+    - WARNING: 70-80% system memory used
     - CRITICAL: 80-95% system memory used
     - EMERGENCY: > 95% system memory used
     
@@ -260,9 +255,9 @@ class SystemMemoryMonitor:
             
         self.update_interval = update_interval
         self._lock = threading.RLock()
-        self._current_stats: Optional[MemoryStats] = None
+        self._current_stats: MemoryStats | None = None
         self._monitoring_active = False
-        self._monitor_thread: Optional[threading.Thread] = None
+        self._monitor_thread: threading.Thread | None = None
         
         # Check psutil availability for cross-platform memory monitoring
         self._psutil = _get_psutil()
@@ -329,7 +324,7 @@ class SystemMemoryMonitor:
                 self._monitor_thread.join(timeout=1.0)
             logger.info("System memory monitoring stopped")
     
-    def get_current_stats(self) -> Optional[MemoryStats]:
+    def get_current_stats(self) -> MemoryStats | None:
         """Get the most recent memory statistics from background monitoring.
         
         Returns the latest MemoryStats collected by the background monitoring
@@ -368,7 +363,7 @@ class SystemMemoryMonitor:
         Returns:
             MemoryStats: Complete memory statistics including:
                 - Process memory usage (MB and percentage)
-                - System memory usage (MB and percentage) 
+                - System memory usage (MB and percentage)
                 - Available system memory (MB)
                 - Total system memory (MB)
                 - Memory pressure level (NORMAL/WARNING/CRITICAL/EMERGENCY)
@@ -462,7 +457,7 @@ class SystemMemoryMonitor:
         
         Thresholds are based on typical system behavior:
         - 70%: Early warning for proactive cache management
-        - 80%: Critical level where performance degrades  
+        - 80%: Critical level where performance degrades
         - 95%: Emergency level approaching system limits
         
         Args:
@@ -473,7 +468,7 @@ class SystemMemoryMonitor:
             MemoryPressureLevel: Appropriate pressure level:
                 - NORMAL: < 70% usage
                 - WARNING: 70-80% usage
-                - CRITICAL: 80-95% usage  
+                - CRITICAL: 80-95% usage
                 - EMERGENCY: > 95% usage
                 
         Example:
@@ -533,7 +528,6 @@ class SystemMemoryMonitor:
                 logger.error(f"Error in memory monitoring loop: {e}")
                 time.sleep(self.update_interval)  # Continue monitoring despite errors
 
-
 class CacheMemoryTracker:
     """Tracks memory usage across all GifLab cache systems with effectiveness monitoring.
     
@@ -557,21 +551,21 @@ class CacheMemoryTracker:
         - System-wide effectiveness reporting
     
     Attributes:
-        _cache_sizes (Dict[str, float]): Memory usage per cache type in MB.
+        _cache_sizes (dict[str, float]): Memory usage per cache type in MB.
         _effectiveness_monitor: Optional effectiveness monitoring integration.
         _effectiveness_enabled (bool): Whether effectiveness monitoring is active.
     
     Example:
         >>> tracker = CacheMemoryTracker()
-        >>> 
+        >>>
         >>> # Update cache sizes as caches grow/shrink
         >>> tracker.update_cache_size("frame_cache", 150.5)
         >>> tracker.update_cache_size("resize_cache", 75.2)
-        >>> 
+        >>>
         >>> # Get total usage for memory pressure management
         >>> usage = tracker.get_total_cache_usage()
         >>> print(f"Total cache memory: {usage.total_cache_mb:.1f}MB")
-        >>> 
+        >>>
         >>> # Record cache operations for effectiveness analysis
         >>> tracker.record_cache_operation("frame_cache", "hit", "video_123_frame_5")
         >>> tracker.record_cache_operation("resize_cache", "miss", "resized_100x100_video_456")
@@ -601,7 +595,7 @@ class CacheMemoryTracker:
             >>> tracker.update_cache_size("frame_cache", 0.0)
         """
         self._lock = threading.RLock()
-        self._cache_sizes: Dict[str, float] = {}
+        self._cache_sizes: dict[str, float] = {}
         
         # Cache effectiveness monitoring integration (optional)
         self._effectiveness_monitor = None
@@ -628,13 +622,13 @@ class CacheMemoryTracker:
             
         Example:
             >>> tracker = CacheMemoryTracker()
-            >>> 
+            >>>
             >>> # Cache grew by adding new entries
             >>> tracker.update_cache_size("frame_cache", 120.5)
-            >>> 
+            >>>
             >>> # Cache shrunk due to eviction
             >>> tracker.update_cache_size("frame_cache", 95.2)
-            >>> 
+            >>>
             >>> # Cache was cleared
             >>> tracker.update_cache_size("frame_cache", 0.0)
         """
@@ -651,7 +645,7 @@ class CacheMemoryTracker:
         Returns:
             CacheMemoryUsage: Object containing:
                 - frame_cache_mb: Memory used by frame cache
-                - resize_cache_mb: Memory used by resize cache  
+                - resize_cache_mb: Memory used by resize cache
                 - validation_cache_mb: Memory used by validation cache
                 - total_cache_mb: Sum of all cache memory usage
                 
@@ -667,7 +661,7 @@ class CacheMemoryTracker:
             >>> print(f"Resize cache: {usage.resize_cache_mb:.1f}MB")
             >>> print(f"Validation cache: {usage.validation_cache_mb:.1f}MB")
             >>> print(f"Total: {usage.total_cache_mb:.1f}MB")
-            >>> 
+            >>>
             >>> # Check if total usage exceeds threshold
             >>> if usage.total_cache_mb > 500.0:
             >>>     print("Cache memory usage is high, consider eviction")
@@ -697,7 +691,7 @@ class CacheMemoryTracker:
             >>> tracker.update_cache_size("validation_cache", 50.0)
             >>> usage = tracker.get_total_cache_usage()
             >>> print(usage.validation_cache_mb)  # 50.0
-            >>> 
+            >>>
             >>> tracker.reset_cache_size("validation_cache")
             >>> usage = tracker.get_total_cache_usage()
             >>> print(usage.validation_cache_mb)  # 0.0
@@ -724,7 +718,10 @@ class CacheMemoryTracker:
             - DEBUG: Success/failure of effectiveness monitoring initialization
         """
         try:
-            from .cache_effectiveness import get_cache_effectiveness_monitor, is_cache_effectiveness_monitoring_enabled
+            from .cache_effectiveness import (
+                get_cache_effectiveness_monitor,
+                is_cache_effectiveness_monitoring_enabled,
+            )
             if is_cache_effectiveness_monitoring_enabled():
                 self._effectiveness_monitor = get_cache_effectiveness_monitor()
                 self._effectiveness_enabled = True
@@ -732,8 +729,8 @@ class CacheMemoryTracker:
         except ImportError:
             logger.debug("Cache effectiveness monitoring not available")
     
-    def record_cache_operation(self, 
-                              cache_type: str, 
+    def record_cache_operation(self,
+                              cache_type: str,
                               operation: str,
                               key: str,
                               data_size_mb: float = 0.0,
@@ -748,10 +745,10 @@ class CacheMemoryTracker:
         Fails gracefully when effectiveness monitoring is unavailable.
         
         Args:
-            cache_type (str): Type of cache where operation occurred.
-            operation (str): Type of operation performed. Valid values:
+            cache_type (str): type of cache where operation occurred.
+            operation (str): type of operation performed. Valid values:
                 - "hit": Successful cache lookup
-                - "miss": Failed cache lookup  
+                - "miss": Failed cache lookup
                 - "put": Data stored in cache
                 - "evict": Data removed due to memory pressure
                 - "expire": Data removed due to TTL expiration
@@ -773,21 +770,21 @@ class CacheMemoryTracker:
             >>> # Record successful cache hit
             >>> tracker.record_cache_operation(
             ...     cache_type="frame_cache",
-            ...     operation="hit", 
+            ...     operation="hit",
             ...     key="video_123_frame_10",
             ...     processing_time_ms=0.5
             ... )
-            >>> 
+            >>>
             >>> # Record cache miss with subsequent put
             >>> tracker.record_cache_operation("resize_cache", "miss", "100x100_video_456")
             >>> tracker.record_cache_operation(
             ...     cache_type="resize_cache",
             ...     operation="put",
-            ...     key="100x100_video_456", 
+            ...     key="100x100_video_456",
             ...     data_size_mb=2.5,
             ...     processing_time_ms=15.2
             ... )
-            >>> 
+            >>>
             >>> # Record memory pressure eviction
             >>> tracker.record_cache_operation(
             ...     cache_type="frame_cache",
@@ -833,7 +830,7 @@ class CacheMemoryTracker:
         except Exception as e:
             logger.debug(f"Failed to record cache operation for effectiveness monitoring: {e}")
     
-    def get_cache_effectiveness_stats(self, cache_type: str) -> Optional[Any]:
+    def get_cache_effectiveness_stats(self, cache_type: str) -> Any | None:
         """Get effectiveness statistics for a specific cache type.
         
         Retrieves detailed effectiveness statistics for the specified cache
@@ -865,7 +862,7 @@ class CacheMemoryTracker:
             logger.debug(f"Failed to get cache effectiveness stats: {e}")
             return None
     
-    def get_system_effectiveness_summary(self) -> Dict[str, Any]:
+    def get_system_effectiveness_summary(self) -> dict[str, Any]:
         """Get system-wide cache effectiveness summary.
         
         Retrieves a comprehensive summary of cache effectiveness across all
@@ -873,7 +870,7 @@ class CacheMemoryTracker:
         recommendations for optimization.
         
         Returns:
-            Dict[str, Any]: Summary dictionary containing:
+            dict[str, Any]: Summary dictionary containing:
                 - When effectiveness monitoring enabled: comprehensive stats
                 - When effectiveness monitoring disabled: {"effectiveness_monitoring": "disabled"}
                 - On error: {"error": "error_description"}
@@ -906,7 +903,6 @@ class CacheMemoryTracker:
             logger.debug(f"Failed to get system effectiveness summary: {e}")
             return {"error": str(e)}
 
-
 class MemoryPressureManager:
     """Manages memory pressure detection and automatic cache eviction.
     
@@ -922,7 +918,7 @@ class MemoryPressureManager:
         2. Calculate target memory to free based on pressure level
         3. Execute eviction callbacks in priority order:
            - validation_cache (highest priority - clear first)
-           - resize_cache (medium priority) 
+           - resize_cache (medium priority)
            - frame_cache (lowest priority - most valuable data)
         4. Record eviction events for effectiveness monitoring
     
@@ -935,11 +931,11 @@ class MemoryPressureManager:
         >>> monitor = SystemMemoryMonitor()
         >>> tracker = CacheMemoryTracker()
         >>> manager = MemoryPressureManager(monitor, tracker)
-        >>> 
+        >>>
         >>> # Register cache eviction callbacks
         >>> manager.register_eviction_callback("frame_cache", frame_cache.evict)
         >>> manager.register_eviction_callback("resize_cache", resize_cache.clear)
-        >>> 
+        >>>
         >>> # Check and handle memory pressure
         >>> should_evict, target_mb = manager.check_memory_pressure()
         >>> if should_evict:
@@ -955,10 +951,10 @@ class MemoryPressureManager:
         infrastructure. Works with any cache that can provide eviction callbacks.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  system_monitor: SystemMemoryMonitor,
                  cache_tracker: CacheMemoryTracker,
-                 eviction_policy: Optional[EvictionPolicy] = None):
+                 eviction_policy: EvictionPolicy | None = None):
         """Initialize the memory pressure manager.
         
         Args:
@@ -978,7 +974,7 @@ class MemoryPressureManager:
         self.system_monitor = system_monitor
         self.cache_tracker = cache_tracker
         self.eviction_policy = eviction_policy or ConservativeEvictionPolicy()
-        self._eviction_callbacks: Dict[str, Any] = {}
+        self._eviction_callbacks: dict[str, Any] = {}
         self._lock = threading.RLock()
     
     def register_eviction_callback(self, cache_type: str, callback) -> None:
@@ -1005,7 +1001,7 @@ class MemoryPressureManager:
             ...     freed = 0.0
             ...     # Evict cache entries until target_mb freed
             ...     return freed
-            >>> 
+            >>>
             >>> manager.register_eviction_callback("frame_cache", frame_cache_evict)
             
         Note:
@@ -1015,7 +1011,7 @@ class MemoryPressureManager:
         with self._lock:
             self._eviction_callbacks[cache_type] = callback
     
-    def check_memory_pressure(self) -> Tuple[bool, Optional[float]]:
+    def check_memory_pressure(self) -> tuple[bool, float | None]:
         """Check if current memory usage requires cache eviction.
         
         Evaluates current system memory usage and cache memory consumption
@@ -1027,7 +1023,7 @@ class MemoryPressureManager:
         adaptive, etc.).
         
         Returns:
-            Tuple[bool, Optional[float]]: A tuple containing:
+            tuple[bool, Optional[float]]: A tuple containing:
                 - should_evict (bool): True if eviction should be performed
                 - target_mb_to_free (Optional[float]): Amount of memory to free
                   in MB, or None if no eviction needed
@@ -1080,7 +1076,7 @@ class MemoryPressureManager:
         
         Eviction Priority Order (high to low priority):
         1. validation_cache - Fast to rebuild, clears quickly
-        2. resize_cache - Medium cost to rebuild  
+        2. resize_cache - Medium cost to rebuild
         3. frame_cache - Expensive to rebuild, evict last
         
         Records eviction events in the cache tracker for effectiveness monitoring
@@ -1115,13 +1111,13 @@ class MemoryPressureManager:
             >>>     freed_mb = manager.execute_eviction(target_mb)
             >>>     efficiency = (freed_mb / target_mb) * 100
             >>>     print(f"Eviction efficiency: {efficiency:.1f}%")
-            >>>     
+            >>>
             >>>     if freed_mb < target_mb * 0.8:  # Less than 80% efficiency
             >>>         print("Warning: Eviction target not fully met")
                 
         Logging:
             - INFO: Successful eviction from each cache type
-            - ERROR: Failed eviction callbacks  
+            - ERROR: Failed eviction callbacks
             - Records detailed eviction events for monitoring
         """
         freed_mb = 0.0
@@ -1162,13 +1158,11 @@ class MemoryPressureManager:
         
         return freed_mb
 
-
 # Global instances for singleton access
-_system_monitor: Optional[SystemMemoryMonitor] = None
-_cache_tracker: Optional[CacheMemoryTracker] = None  
-_pressure_manager: Optional[MemoryPressureManager] = None
+_system_monitor: SystemMemoryMonitor | None = None
+_cache_tracker: CacheMemoryTracker | None = None
+_pressure_manager: MemoryPressureManager | None = None
 _monitor_lock = threading.RLock()
-
 
 def get_system_memory_monitor() -> SystemMemoryMonitor:
     """Get singleton system memory monitor."""
@@ -1178,15 +1172,13 @@ def get_system_memory_monitor() -> SystemMemoryMonitor:
             _system_monitor = SystemMemoryMonitor()
         return _system_monitor
 
-
 def get_cache_memory_tracker() -> CacheMemoryTracker:
-    """Get singleton cache memory tracker.""" 
+    """Get singleton cache memory tracker."""
     global _cache_tracker
     with _monitor_lock:
         if _cache_tracker is None:
             _cache_tracker = CacheMemoryTracker()
         return _cache_tracker
-
 
 def get_memory_pressure_manager() -> MemoryPressureManager:
     """Get singleton memory pressure manager."""
@@ -1198,19 +1190,16 @@ def get_memory_pressure_manager() -> MemoryPressureManager:
             _pressure_manager = MemoryPressureManager(system_monitor, cache_tracker)
         return _pressure_manager
 
-
 def start_memory_monitoring() -> None:
     """Start system-wide memory monitoring."""
     monitor = get_system_memory_monitor()
     monitor.start_monitoring()
-
 
 def stop_memory_monitoring() -> None:
     """Stop system-wide memory monitoring."""
     global _system_monitor
     if _system_monitor:
         _system_monitor.stop_monitoring()
-
 
 def is_memory_monitoring_available() -> bool:
     """Check if memory monitoring is available (requires psutil)."""

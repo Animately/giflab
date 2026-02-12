@@ -11,7 +11,6 @@ import time
 import cv2
 import numpy as np
 import pytest
-
 from giflab.caching.resized_frame_cache import ResizedFrameCache
 
 pytestmark = [pytest.mark.performance, pytest.mark.nightly]
@@ -53,7 +52,7 @@ class TestCachePerformance:
         # Create large frames that will exceed 1MB limit
         # Each 500x500x3 resized to 400x400x3 = 480000 bytes (~0.46MB)
         # 3 frames = ~1.4MB > 1MB limit
-        for i in range(5):
+        for _i in range(5):
             frame = np.random.randint(0, 255, (500, 500, 3), dtype=np.uint8)
             cache.get(frame, (400, 400), cv2.INTER_AREA)
 

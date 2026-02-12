@@ -16,15 +16,16 @@ def memory_tracker():
     tracemalloc.start()
     snapshot_before = tracemalloc.take_snapshot()
     yield {"before": snapshot_before}
-    snapshot_after = tracemalloc.take_snapshot()
+    tracemalloc.take_snapshot()
     tracemalloc.stop()
 
 
 @pytest.fixture
 def process_memory():
     """Get current process memory usage via psutil."""
-    import psutil
     import os
+
+    import psutil
 
     process = psutil.Process(os.getpid())
 

@@ -2,25 +2,24 @@
 Alerting rules and threshold monitoring for GifLab optimization systems.
 """
 
+import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
-import logging
+from typing import Any, Optional
 
-from .metrics_collector import get_metrics_collector, MetricSummary, MetricType
 from ..config import MONITORING
+from .metrics_collector import MetricSummary, MetricType, get_metrics_collector
 
 logger = logging.getLogger(__name__)
-
 
 class AlertLevel(Enum):
     """Alert severity levels."""
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
-
 
 @dataclass
 class Alert:
@@ -32,7 +31,7 @@ class Alert:
     value: float
     threshold: float
     timestamp: float = field(default_factory=time.time)
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     
     def __str__(self) -> str:
         """String representation of alert."""
@@ -42,21 +41,20 @@ class Alert:
             f"{self.message} (value={self.value:.2f}, threshold={self.threshold:.2f})"
         )
 
-
 @dataclass
 class AlertRule:
     """Definition of an alert rule."""
     name: str
     metric_pattern: str
     condition: Callable[[float], bool]
-    warning_threshold: Optional[float] = None
-    critical_threshold: Optional[float] = None
+    warning_threshold: float | None = None
+    critical_threshold: float | None = None
     message_template: str = "{metric} exceeded threshold"
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     window_seconds: int = 300
     min_occurrences: int = 1
     
-    def evaluate(self, value: float) -> Optional[Alert]:
+    def evaluate(self, value: float) -> Alert | None:
         """Evaluate rule against a value and return alert if triggered."""
         if self.critical_threshold is not None and value >= self.critical_threshold:
             return Alert(
@@ -88,7 +86,6 @@ class AlertRule:
             )
         return None
 
-
 class AlertManager:
     """
     Manages alert rules and evaluates metrics against thresholds.
@@ -96,9 +93,9 @@ class AlertManager:
     
     def __init__(self):
         """Initialize alert manager with default rules."""
-        self.rules: List[AlertRule] = []
-        self.alerts: List[Alert] = []
-        self.alert_history: List[Alert] = []
+        self.rules: list[AlertRule] = []
+        self.alerts: list[Alert] = []
+        self.alert_history: list[Alert] = []
         self.max_history = 1000
         
         # Load default rules from config
@@ -171,7 +168,7 @@ class AlertManager:
         self,
         window_seconds: int = 300,
         clear_existing: bool = True,
-    ) -> List[Alert]:
+    ) -> list[Alert]:
         """
         Evaluate all rules against current metrics.
         
@@ -180,7 +177,7 @@ class AlertManager:
             clear_existing: Whether to clear existing alerts
         
         Returns:
-            List of triggered alerts
+            list of triggered alerts
         """
         if clear_existing:
             self.alerts.clear()
@@ -232,7 +229,7 @@ class AlertManager:
         
         return self.alerts
     
-    def get_active_alerts(self, level: Optional[AlertLevel] = None) -> List[Alert]:
+    def get_active_alerts(self, level: AlertLevel | None = None) -> list[Alert]:
         """
         Get currently active alerts.
         
@@ -240,7 +237,7 @@ class AlertManager:
             level: Filter by alert level
         
         Returns:
-            List of active alerts
+            list of active alerts
         """
         if level is None:
             return self.alerts.copy()
@@ -249,8 +246,8 @@ class AlertManager:
     def get_alert_history(
         self,
         hours: float = 24,
-        level: Optional[AlertLevel] = None,
-    ) -> List[Alert]:
+        level: AlertLevel | None = None,
+    ) -> list[Alert]:
         """
         Get alert history.
         
@@ -259,7 +256,7 @@ class AlertManager:
             level: Filter by alert level
         
         Returns:
-            List of historical alerts
+            list of historical alerts
         """
         cutoff = time.time() - (hours * 3600)
         history = [a for a in self.alert_history if a.timestamp >= cutoff]
@@ -273,7 +270,7 @@ class AlertManager:
         """Clear all active alerts."""
         self.alerts.clear()
     
-    def get_alert_summary(self) -> Dict[str, Any]:
+    def get_alert_summary(self) -> dict[str, Any]:
         """
         Get summary of alert status.
         
@@ -308,7 +305,6 @@ class AlertManager:
             "rules_count": len(self.rules),
         }
 
-
 class AlertNotifier:
     """
     Handles alert notifications to various channels.
@@ -316,7 +312,7 @@ class AlertNotifier:
     
     def __init__(self):
         """Initialize notifier."""
-        self.handlers: Dict[str, Callable[[Alert], None]] = {}
+        self.handlers: dict[str, Callable[[Alert], None]] = {}
         
         # Register default handlers
         self.register_handler("log", self._log_handler)
@@ -332,13 +328,13 @@ class AlertNotifier:
         """
         self.handlers[name] = handler
     
-    def notify(self, alert: Alert, handlers: Optional[List[str]] = None):
+    def notify(self, alert: Alert, handlers: list[str] | None = None):
         """
         Send alert notification.
         
         Args:
             alert: Alert to send
-            handlers: List of handler names to use (None = all)
+            handlers: list of handler names to use (None = all)
         """
         if handlers is None:
             handlers = list(self.handlers.keys())
@@ -373,11 +369,9 @@ class AlertNotifier:
         color = color_map[alert.level]
         console.print(f"[{color}]{alert}[/{color}]")
 
-
 # Global instances
-_alert_manager: Optional[AlertManager] = None
-_alert_notifier: Optional[AlertNotifier] = None
-
+_alert_manager: AlertManager | None = None
+_alert_notifier: AlertNotifier | None = None
 
 def get_alert_manager() -> AlertManager:
     """Get singleton alert manager instance."""
@@ -386,7 +380,6 @@ def get_alert_manager() -> AlertManager:
         _alert_manager = AlertManager()
     return _alert_manager
 
-
 def get_alert_notifier() -> AlertNotifier:
     """Get singleton alert notifier instance."""
     global _alert_notifier
@@ -394,12 +387,11 @@ def get_alert_notifier() -> AlertNotifier:
         _alert_notifier = AlertNotifier()
     return _alert_notifier
 
-
 def check_alerts(
     window_seconds: int = 300,
     notify: bool = True,
-    handlers: Optional[List[str]] = None,
-) -> List[Alert]:
+    handlers: list[str] | None = None,
+) -> list[Alert]:
     """
     Convenience function to check for alerts and optionally notify.
     
@@ -409,7 +401,7 @@ def check_alerts(
         handlers: Notification handlers to use
     
     Returns:
-        List of triggered alerts
+        list of triggered alerts
     """
     manager = get_alert_manager()
     notifier = get_alert_notifier()

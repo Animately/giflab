@@ -10,7 +10,6 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
 import pytest
@@ -29,7 +28,6 @@ class GoldenTestCase:
     tolerance: dict[str, float]  # Acceptable tolerance for each metric
     frames_original: list[np.ndarray] = None
     frames_compressed: list[np.ndarray] = None
-
 
 class TestRegressionPrevention:
     """Regression tests to maintain detection accuracy."""
@@ -545,7 +543,7 @@ class TestRegressionPrevention:
             # Add colored patches
             patch_size = size[0] // 2
             for i, (orig_color, shift_color) in enumerate(
-                zip(brand_colors, shifted_colors)
+                zip(brand_colors, shifted_colors, strict=True)
             ):
                 row = i // 2
                 col = i % 2
@@ -563,7 +561,6 @@ class TestRegressionPrevention:
 
         return original_frames, shifted_frames
 
-
 # Custom pytest configuration for golden test updates
 def pytest_addoption(parser):
     """Add custom pytest options."""
@@ -574,10 +571,8 @@ def pytest_addoption(parser):
         help="Update golden test results",
     )
 
-
 @pytest.fixture
 def current_test_config():
     """Provide access to current test configuration."""
     return pytest
-
 

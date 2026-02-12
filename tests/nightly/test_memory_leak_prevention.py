@@ -17,13 +17,16 @@ import psutil
 import pytest
 from giflab.config import MetricsConfig
 from giflab.deep_perceptual_metrics import cleanup_global_validator
-from giflab.metrics import calculate_comprehensive_metrics_from_frames, cleanup_all_validators
-from giflab.temporal_artifacts import cleanup_global_temporal_detector
+from giflab.metrics import (
+    calculate_comprehensive_metrics_from_frames,
+    cleanup_all_validators,
+)
 from giflab.model_cache import (
     LPIPSModelCache,
     cleanup_model_cache,
     get_model_cache_info,
 )
+from giflab.temporal_artifacts import cleanup_global_temporal_detector
 from PIL import Image
 
 
@@ -128,7 +131,7 @@ class TestMemoryLeakPrevention:
         cached_memory = process.memory_info().rss
         cached_increase = (cached_memory - initial_memory) / (1024 * 1024)
         
-        # Memory increase with caching should be < 500MB 
+        # Memory increase with caching should be < 500MB
         # (LPIPS AlexNet model is ~475MB, so this accounts for the model + overhead)
         assert cached_increase < 500, f"Cached memory increased by {cached_increase:.1f}MB"
 

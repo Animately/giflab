@@ -2,18 +2,20 @@
 Core metrics collection infrastructure with pluggable backends.
 """
 
-import time
+import logging
+import statistics
 import threading
+import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Union
-import statistics
-import logging
+from typing import TYPE_CHECKING, Any, Optional, Union
+
+if TYPE_CHECKING:
+    from .backends import MetricsBackend
 
 logger = logging.getLogger(__name__)
-
 
 class MetricType(Enum):
     """Types of metrics that can be collected."""
@@ -22,7 +24,6 @@ class MetricType(Enum):
     HISTOGRAM = "histogram"  # Distribution of values
     TIMER = "timer"         # Duration measurements
 
-
 @dataclass
 class MetricPoint:
     """Single metric data point."""
@@ -30,8 +31,7 @@ class MetricPoint:
     value: float
     metric_type: MetricType
     timestamp: float
-    tags: Dict[str, str] = field(default_factory=dict)
-
+    tags: dict[str, str] = field(default_factory=dict)
 
 @dataclass
 class MetricSummary:
@@ -47,10 +47,9 @@ class MetricSummary:
     p95: float
     p99: float
     stddev: float
-    tags: Dict[str, str] = field(default_factory=dict)
+    tags: dict[str, str] = field(default_factory=dict)
     window_start: float = field(default_factory=time.time)
     window_end: float = field(default_factory=time.time)
-
 
 class RingBuffer:
     """Thread-safe ring buffer for storing recent metrics."""
@@ -65,12 +64,12 @@ class RingBuffer:
         with self.lock:
             self.buffer.append(item)
     
-    def get_all(self) -> List[MetricPoint]:
+    def get_all(self) -> list[MetricPoint]:
         """Get all items in buffer."""
         with self.lock:
             return list(self.buffer)
     
-    def get_recent(self, seconds: float) -> List[MetricPoint]:
+    def get_recent(self, seconds: float) -> list[MetricPoint]:
         """Get items from last N seconds."""
         cutoff = time.time() - seconds
         with self.lock:
@@ -80,7 +79,6 @@ class RingBuffer:
         """Clear all items."""
         with self.lock:
             self.buffer.clear()
-
 
 class MetricsAggregator:
     """Aggregates metrics for efficient batch processing."""
@@ -94,25 +92,25 @@ class MetricsAggregator:
         self.lock = threading.RLock()
         self.last_flush = time.time()
     
-    def add_counter(self, name: str, value: float, tags: Dict[str, str] = None):
+    def add_counter(self, name: str, value: float, tags: dict[str, str] = None):
         """Increment counter."""
         key = self._make_key(name, tags)
         with self.lock:
             self.counters[key] += value
     
-    def set_gauge(self, name: str, value: float, tags: Dict[str, str] = None):
+    def set_gauge(self, name: str, value: float, tags: dict[str, str] = None):
         """Set gauge value."""
         key = self._make_key(name, tags)
         with self.lock:
             self.gauges[key] = value
     
-    def add_histogram(self, name: str, value: float, tags: Dict[str, str] = None):
+    def add_histogram(self, name: str, value: float, tags: dict[str, str] = None):
         """Add value to histogram."""
         key = self._make_key(name, tags)
         with self.lock:
             self.histograms[key].append(value)
     
-    def add_timer(self, name: str, duration: float, tags: Dict[str, str] = None):
+    def add_timer(self, name: str, duration: float, tags: dict[str, str] = None):
         """Add timing measurement."""
         key = self._make_key(name, tags)
         with self.lock:
@@ -122,7 +120,7 @@ class MetricsAggregator:
         """Check if aggregator should be flushed."""
         return time.time() - self.last_flush >= self.flush_interval
     
-    def flush(self) -> List[MetricPoint]:
+    def flush(self) -> list[MetricPoint]:
         """Flush all aggregated metrics."""
         with self.lock:
             points = []
@@ -139,7 +137,7 @@ class MetricsAggregator:
                     tags=tags
                 ))
             
-            # Flush gauges  
+            # Flush gauges
             for key, value in self.gauges.items():
                 name, tags = self._parse_key(key)
                 points.append(MetricPoint(
@@ -186,14 +184,14 @@ class MetricsAggregator:
             
             return points
     
-    def _make_key(self, name: str, tags: Optional[Dict[str, str]]) -> str:
+    def _make_key(self, name: str, tags: dict[str, str] | None) -> str:
         """Create unique key from name and tags."""
         if not tags:
             return name
         tag_str = ",".join(f"{k}={v}" for k, v in sorted(tags.items()))
         return f"{name}|{tag_str}"
     
-    def _parse_key(self, key: str) -> Tuple[str, Dict[str, str]]:
+    def _parse_key(self, key: str) -> tuple[str, dict[str, str]]:
         """Parse key back into name and tags."""
         if "|" not in key:
             return key, {}
@@ -205,7 +203,7 @@ class MetricsAggregator:
                 tags[k] = v
         return name, tags
     
-    def _calculate_percentiles(self, values: List[float]) -> Dict[str, float]:
+    def _calculate_percentiles(self, values: list[float]) -> dict[str, float]:
         """Calculate percentiles for a list of values."""
         if not values:
             return {}
@@ -221,7 +219,7 @@ class MetricsAggregator:
             "count": len(values),
         }
     
-    def _percentile(self, sorted_values: List[float], p: float) -> float:
+    def _percentile(self, sorted_values: list[float], p: float) -> float:
         """Calculate percentile from sorted values."""
         if not sorted_values:
             return 0.0
@@ -229,7 +227,6 @@ class MetricsAggregator:
         f = int(k)
         c = f + 1 if f < len(sorted_values) - 1 else f
         return sorted_values[f] + (k - f) * (sorted_values[c] - sorted_values[f])
-
 
 class MetricsCollector:
     """
@@ -275,7 +272,7 @@ class MetricsCollector:
         self._flush_thread = threading.Thread(target=self._flush_loop, daemon=True)
         self._flush_thread.start()
     
-    def record_counter(self, name: str, value: float = 1.0, tags: Dict[str, str] = None):
+    def record_counter(self, name: str, value: float = 1.0, tags: dict[str, str] = None):
         """Record counter increment."""
         if not self._should_sample():
             return
@@ -284,7 +281,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
     
-    def record_gauge(self, name: str, value: float, tags: Dict[str, str] = None):
+    def record_gauge(self, name: str, value: float, tags: dict[str, str] = None):
         """Record gauge value."""
         if not self._should_sample():
             return
@@ -293,7 +290,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
     
-    def record_histogram(self, name: str, value: float, tags: Dict[str, str] = None):
+    def record_histogram(self, name: str, value: float, tags: dict[str, str] = None):
         """Record histogram value."""
         if not self._should_sample():
             return
@@ -302,7 +299,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
     
-    def record_timer(self, name: str, duration: float, tags: Dict[str, str] = None):
+    def record_timer(self, name: str, duration: float, tags: dict[str, str] = None):
         """Record timer duration in seconds."""
         if not self._should_sample():
             return
@@ -330,8 +327,8 @@ class MetricsCollector:
         name: str = None,
         metric_type: MetricType = None,
         window_seconds: float = 300,
-        tags: Dict[str, str] = None,
-    ) -> List[MetricSummary]:
+        tags: dict[str, str] = None,
+    ) -> list[MetricSummary]:
         """
         Get summary statistics for metrics.
         
@@ -342,7 +339,7 @@ class MetricsCollector:
             tags: Filter by tags
         
         Returns:
-            List of metric summaries
+            list of metric summaries
         """
         # Get recent points from buffer
         points = self.buffer.get_recent(window_seconds)
@@ -394,7 +391,7 @@ class MetricsCollector:
         start_time: float = None,
         end_time: float = None,
         **filters
-    ) -> List[MetricPoint]:
+    ) -> list[MetricPoint]:
         """Get raw metric points from backend."""
         return self.backend.query(start_time, end_time, **filters)
     
@@ -426,11 +423,9 @@ class MetricsCollector:
             if self.aggregator.should_flush():
                 self.flush()
 
-
 # Global singleton instance
-_metrics_collector: Optional[MetricsCollector] = None
+_metrics_collector: MetricsCollector | None = None
 _lock = threading.Lock()
-
 
 def get_metrics_collector() -> MetricsCollector:
     """Get singleton metrics collector instance."""
@@ -450,7 +445,6 @@ def get_metrics_collector() -> MetricsCollector:
                     sampling_rate=MONITORING.get("sampling_rate", 1.0),
                 )
     return _metrics_collector
-
 
 def reset_metrics_collector():
     """Reset singleton metrics collector (mainly for testing)."""

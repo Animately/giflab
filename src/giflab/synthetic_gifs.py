@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -23,7 +23,6 @@ class SyntheticGifSpec:
     size: tuple[int, int]
     content_type: str
     description: str
-
 
 class SyntheticGifGenerator:
     """Generator for synthetic test GIFs with diverse characteristics.
@@ -295,7 +294,7 @@ class SyntheticGifGenerator:
             use_targeted_set: If True, generate only the targeted subset
 
         Returns:
-            List of paths to generated GIF files
+            list of paths to generated GIF files
         """
         specs = self.get_targeted_specs() if use_targeted_set else self.synthetic_specs
 
@@ -356,7 +355,6 @@ class SyntheticGifGenerator:
                 loop=0,
             )
 
-
 class SyntheticFrameGenerator:
     """Generator for individual synthetic frames based on content type."""
 
@@ -366,7 +364,7 @@ class SyntheticFrameGenerator:
         """Create a frame based on content type.
 
         Args:
-            content_type: Type of content to generate
+            content_type: type of content to generate
             size: Frame dimensions (width, height)
             frame: Current frame index
             total_frames: Total number of frames
@@ -950,7 +948,7 @@ class SyntheticFrameGenerator:
         )
         return img
 
-def generate_gradient_frames(num_frames: int, width: int, height: int) -> List:
+def generate_gradient_frames(num_frames: int, width: int, height: int) -> list:
     """
     Compatibility function for existing benchmarking code.
     
@@ -962,7 +960,7 @@ def generate_gradient_frames(num_frames: int, width: int, height: int) -> List:
         height: Frame height in pixels
         
     Returns:
-        List of numpy arrays representing frames
+        list of numpy arrays representing frames
     """
     generator = SyntheticFrameGenerator()
     frames = []

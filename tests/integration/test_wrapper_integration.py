@@ -7,21 +7,24 @@ import pytest
 from giflab.meta import extract_gif_metadata
 from giflab.tool_wrappers import (  # Dithering-specific wrappers; All Bayer scale variations
     FFmpegColorReducer,
+    FFmpegColorReducerAtkinson,
     FFmpegColorReducerBayerScale0,
     FFmpegColorReducerBayerScale1,
     FFmpegColorReducerBayerScale2,
     FFmpegColorReducerBayerScale3,
     FFmpegColorReducerBayerScale4,
     FFmpegColorReducerBayerScale5,
+    FFmpegColorReducerBurkes,
     FFmpegColorReducerFloydSteinberg,
-    FFmpegColorReducerNone,
+    FFmpegColorReducerHeckbert,
     FFmpegColorReducerSierra2,
+    FFmpegColorReducerSierra2_4a,
+    FFmpegColorReducerSierra3,
     FFmpegFrameReducer,
     FFmpegLossyCompressor,
     GifskiLossyCompressor,
     ImageMagickColorReducer,
     ImageMagickColorReducerFloydSteinberg,
-    ImageMagickColorReducerNone,
     ImageMagickColorReducerRiemersma,
     ImageMagickFrameReducer,
     ImageMagickLossyCompressor,
@@ -128,8 +131,8 @@ class TestImageMagickWrapperIntegration:
         with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
             output_path = Path(tmp.name)
 
-            # Test lossy compression with low quality
-            result = wrapper.apply(test_gif, output_path, params={"quality": 50})
+            # Test lossy compression (lossy_level 50 → quality 50 via inversion)
+            result = wrapper.apply(test_gif, output_path, params={"lossy_level": 50})
 
             # Validate metadata
             assert result["engine"] == "imagemagick"
@@ -221,7 +224,7 @@ class TestFFmpegWrapperIntegration:
             output_path = Path(tmp.name)
 
             result = wrapper.apply(
-                test_gif, output_path, params={"qv": 25, "fps": 12.0}
+                test_gif, output_path, params={"lossy_level": 50}
             )
 
             # Validate metadata
@@ -264,7 +267,7 @@ class TestGifskiWrapperIntegration:
         with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
             output_path = Path(tmp.name)
 
-            result = wrapper.apply(test_gif, output_path, params={"quality": 70})
+            result = wrapper.apply(test_gif, output_path, params={"lossy_level": 30})
 
             # Validate metadata
             assert result["engine"] == "gifski"
@@ -273,7 +276,7 @@ class TestGifskiWrapperIntegration:
             assert output_path.exists()
 
     def test_default_parameters(self, test_gif):
-        """Test gifski with default parameters."""
+        """Test gifski with lossy_level=0 (no compression)."""
         wrapper = GifskiLossyCompressor()
 
         if not wrapper.available():
@@ -282,8 +285,8 @@ class TestGifskiWrapperIntegration:
         with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
             output_path = Path(tmp.name)
 
-            # Should work with no params (uses defaults)
-            result = wrapper.apply(test_gif, output_path, params=None)
+            # lossy_level is required; 0 means best quality
+            result = wrapper.apply(test_gif, output_path, params={"lossy_level": 0})
 
             assert result["engine"] == "gifski"
             assert output_path.exists()
@@ -314,13 +317,8 @@ class TestCrossEngineConsistency:
             with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
                 output_path = Path(tmp.name)
 
-                # Use appropriate parameters for each wrapper
-                if isinstance(wrapper, ImageMagickLossyCompressor):
-                    params = {"quality": 75}
-                elif isinstance(wrapper, FFmpegLossyCompressor):
-                    params = {"qv": 25, "fps": 15.0}
-                else:  # GifskiLossyCompressor
-                    params = {"quality": 75}
+                # All lossy wrappers use the uniform lossy_level param
+                params = {"lossy_level": 50}
 
                 result = wrapper.apply(test_gif, output_path, params=params)
                 results.append(result)
@@ -414,28 +412,11 @@ class TestImageMagickDitheringWrappers:
             assert result["pipeline_variant"] == "imagemagick_dither_floydsteinberg"
             assert output_path.exists()
 
-    def test_none_wrapper(self, many_colors_gif):
-        """Test ImageMagick no-dithering wrapper (size priority baseline)."""
-        wrapper = ImageMagickColorReducerNone()
-
-        if not wrapper.available():
-            pytest.skip("ImageMagick not available")
-
-        with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
-            output_path = Path(tmp.name)
-
-            result = wrapper.apply(many_colors_gif, output_path, params={"colors": 16})
-
-            assert result["dithering_method"] == "None"
-            assert result["pipeline_variant"] == "imagemagick_dither_none"
-            assert output_path.exists()
-
     def test_wrapper_combine_group_consistency(self):
         """Test that all ImageMagick dithering wrappers have consistent COMBINE_GROUP."""
         wrappers = [
             ImageMagickColorReducerRiemersma(),
             ImageMagickColorReducerFloydSteinberg(),
-            ImageMagickColorReducerNone(),
         ]
 
         for wrapper in wrappers:
@@ -534,27 +515,16 @@ class TestFFmpegDitheringWrappers:
                 expected_variant = f"ffmpeg_dither_bayer_bayer_scale_{scale}"
                 assert result["pipeline_variant"] == expected_variant
 
-    def test_none_wrapper(self, many_colors_gif):
-        """Test FFmpeg no-dithering wrapper (size priority baseline)."""
-        wrapper = FFmpegColorReducerNone()
-
-        if not wrapper.available():
-            pytest.skip("FFmpeg not available")
-
-        with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
-            output_path = Path(tmp.name)
-
-            result = wrapper.apply(many_colors_gif, output_path, params={"colors": 16})
-
-            assert result["dithering_method"] == "none"
-            assert result["pipeline_variant"] == "ffmpeg_dither_none"
-            assert output_path.exists()
-
     def test_wrapper_combine_group_consistency(self):
         """Test that all FFmpeg dithering wrappers have consistent COMBINE_GROUP."""
         wrappers = [
             FFmpegColorReducerSierra2(),
+            FFmpegColorReducerSierra2_4a(),
+            FFmpegColorReducerSierra3(),
             FFmpegColorReducerFloydSteinberg(),
+            FFmpegColorReducerBurkes(),
+            FFmpegColorReducerAtkinson(),
+            FFmpegColorReducerHeckbert(),
             # All Bayer scale variations
             FFmpegColorReducerBayerScale0(),
             FFmpegColorReducerBayerScale1(),
@@ -562,7 +532,6 @@ class TestFFmpegDitheringWrappers:
             FFmpegColorReducerBayerScale3(),
             FFmpegColorReducerBayerScale4(),
             FFmpegColorReducerBayerScale5(),
-            FFmpegColorReducerNone(),
         ]
 
         for wrapper in wrappers:
@@ -614,9 +583,13 @@ class TestDitheringComparison:
         test_cases = [
             (ImageMagickColorReducerRiemersma, "riemersma"),
             (ImageMagickColorReducerFloydSteinberg, "floyd"),
-            (ImageMagickColorReducerNone, "none"),
             (FFmpegColorReducerSierra2, "sierra2"),
+            (FFmpegColorReducerSierra2_4a, "sierra2-4a"),
+            (FFmpegColorReducerSierra3, "sierra3"),
             (FFmpegColorReducerFloydSteinberg, "floyd"),
+            (FFmpegColorReducerBurkes, "burkes"),
+            (FFmpegColorReducerAtkinson, "atkinson"),
+            (FFmpegColorReducerHeckbert, "heckbert"),
             # All Bayer scale variations
             (FFmpegColorReducerBayerScale0, "bayer0"),
             (FFmpegColorReducerBayerScale1, "bayer1"),
@@ -624,7 +597,6 @@ class TestDitheringComparison:
             (FFmpegColorReducerBayerScale3, "bayer3"),
             (FFmpegColorReducerBayerScale4, "bayer4"),
             (FFmpegColorReducerBayerScale5, "bayer5"),
-            (FFmpegColorReducerNone, "none"),
         ]
 
         for wrapper_class, expected_name_part in test_cases:
@@ -636,13 +608,13 @@ class TestDitheringComparison:
         # 1. ImageMagick Riemersma - Best all-around performer ✅
         # 2. FFmpeg Floyd-Steinberg - Standard high-quality baseline ✅
         # 3. FFmpeg Sierra2 - Excellent quality/size balance ✅
-        # 4. ImageMagick None - Size priority baseline ✅
+        # 4. ImageMagick default (None dithering) - Size priority baseline ✅
 
         tier_1_wrappers = [
             ImageMagickColorReducerRiemersma,
             FFmpegColorReducerFloydSteinberg,
             FFmpegColorReducerSierra2,
-            ImageMagickColorReducerNone,
+            ImageMagickColorReducer,
         ]
 
         for wrapper_class in tier_1_wrappers:

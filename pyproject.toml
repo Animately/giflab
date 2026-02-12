@@ -5,7 +5,7 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 name = "giflab"
 version = "0.2.0"
-description = "GIF compression and analysis laboratory"
+description = "Training dataset generation for GIF compression curve prediction"
 authors = ["GifLab Team <team@giflab.example>"]
 readme = "README.md"
 packages = [{include = "giflab", from = "src"}]

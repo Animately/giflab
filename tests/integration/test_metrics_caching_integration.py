@@ -8,30 +8,32 @@ Both test suites verify caching correctness, performance improvements, concurren
 and configuration-driven cache behavior.
 """
 
+import tempfile
 import threading
 import time
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import cv2
+import giflab.metrics as metrics_module
 import numpy as np
 import pytest
-
-from giflab.caching.resized_frame_cache import get_resize_cache, resize_frame_cached
-from giflab.caching.validation_cache import ValidationCache, get_validation_cache, reset_validation_cache
 from giflab.caching.metrics_integration import (
+    calculate_gradient_color_cached,
+    calculate_lpips_cached,
     calculate_ms_ssim_cached,
     calculate_ssim_cached,
-    calculate_lpips_cached,
-    calculate_gradient_color_cached,
     calculate_ssimulacra2_cached,
     integrate_validation_cache_with_metrics,
 )
+from giflab.caching.resized_frame_cache import get_resize_cache, resize_frame_cached
+from giflab.caching.validation_cache import (
+    ValidationCache,
+    get_validation_cache,
+    reset_validation_cache,
+)
 from giflab.deep_perceptual_metrics import DeepPerceptualValidator
-import giflab.metrics as metrics_module
-from giflab.metrics import calculate_ms_ssim, _resize_if_needed
-
+from giflab.metrics import _resize_if_needed, calculate_ms_ssim
 
 # ---------------------------------------------------------------------------
 # ValidationCache + Metrics Integration Tests
@@ -52,7 +54,7 @@ class TestValidationCacheMetricsIntegration:
         """Create sample frame arrays for testing."""
         np.random.seed(42)
         frames = []
-        for i in range(5):
+        for _i in range(5):
             frame = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
             frames.append(frame)
         return frames
@@ -100,7 +102,7 @@ class TestValidationCacheMetricsIntegration:
                     assert mock_ms_ssim.call_count == 1  # No additional call
 
                     # Different parameters should trigger new calculation
-                    result3 = calculate_ms_ssim_cached(frame1, frame2, scales=3)
+                    calculate_ms_ssim_cached(frame1, frame2, scales=3)
                     assert mock_ms_ssim.call_count == 2
 
     def test_ssim_caching(self, sample_frames, cache_config):
@@ -238,16 +240,16 @@ class TestValidationCacheMetricsIntegration:
                 with patch("giflab.metrics.calculate_ms_ssim") as mock_ms_ssim:
                     mock_ms_ssim.return_value = 0.95
 
-                    result1 = calculate_ms_ssim_cached(frame1, frame2)
-                    result2 = calculate_ms_ssim_cached(frame1, frame2)
+                    calculate_ms_ssim_cached(frame1, frame2)
+                    calculate_ms_ssim_cached(frame1, frame2)
                     assert mock_ms_ssim.call_count == 2  # Called twice
 
                 # SSIM should cache
                 with patch("skimage.metrics.structural_similarity") as mock_ssim:
                     mock_ssim.return_value = 0.88
 
-                    result1 = calculate_ssim_cached(frame1, frame2)
-                    result2 = calculate_ssim_cached(frame1, frame2)
+                    calculate_ssim_cached(frame1, frame2)
+                    calculate_ssim_cached(frame1, frame2)
                     assert mock_ssim.call_count == 1  # Called once
 
     def test_frame_indices_in_caching(self, sample_frames, cache_config):
@@ -260,18 +262,18 @@ class TestValidationCacheMetricsIntegration:
                     mock_ms_ssim.return_value = 0.95
 
                     # Same frames but different indices should calculate separately
-                    result1 = calculate_ms_ssim_cached(
+                    calculate_ms_ssim_cached(
                         frame1, frame2, frame_indices=(0, 1)
                     )
                     assert mock_ms_ssim.call_count == 1
 
-                    result2 = calculate_ms_ssim_cached(
+                    calculate_ms_ssim_cached(
                         frame1, frame2, frame_indices=(5, 6)
                     )
                     assert mock_ms_ssim.call_count == 2  # New calculation
 
                     # Same indices should use cache
-                    result3 = calculate_ms_ssim_cached(
+                    calculate_ms_ssim_cached(
                         frame1, frame2, frame_indices=(0, 1)
                     )
                     assert mock_ms_ssim.call_count == 2  # No new calculation
@@ -328,7 +330,7 @@ class TestValidationCacheMetricsIntegration:
             with patch("giflab.config.VALIDATION_CACHE", config):
                 with patch("giflab.metrics.calculate_ms_ssim") as mock_ms_ssim:
                     mock_ms_ssim.return_value = 0.95
-                    result1 = calculate_ms_ssim_cached(frame1, frame2)
+                    calculate_ms_ssim_cached(frame1, frame2)
                     assert mock_ms_ssim.call_count == 1
 
         # Reset cache singleton to simulate new run
@@ -390,13 +392,13 @@ class TestValidationCacheMetricsIntegration:
                     mock_ms_ssim.return_value = 0.95
 
                     # First call
-                    result1 = calculate_ms_ssim_cached(
+                    calculate_ms_ssim_cached(
                         frame1, frame2, use_validation_cache=use_cache
                     )
                     assert mock_ms_ssim.call_count == 1
 
                     # Second call
-                    result2 = calculate_ms_ssim_cached(
+                    calculate_ms_ssim_cached(
                         frame1, frame2, use_validation_cache=use_cache
                     )
 
@@ -515,7 +517,7 @@ class TestResizeCacheIntegrationWithMetrics:
         cache.clear()
 
         # Calculate MS-SSIM with 4 scales
-        ms_ssim = calculate_ms_ssim(frame1, frame2, scales=4, use_cache=True)
+        calculate_ms_ssim(frame1, frame2, scales=4, use_cache=True)
 
         stats = cache.get_stats()
         # Should have cached multiple scales (256x256, 128x128, 64x64 for each frame)
@@ -544,7 +546,7 @@ class TestResizeCacheIntegrationWithMetrics:
         cache.clear()
 
         # First calculation - cache misses
-        metrics1 = validator.calculate_deep_perceptual_metrics(
+        validator.calculate_deep_perceptual_metrics(
             original_frames[:2], compressed_frames[:2]
         )
 
@@ -554,7 +556,7 @@ class TestResizeCacheIntegrationWithMetrics:
             pytest.skip("Cache not active in this test run (order-dependent)")
 
         # Second calculation with overlapping frames - should have cache hits
-        metrics2 = validator.calculate_deep_perceptual_metrics(
+        validator.calculate_deep_perceptual_metrics(
             original_frames[1:], compressed_frames[1:]
         )
 
@@ -577,7 +579,7 @@ class TestResizeCacheIntegrationWithMetrics:
         start = time.perf_counter()
         for _ in range(5):
             _resize_if_needed(frame1, frame2, use_cache=True)
-        cached_time = time.perf_counter() - start
+        time.perf_counter() - start
 
         # Verify cache is actually being used
         stats = cache.get_stats()
@@ -635,9 +637,9 @@ class TestResizeCacheIntegrationWithMetrics:
         cache = get_resize_cache()
         cache.clear()
 
-        result_area = resize_frame_cached(frame, target_size, cv2.INTER_AREA)
-        result_lanczos = resize_frame_cached(frame, target_size, cv2.INTER_LANCZOS4)
-        result_cubic = resize_frame_cached(frame, target_size, cv2.INTER_CUBIC)
+        resize_frame_cached(frame, target_size, cv2.INTER_AREA)
+        resize_frame_cached(frame, target_size, cv2.INTER_LANCZOS4)
+        resize_frame_cached(frame, target_size, cv2.INTER_CUBIC)
 
         stats = cache.get_stats()
         assert stats["entries"] == 3

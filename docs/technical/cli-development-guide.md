@@ -153,22 +153,14 @@ def test_cli_integration():
 
 ### Caching Behavior
 
-**⚠️ Default Behavior Change**: As of recent updates, caching is **disabled by default** in `GifLabRunner` to ensure predictable behavior during development.
-
-**When developing CLI commands that use GifLabRunner**:
+The production pipeline uses `PredictionRunner` with SQLite storage. The CLI commands (`run`, `train`, `predict`, `export`, `stats`) delegate to `PredictionRunner` for all operations.
 
 ```python
-# Development/testing - use default (no cache)
-runner = GifLabRunner()
+from giflab.prediction_runner import PredictionRunner
 
-# Production/repeated runs - explicitly enable cache
-runner = GifLabRunner(use_cache=True)
-
-# CLI option for user control
-@click.option('--use-cache/--no-cache', default=False,
-              help="Enable result caching for faster repeated runs")
-def my_command(use_cache: bool):
-    runner = GifLabRunner(use_cache=use_cache)
+# Create runner with SQLite storage
+runner = PredictionRunner(db_path="results.db")
+runner.run(data_dir="data/raw", workers=4)
 ```
 
 ### Memory Management

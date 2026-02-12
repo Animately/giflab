@@ -16,14 +16,13 @@ import threading
 import time
 import zlib
 from collections import OrderedDict
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class ValidationCacheStats:
@@ -43,18 +42,16 @@ class ValidationCacheStats:
         total = self.hits + self.misses
         return self.hits / total if total > 0 else 0.0
 
-
 @dataclass
 class ValidationResult:
     """Container for cached validation metric results."""
     
     metric_type: str  # e.g., "ssim", "ms_ssim", "lpips", "gradient_color"
-    value: Union[float, Dict[str, Any]]  # Metric value or dict for complex metrics
-    frame_indices: Optional[Tuple[int, int]] = None  # For frame-level caching
-    config_hash: Optional[str] = None  # Hash of relevant configuration
+    value: float | dict[str, Any]  # Metric value or dict for complex metrics
+    frame_indices: tuple[int, int] | None = None  # For frame-level caching
+    config_hash: str | None = None  # Hash of relevant configuration
     timestamp: float = 0.0
-    metadata: Optional[Dict[str, Any]] = None  # Additional metadata
-
+    metadata: dict[str, Any] | None = None  # Additional metadata
 
 class ValidationCache:
     """
@@ -71,7 +68,7 @@ class ValidationCache:
     def __init__(
         self,
         memory_limit_mb: int = 100,
-        disk_path: Optional[Path] = None,
+        disk_path: Path | None = None,
         disk_limit_mb: int = 1000,
         ttl_seconds: int = 172800,  # 48 hours default
         enabled: bool = True,
@@ -129,17 +126,17 @@ class ValidationCache:
             """)
             
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_metric_type 
+                CREATE INDEX IF NOT EXISTS idx_metric_type
                 ON validation_cache(metric_type)
             """)
             
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_timestamp 
+                CREATE INDEX IF NOT EXISTS idx_timestamp
                 ON validation_cache(timestamp)
             """)
             
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_frame_hashes 
+                CREATE INDEX IF NOT EXISTS idx_frame_hashes
                 ON validation_cache(frame1_hash, frame2_hash)
             """)
             
@@ -158,8 +155,8 @@ class ValidationCache:
         frame1_hash: str,
         frame2_hash: str,
         metric_type: str,
-        config: Optional[Dict[str, Any]] = None,
-        frame_indices: Optional[Tuple[int, int]] = None,
+        config: dict[str, Any] | None = None,
+        frame_indices: tuple[int, int] | None = None,
     ) -> str:
         """
         Generate a unique cache key for a validation result.
@@ -167,7 +164,7 @@ class ValidationCache:
         Args:
             frame1_hash: Hash of first frame
             frame2_hash: Hash of second frame
-            metric_type: Type of metric (e.g., "ssim", "lpips")
+            metric_type: type of metric (e.g., "ssim", "lpips")
             config: Relevant configuration parameters
             frame_indices: Optional frame indices for identification
             
@@ -220,16 +217,16 @@ class ValidationCache:
         frame1: np.ndarray,
         frame2: np.ndarray,
         metric_type: str,
-        config: Optional[Dict[str, Any]] = None,
-        frame_indices: Optional[Tuple[int, int]] = None,
-    ) -> Optional[Union[float, Dict[str, Any]]]:
+        config: dict[str, Any] | None = None,
+        frame_indices: tuple[int, int] | None = None,
+    ) -> float | dict[str, Any] | None:
         """
         Retrieve a cached validation result.
         
         Args:
             frame1: First frame array
             frame2: Second frame array
-            metric_type: Type of metric
+            metric_type: type of metric
             config: Configuration parameters
             frame_indices: Optional frame indices
             
@@ -286,10 +283,10 @@ class ValidationCache:
         frame1: np.ndarray,
         frame2: np.ndarray,
         metric_type: str,
-        value: Union[float, Dict[str, Any]],
-        config: Optional[Dict[str, Any]] = None,
-        frame_indices: Optional[Tuple[int, int]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        value: float | dict[str, Any],
+        config: dict[str, Any] | None = None,
+        frame_indices: tuple[int, int] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
         Store a validation result in the cache.
@@ -297,7 +294,7 @@ class ValidationCache:
         Args:
             frame1: First frame array
             frame2: Second frame array
-            metric_type: Type of metric
+            metric_type: type of metric
             value: Metric value to cache
             config: Configuration parameters
             frame_indices: Optional frame indices
@@ -382,7 +379,7 @@ class ValidationCache:
                 conn.execute("""
                     INSERT OR REPLACE INTO validation_cache
                     (cache_key, metric_type, value_data, frame1_hash, frame2_hash,
-                     frame_indices, config_hash, metadata, timestamp, size_bytes, 
+                     frame_indices, config_hash, metadata, timestamp, size_bytes,
                      access_count, last_accessed)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
                 """, (
@@ -407,7 +404,7 @@ class ValidationCache:
         except Exception as e:
             logger.warning(f"Failed to store to disk cache: {e}")
     
-    def _load_from_disk(self, cache_key: str) -> Optional[ValidationResult]:
+    def _load_from_disk(self, cache_key: str) -> ValidationResult | None:
         """Load entry from disk cache."""
         try:
             with sqlite3.connect(str(self.disk_path)) as conn:
@@ -530,7 +527,7 @@ class ValidationCache:
         Invalidate all cache entries for a specific metric type.
         
         Args:
-            metric_type: Type of metric to invalidate
+            metric_type: type of metric to invalidate
         """
         with self._lock:
             # Clear from memory cache
@@ -592,7 +589,7 @@ class ValidationCache:
             
             return self._stats
     
-    def get_metric_stats(self) -> Dict[str, int]:
+    def get_metric_stats(self) -> dict[str, int]:
         """Get statistics grouped by metric type."""
         stats = {}
         
@@ -614,18 +611,18 @@ class ValidationCache:
     
     def warm_cache(
         self,
-        frames1: List[np.ndarray],
-        frames2: List[np.ndarray],
-        metric_types: List[str],
-        config: Optional[Dict[str, Any]] = None,
+        frames1: list[np.ndarray],
+        frames2: list[np.ndarray],
+        metric_types: list[str],
+        config: dict[str, Any] | None = None,
     ) -> int:
         """
         Pre-warm cache with frame pairs and metrics.
         
         Args:
-            frames1: List of first frames
-            frames2: List of second frames
-            metric_types: List of metric types to pre-compute
+            frames1: list of first frames
+            frames2: list of second frames
+            metric_types: list of metric types to pre-compute
             config: Configuration parameters
             
         Returns:
@@ -642,11 +639,9 @@ class ValidationCache:
         
         return entries_added
 
-
 # Singleton instance management
-_validation_cache_instance: Optional[ValidationCache] = None
+_validation_cache_instance: ValidationCache | None = None
 _validation_cache_lock = threading.Lock()
-
 
 def get_validation_cache() -> ValidationCache:
     """Get the singleton ValidationCache instance."""
@@ -666,7 +661,6 @@ def get_validation_cache() -> ValidationCache:
                 )
     
     return _validation_cache_instance
-
 
 def reset_validation_cache() -> None:
     """Reset the singleton ValidationCache instance."""

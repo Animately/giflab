@@ -1,16 +1,16 @@
 """Unit tests for conditional metrics optimization module."""
 
 import os
+from unittest.mock import MagicMock, call, patch
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch, call
-
 from giflab.conditional_metrics import (
     ConditionalMetricsCalculator,
-    QualityTier,
     ContentProfile,
+    FrameHashCache,
     QualityAssessment,
-    FrameHashCache
+    QualityTier,
 )
 
 
@@ -463,7 +463,7 @@ class TestProgressiveCalculation:
             "all_metrics": "calculated"
         }
         
-        results = calc.calculate_progressive(
+        calc.calculate_progressive(
             original, compressed, mock_metrics_calc, force_all=True
         )
         
@@ -485,7 +485,7 @@ class TestProgressiveCalculation:
             "all_metrics": "calculated"
         }
         
-        results = calc.calculate_progressive(
+        calc.calculate_progressive(
             original, compressed, mock_metrics_calc, force_all=False
         )
         

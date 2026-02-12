@@ -12,7 +12,14 @@
 ### Compression Parameters
 * **Lossy levels** ∈ { 0 · 20 · 40 · 60 · 80 · 100 · 120 } — 7 points for smooth curve prediction
 * **Color counts** ∈ { 256 · 128 · 64 · 32 · 16 } — 5 points for color curve prediction
-* **Engines** `gifsicle`, `animately` (expanding to ImageMagick, FFmpeg, gifski, etc.)
+* **Engines** (7 total):
+  * `gifsicle` — standard GIF optimizer
+  * `animately-standard` — Animately standard lossy (`--lossy`)
+  * `animately-advanced` — Animately advanced lossy (`--advanced-lossy`)
+  * `animately-hard` — Animately hard mode (`--hard --lossy`)
+  * `imagemagick` — ImageMagick lossy compression
+  * `ffmpeg` — FFmpeg GIF encoding
+  * `gifski` — high-quality GIF encoder
 
 ### Visual Features Extracted (25 features)
 * **Spatial**: entropy, edge_density, color_complexity, gradient_smoothness, contrast_score, text_density, dct_energy_ratio, color_histogram_entropy, dominant_color_ratio
@@ -98,10 +105,15 @@ giflab/
 
 ### Engine Responsibilities
 
-| Engine      | Handles                                           |
-|-------------|---------------------------------------------------|
-| `gifsicle`  | Lossy compression + frame reduction + color reduction |
-| `animately` | Lossy compression + frame reduction + color reduction |
+| Engine | Handles |
+|--------|---------|
+| `gifsicle` | Lossy compression + frame reduction + color reduction |
+| `animately-standard` | Standard lossy compression + frame reduction + color reduction |
+| `animately-advanced` | Advanced lossy via PNG sequence pipeline |
+| `animately-hard` | Hard mode lossy compression (`--hard --lossy`) |
+| `imagemagick` | Lossy compression + frame reduction + color reduction (multiple dithering modes) |
+| `ffmpeg` | Lossy compression + frame reduction + color reduction (multiple dithering modes) |
+| `gifski` | High-quality lossy compression |
 
 ### Anti-Pattern (❌ Don't Do This)
 ```

@@ -1074,7 +1074,7 @@ class TestSsimulacra2RobustnessAndSafety:
         quality_values = [0.3, 0.6, 0.9]
 
         results = []
-        for validator, quality in zip(validators, quality_values):
+        for validator, quality in zip(validators, quality_values, strict=True):
             result = validator.should_use_ssimulacra2(quality)
             results.append(result)
 

@@ -4,95 +4,87 @@ Performance monitoring infrastructure for GifLab optimization systems.
 This module provides comprehensive monitoring for:
 - FrameCache performance and hit rates
 - ValidationCache metrics by validation type
-- ResizedFrameCache and buffer pool efficiency  
+- ResizedFrameCache and buffer pool efficiency
 - Frame sampling accuracy and speedup
 - Lazy loading patterns and import times
 """
 
-from .metrics_collector import (
-    MetricsCollector,
-    MetricType,
-    get_metrics_collector,
-    reset_metrics_collector,
-)
-from .backends import MetricsBackend, InMemoryBackend, SQLiteBackend
-from .decorators import (
-    track_timing,
-    track_counter,
-    track_gauge,
-    track_histogram,
-)
-from .integration import (
-    instrument_frame_cache,
-    instrument_validation_cache,
-    instrument_resize_cache,
-    instrument_sampling,
-    instrument_lazy_imports,
-    instrument_all_systems,
-)
 from .alerting import (
     Alert,
     AlertLevel,
     AlertManager,
     AlertNotifier,
+    check_alerts,
     get_alert_manager,
     get_alert_notifier,
-    check_alerts,
 )
-from .memory_monitor import (
-    MemoryStats,
-    MemoryPressureLevel,
-    CacheMemoryUsage,
-    SystemMemoryMonitor,
-    CacheMemoryTracker,
-    MemoryPressureManager,
-    ConservativeEvictionPolicy,
-    get_system_memory_monitor,
-    get_cache_memory_tracker,
-    get_memory_pressure_manager,
-    start_memory_monitoring,
-    stop_memory_monitoring,
-    is_memory_monitoring_available,
-)
-from .memory_integration import (
-    MemoryPressureIntegration,
-    get_memory_integration,
-    initialize_memory_monitoring,
-    instrument_cache_with_memory_tracking,
-    instrument_all_caches_memory,
-)
-from .cache_effectiveness import (
-    CacheEffectivenessMonitor,
-    CacheOperationType,
-    CacheEffectivenessStats,
-    BaselineComparison,
-    get_cache_effectiveness_monitor,
-    is_cache_effectiveness_monitoring_enabled,
-)
+from .backends import InMemoryBackend, MetricsBackend, SQLiteBackend
 from .baseline_framework import (
-    PerformanceBaselineFramework,
-    BaselineTestMode,
     BaselineStatistics,
+    BaselineTestMode,
+    PerformanceBaselineFramework,
     PerformanceMeasurement,
     WorkloadScenario,
     baseline_performance_test,
     get_baseline_framework,
     is_baseline_testing_enabled,
 )
+from .cache_effectiveness import (
+    BaselineComparison,
+    CacheEffectivenessMonitor,
+    CacheEffectivenessStats,
+    CacheOperationType,
+    get_cache_effectiveness_monitor,
+    is_cache_effectiveness_monitoring_enabled,
+)
+from .decorators import (
+    track_counter,
+    track_gauge,
+    track_histogram,
+    track_timing,
+)
 from .effectiveness_analysis import (
+    CacheEffectivenessAnalysis,
     CacheEffectivenessAnalyzer,
     CacheRecommendation,
-    CacheEffectivenessAnalysis,
     analyze_cache_effectiveness,
     get_effectiveness_analyzer,
 )
-from .performance_regression import (
-    PerformanceBaseline,
-    RegressionAlert,
-    RegressionDetector,
-    PerformanceHistory,
-    ContinuousMonitor,
-    create_performance_monitor,
+from .integration import (
+    instrument_all_systems,
+    instrument_frame_cache,
+    instrument_lazy_imports,
+    instrument_resize_cache,
+    instrument_sampling,
+    instrument_validation_cache,
+)
+from .memory_integration import (
+    MemoryPressureIntegration,
+    get_memory_integration,
+    initialize_memory_monitoring,
+    instrument_all_caches_memory,
+    instrument_cache_with_memory_tracking,
+)
+from .memory_monitor import (
+    CacheMemoryTracker,
+    CacheMemoryUsage,
+    ConservativeEvictionPolicy,
+    MemoryPressureLevel,
+    MemoryPressureManager,
+    MemoryStats,
+    SystemMemoryMonitor,
+    get_cache_memory_tracker,
+    get_memory_pressure_manager,
+    get_system_memory_monitor,
+    is_memory_monitoring_available,
+    start_memory_monitoring,
+    stop_memory_monitoring,
+)
+from .metrics_collector import (
+    MetricsCollector,
+    MetricType,
+    get_metrics_collector,
+    reset_metrics_collector,
 )
 
 __all__ = [
@@ -112,7 +104,7 @@ __all__ = [
     "track_histogram",
     # Integration
     "instrument_frame_cache",
-    "instrument_validation_cache", 
+    "instrument_validation_cache",
     "instrument_resize_cache",
     "instrument_sampling",
     "instrument_lazy_imports",
@@ -167,11 +159,4 @@ __all__ = [
     "CacheEffectivenessAnalysis",
     "analyze_cache_effectiveness",
     "get_effectiveness_analyzer",
-    # Performance regression monitoring (Phase 7)
-    "PerformanceBaseline",
-    "RegressionAlert",
-    "RegressionDetector",
-    "PerformanceHistory",
-    "ContinuousMonitor",
-    "create_performance_monitor",
 ]

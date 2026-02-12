@@ -13,7 +13,7 @@ metadata completeness per the engine rollout plan specifications.
 
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from giflab.meta import extract_gif_metadata
@@ -40,12 +40,10 @@ SIMPLE_4FRAME = FIXTURES_DIR / "simple_4frame.gif"
 SINGLE_FRAME = FIXTURES_DIR / "single_frame.gif"
 MANY_COLORS = FIXTURES_DIR / "many_colors.gif"
 
-
 def get_gif_color_count(gif_path: Path) -> int:
     """Get the color count from GIF metadata using giflab's analysis."""
     metadata = extract_gif_metadata(gif_path)
     return metadata.orig_n_colors
-
 
 def validate_metadata(result: dict[str, Any], expected_engine: str) -> None:
     """Validate metadata completeness and correctness."""
@@ -77,11 +75,9 @@ def validate_metadata(result: dict[str, Any], expected_engine: str) -> None:
             result["engine_version"], str
         ), "engine_version should be a string"
 
-
 # =============================================================================
 # Color Reduction Tests
 # =============================================================================
-
 
 class TestColorReduction:
     """Test color reduction functionality for all engines."""
@@ -170,13 +166,11 @@ class TestColorReduction:
             assert actual_colors <= 128, f"Expected ≤128 colors, got {actual_colors}"
 
             # Validate metadata
-            validate_metadata(result, "animately")
-
+            validate_metadata(result, "animately-standard")
 
 # =============================================================================
 # Frame Reduction Tests
 # =============================================================================
-
 
 class TestFrameReduction:
     """Test frame reduction functionality for all engines."""
@@ -316,13 +310,11 @@ class TestFrameReduction:
                 ), f"Frame ratio {frame_ratio:.2f} suggests unexpected timing behavior"
 
             # Validate metadata
-            validate_metadata(result, "animately")
-
+            validate_metadata(result, "animately-standard")
 
 # =============================================================================
 # Lossy Compression Tests
 # =============================================================================
-
 
 class TestLossyCompression:
     """Test lossy compression functionality for all engines."""
@@ -338,9 +330,9 @@ class TestLossyCompression:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "output.gif"
 
-            # Test lossy compression
+            # Test lossy compression (lossy_level 15 → quality 85 via inversion)
             result = compressor.apply(
-                SIMPLE_4FRAME, output_path, params={"quality": 85}
+                SIMPLE_4FRAME, output_path, params={"lossy_level": 15}
             )
 
             # Validate functional change (compression achieved)
@@ -372,9 +364,9 @@ class TestLossyCompression:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "output.gif"
 
-            # Test with higher quantiser value (more compression)
+            # Test with moderate compression (lossy_level 50 → q_scale ~16)
             result = compressor.apply(
-                SIMPLE_4FRAME, output_path, params={"qv": 50, "fps": 15.0}
+                SIMPLE_4FRAME, output_path, params={"lossy_level": 50}
             )
 
             # Validate functional change
@@ -404,9 +396,9 @@ class TestLossyCompression:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "output.gif"
 
-            # Test with quality setting
+            # Test with lossy_level 20 (→ quality 80 via inversion)
             result = compressor.apply(
-                SIMPLE_4FRAME, output_path, params={"quality": 80}
+                SIMPLE_4FRAME, output_path, params={"lossy_level": 20}
             )
 
             # Validate functional change
@@ -487,13 +479,11 @@ class TestLossyCompression:
             ), f"Compression ratio {compression_ratio:.2f} seems unreasonable"
 
             # Validate metadata
-            validate_metadata(result, "animately")
-
+            validate_metadata(result, "animately-standard")
 
 # =============================================================================
 # Edge Cases and Error Handling
 # =============================================================================
-
 
 class TestEdgeCases:
     """Test edge cases and error handling."""
@@ -575,11 +565,9 @@ class TestEdgeCases:
             with pytest.raises(ValueError, match="params must include 'colors'"):
                 reducer.apply(SIMPLE_4FRAME, output_path, params=None)
 
-
 # =============================================================================
 # Cross-Engine Consistency Tests
 # =============================================================================
-
 
 class TestCrossEngineConsistency:
     """Test consistency across different engines."""
@@ -694,11 +682,9 @@ class TestCrossEngineConsistency:
                 with pytest.raises(ValueError):
                     reducer.apply(SIMPLE_4FRAME, output_path, params=None)
 
-
 # =============================================================================
 # Performance and Quality Tests
 # =============================================================================
-
 
 class TestPerformanceAndQuality:
     """Test performance thresholds and quality expectations."""
@@ -802,11 +788,9 @@ class TestPerformanceAndQuality:
             # Frame count should be preserved (no frame reduction)
             assert output_metadata.orig_frames == input_metadata.orig_frames
 
-
 # =============================================================================
 # Quality Degradation Tests (PSNR and Perceptual Quality)
 # =============================================================================
-
 
 class TestQualityDegradation:
     """Test quality degradation and PSNR validation for lossy compression."""

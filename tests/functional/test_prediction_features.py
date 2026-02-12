@@ -9,18 +9,17 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from giflab.prediction.features import (
-    _calculate_entropy,
-    _calculate_edge_density,
     _calculate_color_complexity,
     _calculate_dct_energy_ratio,
+    _calculate_edge_density,
+    _calculate_entropy,
     _extract_frames_for_analysis,
     _extract_spatial_features,
     _extract_temporal_features,
     extract_gif_features,
 )
+from PIL import Image
 
 
 def create_test_gif(

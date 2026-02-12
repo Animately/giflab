@@ -44,7 +44,7 @@ color_slot:
 
 lossy_slot:
   type: locked  
-  implementation: animately-advanced-lossy
+  implementation: animately-advanced
   parameters:
     level: 40
 ```
@@ -156,7 +156,7 @@ lossy_slot:
 **Pipeline Generation**:
 - **Count**: ~11 pipelines (one per lossy algorithm)
 - **Algorithms Tested**:
-  - Animately: 2 variants (animately-lossy, animately-advanced-lossy)
+  - Animately: 3 variants (animately-standard, animately-advanced, animately-hard)
   - Gifsicle: 5 variants (gifsicle-lossy with different methods)
   - FFmpeg: 1 variant (ffmpeg-lossy)
   - Gifski: 1 variant (gifski-lossy)
@@ -206,7 +206,7 @@ color_slot:
 
 lossy_slot:
   type: variable
-  scope: [animately-advanced-lossy, ffmpeg-lossy, gifsicle-lossy, imagemagick-lossy]
+  scope: [animately-advanced, ffmpeg-lossy, gifsicle-lossy, imagemagick-lossy]
   parameters:
     levels: [0, 40, 120]
 ```
@@ -316,14 +316,14 @@ color_slot:
 
 lossy_slot:
   type: variable
-  scope: [gifski-lossy, animately-advanced-lossy]  # PNG-optimized tools
+  scope: [gifski-lossy, animately-advanced]  # PNG-optimized tools
   parameters:
     levels: [60, 80, 100]  # Mid-to-high quality levels
 ```
 
 **Pipeline Generation**:
 - **Count**: ~4 pipelines (2 color × 2 lossy algorithms)
-- **Optimized Tools**: gifski-lossy, animately-advanced-lossy (PNG sequence specialists)
+- **Optimized Tools**: gifski-lossy, animately-advanced (PNG sequence specialists)
 
 **Use Cases**:
 - High-quality animation GIF creation
@@ -368,7 +368,7 @@ color_slot:
 
 lossy_slot:
   type: locked
-  implementation: animately-advanced-lossy
+  implementation: animately-advanced
   parameters:
     level: 40
 ```
@@ -524,12 +524,5 @@ custom_preset = ExperimentPreset(
 - Locked slots must specify implementation
 - Custom sampling must be valid strategy
 - max_combinations must be positive
-
-### Registration
-
-```python
-from giflab.experimental.targeted_presets import PRESET_REGISTRY
-PRESET_REGISTRY.register("preset-id", custom_preset)
-```
 
 This reference provides comprehensive technical details for understanding and using all available preset types effectively.

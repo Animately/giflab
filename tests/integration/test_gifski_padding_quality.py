@@ -232,7 +232,7 @@ def test_gifski_normalization_integration():
         # Verify quality is preserved for the content areas
         target_size = normalized_dimensions[0]
         for i, (orig_img, norm_file) in enumerate(
-            zip(original_images, normalized_files)
+            zip(original_images, normalized_files, strict=True)
         ):
             with Image.open(norm_file) as norm_img:
                 if orig_img.size == target_size:

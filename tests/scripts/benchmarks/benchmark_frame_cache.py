@@ -5,14 +5,12 @@ import json
 import statistics
 import time
 from pathlib import Path
-from typing import Dict, List
 
 import numpy as np
-from PIL import Image
-
 from giflab.caching import get_frame_cache, reset_frame_cache
 from giflab.config import FRAME_CACHE
 from giflab.metrics import extract_gif_frames
+from PIL import Image
 
 
 class FrameCacheBenchmark:
@@ -26,9 +24,9 @@ class FrameCacheBenchmark:
         """
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.results: Dict[str, any] = {}
+        self.results: dict[str, any] = {}
     
-    def create_test_gifs(self, test_dir: Path) -> Dict[str, Path]:
+    def create_test_gifs(self, test_dir: Path) -> dict[str, Path]:
         """Create test GIF files of various sizes.
         
         Args:
@@ -107,7 +105,7 @@ class FrameCacheBenchmark:
         gif_path: Path,
         iterations: int = 10,
         max_frames: int | None = None
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Benchmark frame extraction for a single file.
         
         Args:
@@ -176,18 +174,20 @@ class FrameCacheBenchmark:
     
     def benchmark_cache_size_impact(
         self,
-        test_files: Dict[str, Path],
-        memory_limits_mb: List[int] = [10, 50, 100, 500]
-    ) -> List[Dict]:
+        test_files: dict[str, Path],
+        memory_limits_mb: list[int] = None
+    ) -> list[dict]:
         """Benchmark impact of different cache memory limits.
         
         Args:
             test_files: Dictionary of test files
-            memory_limits_mb: List of memory limits to test
+            memory_limits_mb: list of memory limits to test
             
         Returns:
-            List of benchmark results for each memory limit
+            list of benchmark results for each memory limit
         """
+        if memory_limits_mb is None:
+            memory_limits_mb = [10, 50, 100, 500]
         results = []
         
         for limit_mb in memory_limits_mb:
@@ -220,7 +220,7 @@ class FrameCacheBenchmark:
         gif_path: Path,
         num_threads: int = 10,
         iterations_per_thread: int = 5
-    ) -> Dict:
+    ) -> dict:
         """Benchmark concurrent cache access.
         
         Args:
@@ -290,13 +290,13 @@ class FrameCacheBenchmark:
     
     def benchmark_cache_warming(
         self,
-        test_files: List[Path],
+        test_files: list[Path],
         max_frames: int = 30
-    ) -> Dict:
+    ) -> dict:
         """Benchmark cache warming performance.
         
         Args:
-            test_files: List of GIF files to warm
+            test_files: list of GIF files to warm
             max_frames: Maximum frames per file
             
         Returns:
@@ -420,13 +420,13 @@ class FrameCacheBenchmark:
         
         if "concurrent_access" in self.results:
             concurrent = self.results["concurrent_access"]
-            print(f"\n🔄 Concurrent Performance:")
+            print("\n🔄 Concurrent Performance:")
             print(f"  Concurrency speedup: {concurrent['concurrency_speedup']:.2f}x")
             print(f"  Cache hit rate: {concurrent['cache_hit_rate']:.1%}")
         
         if "cache_warming" in self.results:
             warm = self.results["cache_warming"]
-            print(f"\n🔥 Cache Warming:")
+            print("\n🔥 Cache Warming:")
             print(f"  Files warmed: {warm['num_files']}")
             print(f"  Time per file: {warm['warm_time_per_file']*1000:.1f}ms")
             print(f"  Subsequent access: {warm['hit_times_mean']*1000:.1f}ms")
@@ -451,7 +451,6 @@ class FrameCacheBenchmark:
         
         print("\n  Frame caching provides significant performance improvements,")
         print("  especially for repeated validations and large GIF files.")
-
 
 def main():
     """Main entry point for benchmark script."""
@@ -479,7 +478,6 @@ def main():
     # Run benchmark
     benchmark = FrameCacheBenchmark(args.output)
     benchmark.run_full_benchmark(args.temp)
-
 
 if __name__ == "__main__":
     main()

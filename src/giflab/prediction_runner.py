@@ -1,14 +1,15 @@
 """Unified prediction pipeline runner.
 
 This module runs the main GifLab pipeline for generating prediction training data.
-It extracts features, runs compression sweeps with pipeline chaining support,
+It extracts features, runs compression sweeps via the tool wrapper system,
 and stores results in SQLite using the normalized schema.
 
 Supports two modes:
-- Single-engine mode: Quick testing with just gifsicle/animately
-- Full pipeline mode: All tool combinations (frame × color × lossy)
+- Single-engine mode: One pipeline per lossy engine (all 7 engines)
+- Full pipeline mode: All tool combinations (frame x color x lossy)
 
-Replaces: CSV output, elimination_cache
+All compression is dispatched through ``capability_registry.get_tool_class_by_name()``
+so new engines are automatically supported when registered as tool wrappers.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import logging
 import subprocess
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -108,14 +109,31 @@ class PredictionRunner:
             self._pipeline_ids = None  # None means all
 
     def _get_single_tool_pipeline_ids(self) -> list[int]:
-        """Get pipeline IDs for single-tool pipelines."""
-        # For now, create simple single-tool pipelines
+        """Get pipeline IDs for single-tool pipelines (one per lossy engine).
+
+        Dynamically discovers all available lossy engines from the capability
+        registry and pairs each with a compatible color tool (same COMBINE_GROUP).
+        """
+        from giflab.capability_registry import tools_for
+
         ids = []
-        for lossy_tool in ["gifsicle", "animately"]:
+        lossy_tools = tools_for("lossy_compression")
+        color_tools = tools_for("color_reduction")
+
+        for lossy_cls in lossy_tools:
+            # Find a compatible color tool (same COMBINE_GROUP)
+            combine_group = getattr(lossy_cls, "COMBINE_GROUP", None)
+            color_name = None
+            if combine_group:
+                for color_cls in color_tools:
+                    if getattr(color_cls, "COMBINE_GROUP", None) == combine_group:
+                        color_name = color_cls.NAME
+                        break
+
             pipeline_id = self.storage.get_or_create_pipeline_id(
                 frame_tool=None,
-                color_tool=lossy_tool,  # Same tool for color
-                lossy_tool=lossy_tool,
+                color_tool=color_name,
+                lossy_tool=lossy_cls.NAME,
             )
             ids.append(pipeline_id)
         return ids
@@ -187,9 +205,7 @@ class PredictionRunner:
         # Extract features if needed
         if status is None or self.force:
             self.logger.debug(f"Extracting features for {gif_path.name}")
-            features = extract_features_for_storage(
-                gif_path, precomputed_sha=gif_sha
-            )
+            features = extract_features_for_storage(gif_path, precomputed_sha=gif_sha)
             self.storage.save_gif_features(features)
         elif self.upgrade:
             if status["feature_version"] != FEATURE_EXTRACTION_VERSION:
@@ -236,7 +252,7 @@ class PredictionRunner:
                         "error_message": str(e),
                         "error_traceback": None,
                         "giflab_version": giflab.__version__,
-                        "created_at": datetime.now(timezone.utc).isoformat(),
+                        "created_at": datetime.now(UTC).isoformat(),
                     }
                 )
 
@@ -248,6 +264,30 @@ class PredictionRunner:
         if not remaining:
             self.storage.mark_gif_complete(gif_sha)
 
+    def _validate_gif_output(self, output_path: Path) -> None:
+        """Validate that a compressed output file is a valid GIF.
+
+        Checks magic bytes (GIF87a or GIF89a) and minimum viable size
+        (header + logical screen descriptor = 13 bytes).
+
+        Args:
+            output_path: Path to the compressed GIF file.
+
+        Raises:
+            RuntimeError: If the file is not a valid GIF.
+        """
+        size = output_path.stat().st_size
+        if size < 13:
+            raise RuntimeError(
+                f"Output GIF too small ({size} bytes); minimum viable size is 13 bytes"
+            )
+        with open(output_path, "rb") as f:
+            magic = f.read(6)
+        if magic not in (b"GIF87a", b"GIF89a"):
+            raise RuntimeError(
+                f"Output file is not a valid GIF (magic bytes: {magic!r})"
+            )
+
     def _run_compression(
         self,
         gif_path: Path,
@@ -257,41 +297,38 @@ class PredictionRunner:
         original_size_kb: float,
     ) -> dict[str, Any]:
         """Run a single compression with full quality metrics."""
+        from giflab.storage import QUALITY_METRIC_COLUMNS
+
         start_ms = time.time() * 1000
 
         # Get param values from preset
         with self.storage._connect() as conn:
             row = conn.execute(
-                "SELECT lossy_level, color_count FROM param_presets WHERE id=?",
+                "SELECT lossy_level, color_count, frame_ratio FROM param_presets WHERE id=?",
                 (param_preset_id,),
             ).fetchone()
             if row is None:
                 raise ValueError(f"Unknown param_preset_id: {param_preset_id}")
             lossy_level = row["lossy_level"]
             color_count = row["color_count"]
-
-            # Get pipeline info
-            prow = conn.execute(
-                """SELECT lt.name as lossy_tool
-                   FROM pipelines p
-                   LEFT JOIN tools lt ON p.lossy_tool_id = lt.id
-                   WHERE p.id = ?""",
-                (pipeline_id,),
-            ).fetchone()
-            if prow is None:
-                raise ValueError(f"Unknown pipeline_id: {pipeline_id}")
-            lossy_tool = prow["lossy_tool"] or "gifsicle"
+            frame_ratio = row["frame_ratio"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "compressed.gif"
 
             # Run compression using the tool wrapper system
             self._execute_pipeline(
-                gif_path, output_path, lossy_tool, lossy_level, color_count
+                gif_path,
+                output_path,
+                pipeline_id,
+                lossy_level,
+                color_count,
+                frame_ratio,
             )
 
             if not output_path.exists():
                 raise RuntimeError("Compression produced no output")
+            self._validate_gif_output(output_path)
 
             size_kb = output_path.stat().st_size / 1024
             render_ms = int(time.time() * 1000 - start_ms)
@@ -307,53 +344,105 @@ class PredictionRunner:
 
         compression_ratio = original_size_kb / size_kb if size_kb > 0 else 0
 
-        return {
+        # Build result from QUALITY_METRIC_COLUMNS (single source of truth)
+        result = {col: metrics.get(col) for col in QUALITY_METRIC_COLUMNS}
+        result.update({
             "gif_sha": gif_sha,
             "pipeline_id": pipeline_id,
             "param_preset_id": param_preset_id,
             "size_kb": size_kb,
             "compression_ratio": compression_ratio,
-            "ssim_mean": metrics.get("ssim_mean"),
-            "ssim_std": metrics.get("ssim_std"),
-            "ssim_min": metrics.get("ssim_min"),
-            "ssim_max": metrics.get("ssim_max"),
-            "ms_ssim_mean": metrics.get("ms_ssim_mean"),
-            "psnr_mean": metrics.get("psnr_mean"),
-            "temporal_consistency": metrics.get("temporal_consistency"),
-            "mse_mean": metrics.get("mse_mean"),
-            "fsim_mean": metrics.get("fsim_mean"),
-            "gmsd_mean": metrics.get("gmsd_mean"),
-            "edge_similarity_mean": metrics.get("edge_similarity_mean"),
-            "composite_quality": metrics.get("composite_quality"),
             "render_ms": render_ms,
             "giflab_version": giflab.__version__,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+            "created_at": datetime.now(UTC).isoformat(),
+        })
+        return result
 
     def _execute_pipeline(
         self,
         input_path: Path,
         output_path: Path,
-        lossy_tool: str,
+        pipeline_id: int,
         lossy_level: int,
         color_count: int | None,
+        frame_ratio: float = 1.0,
     ) -> None:
-        """Execute compression pipeline using tool wrappers."""
-        from giflab.lossy import LossyEngine, apply_lossy_compression
+        """Execute compression pipeline using tool wrappers.
 
-        # Map tool name to engine enum
-        if lossy_tool == "animately":
-            engine = LossyEngine.ANIMATELY
-        else:
-            engine = LossyEngine.GIFSICLE
+        Dispatches to the correct tool wrapper classes for each pipeline step
+        (frame reduction → color reduction → lossy compression).
 
-        apply_lossy_compression(
-            input_path,
-            output_path,
-            lossy_level=lossy_level,
-            color_keep_count=color_count,
-            engine=engine,
-        )
+        Args:
+            input_path: Source GIF file
+            output_path: Compressed output file
+            pipeline_id: Pipeline ID to look up tool names from DB
+            lossy_level: Lossy compression level
+            color_count: Color palette size (None to skip)
+            frame_ratio: Frame keep ratio (1.0 = keep all)
+        """
+        from giflab.capability_registry import get_tool_class_by_name
+
+        # Look up pipeline tool names from DB
+        with self.storage._connect() as conn:
+            prow = conn.execute(
+                """SELECT ft.name as frame_tool, ct.name as color_tool,
+                          lt.name as lossy_tool
+                   FROM pipelines p
+                   LEFT JOIN tools ft ON p.frame_tool_id = ft.id
+                   LEFT JOIN tools ct ON p.color_tool_id = ct.id
+                   LEFT JOIN tools lt ON p.lossy_tool_id = lt.id
+                   WHERE p.id = ?""",
+                (pipeline_id,),
+            ).fetchone()
+            if prow is None:
+                raise ValueError(f"Unknown pipeline_id: {pipeline_id}")
+
+        frame_tool_name = prow["frame_tool"]
+        color_tool_name = prow["color_tool"]
+        lossy_tool_name = prow["lossy_tool"]
+
+        # Build ordered steps: frame → color → lossy
+        steps: list[tuple[str, dict[str, Any]]] = []
+
+        if frame_tool_name and frame_ratio < 1.0:
+            steps.append((frame_tool_name, {"ratio": frame_ratio}))
+
+        if color_tool_name and color_count is not None:
+            steps.append((color_tool_name, {"colors": color_count}))
+
+        if lossy_tool_name:
+            params: dict[str, Any] = {"lossy_level": lossy_level}
+            steps.append((lossy_tool_name, params))
+
+        if not steps:
+            raise ValueError(f"Pipeline {pipeline_id} has no executable steps")
+
+        # Execute steps, chaining temp files
+        current_input = input_path
+        for i, (tool_name, params) in enumerate(steps):
+            tool_cls = get_tool_class_by_name(tool_name)
+            if tool_cls is None:
+                raise ValueError(f"Unknown tool: {tool_name}")
+
+            is_last = i == len(steps) - 1
+            step_output = (
+                output_path
+                if is_last
+                else (output_path.parent / f"_step{i}_{output_path.name}")
+            )
+
+            tool_instance = tool_cls()
+            tool_instance.apply(current_input, step_output, params=params)
+
+            # Clean up intermediate files
+            if not is_last:
+                current_input = step_output
+
+        # Clean up intermediate temp files
+        for i in range(len(steps) - 1):
+            tmp = output_path.parent / f"_step{i}_{output_path.name}"
+            if tmp.exists():
+                tmp.unlink()
 
     def _all_compression_params(self) -> list[dict[str, Any]]:
         """Get all compression parameter combinations for selected pipelines."""

@@ -35,7 +35,7 @@ For more control, you can specify custom slot configurations:
 poetry run python -m giflab run \
   --variable-slot frame=* \
   --lock-slot color=ffmpeg-color \
-  --lock-slot lossy=animately-advanced-lossy \
+  --lock-slot lossy=animately-advanced \
   --slot-params color=colors:32 \
   --slot-params lossy=level:40
 
@@ -52,7 +52,7 @@ The targeted preset system is built around the concept of **slots** - the three 
 
 1. **Frame Slot**: Frame reduction algorithms (animately-frame, ffmpeg-frame, etc.)
 2. **Color Slot**: Color reduction algorithms (ffmpeg-color, gifsicle-color, etc.)  
-3. **Lossy Slot**: Lossy compression algorithms (animately-advanced-lossy, gifski-lossy, etc.)
+3. **Lossy Slot**: Lossy compression algorithms (animately-advanced, gifski-lossy, etc.)
 
 Each slot can be configured as either:
 - **Variable**: Test multiple algorithms in this slot
@@ -164,7 +164,7 @@ Use `--lock-slot` to fix specific algorithms:
 # Lock to specific implementations
 --lock-slot frame=animately-frame
 --lock-slot color=ffmpeg-color
---lock-slot lossy=animately-advanced-lossy
+--lock-slot lossy=animately-advanced
 
 # Multiple locked slots
 --lock-slot color=ffmpeg-color --lock-slot lossy=none-lossy
@@ -206,70 +206,17 @@ poetry run python -m giflab run --preset tool-comparison-baseline --use-gpu
 
 ### Programmatic Usage
 
-You can also use targeted presets programmatically:
+The prediction pipeline can be used programmatically:
 
 ```python
-from giflab.core.runner import GifLabRunner
-from pathlib import Path
+from giflab.prediction_runner import PredictionRunner
 
-# Set up experiment
-runner = GifLabRunner(
-    output_dir=Path("results"),
-    use_cache=True
-)
+# Run the compression pipeline
+runner = PredictionRunner(db_path="results.db")
+runner.run(data_dir="data/raw", workers=4)
 
-# List available presets
-presets = runner.list_available_presets()
-print(f"Available presets: {list(presets.keys())}")
-
-# Generate targeted pipelines
-pipelines = runner.generate_targeted_pipelines("frame-focus")
-print(f"Generated {len(pipelines)} targeted pipelines")
-
-# Run experiment
-result = runner.run_targeted_experiment(
-    preset_id="frame-focus",
-    quality_threshold=0.05
-)
-
-print(f"Completed {result.total_jobs_run} pipeline tests")
-```
-
-### Custom Preset Creation
-
-For advanced users, you can create custom presets programmatically:
-
-```python
-from giflab.experimental.targeted_presets import ExperimentPreset, SlotConfiguration, PRESET_REGISTRY
-
-# Create custom preset
-custom_preset = ExperimentPreset(
-    name="My Custom Study",
-    description="Custom frame algorithm comparison",
-    frame_slot=SlotConfiguration(
-        type="variable",
-        scope=["animately-frame", "ffmpeg-frame"],
-        parameters={"ratios": [1.0, 0.7, 0.4]}
-    ),
-    color_slot=SlotConfiguration(
-        type="locked",
-        implementation="ffmpeg-color",
-        parameters={"colors": 64}
-    ),
-    lossy_slot=SlotConfiguration(
-        type="locked",
-        implementation="none-lossy",
-        parameters={"level": 0}
-    ),
-    max_combinations=50
-)
-
-# Register the preset
-PRESET_REGISTRY.register("my-custom-study", custom_preset)
-
-# Use the custom preset
-runner = GifLabRunner()
-pipelines = runner.generate_targeted_pipelines("my-custom-study")
+# Export results
+runner.export(output="results.csv", format="csv")
 ```
 
 ## Troubleshooting

@@ -8,35 +8,36 @@ to ensure lazy loading works correctly and maintains backward compatibility.
 import sys
 import threading
 import time
-from unittest.mock import MagicMock, patch, Mock
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 
 # Import directly from the source
 sys.path.insert(0, '/Users/lachlants/repos/animately/giflab/src')
 
 from giflab.lazy_imports import (
-    LazyModule,
     LazyImportRegistry,
-    lazy_import,
+    LazyModule,
     check_import_available,
     get_import_status,
-    preload_modules,
-    is_torch_available,
-    is_lpips_available,
-    is_cv2_available,
-    is_scipy_available,
-    is_sklearn_available,
+    get_matplotlib,
     # Phase 2.3 additions
     get_pil,
-    is_pil_available,
-    get_matplotlib,
-    is_matplotlib_available,
-    get_seaborn,
-    is_seaborn_available,
     get_plotly,
-    is_plotly_available,
+    get_seaborn,
     get_subprocess,
+    is_cv2_available,
+    is_lpips_available,
+    is_matplotlib_available,
+    is_pil_available,
+    is_plotly_available,
+    is_scipy_available,
+    is_seaborn_available,
+    is_sklearn_available,
     is_subprocess_available,
+    is_torch_available,
+    lazy_import,
+    preload_modules,
 )
 
 
@@ -315,7 +316,7 @@ class TestPhase23Additions:
         assert matplotlib_module is not None
         assert matplotlib_module._module_name == 'matplotlib'
         
-        # Test seaborn function  
+        # Test seaborn function
         seaborn_module = get_seaborn()
         assert seaborn_module is not None
         assert seaborn_module._module_name == 'seaborn'
@@ -384,7 +385,7 @@ class TestPhase23Additions:
         # Mock different availability states for new functions
         mock_availability = {
             'PIL': True,
-            'matplotlib': False, 
+            'matplotlib': False,
             'seaborn': True,
             'plotly': False,
             'subprocess': True
@@ -417,6 +418,7 @@ class TestPhase23Additions:
     def test_thread_safety_of_new_functions(self):
         """Test thread safety of new availability checkers."""
         import threading
+
         from giflab.lazy_imports import _availability_cache, _availability_lock
         
         # Clear cache
@@ -484,7 +486,7 @@ class TestPhase23Additions:
         assert isinstance(status, dict)
         # Note: The specific modules in status depend on what's been accessed
         # So we just verify the status structure is correct
-        for module_name, (available, imported) in status.items():
+        for _module_name, (available, imported) in status.items():
             assert isinstance(available, bool)
             assert isinstance(imported, bool)
 

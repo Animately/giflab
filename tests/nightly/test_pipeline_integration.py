@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from unittest.mock import Mock
 
 import numpy as np
@@ -37,7 +37,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from giflab.conditional_metrics import ConditionalMetricsCalculator
 from giflab.deep_perceptual_metrics import should_use_deep_perceptual
-from giflab.metrics import calculate_comprehensive_metrics_from_frames, cleanup_all_validators
+from giflab.metrics import (
+    calculate_comprehensive_metrics_from_frames,
+    cleanup_all_validators,
+)
 from giflab.model_cache import LPIPSModelCache
 from giflab.multiprocessing_support import (
     ParallelFrameGenerator,
@@ -51,11 +54,9 @@ from giflab.optimization_validation import (
 from giflab.parallel_metrics import ParallelMetricsCalculator
 from giflab.synthetic_gifs import SyntheticFrameGenerator, SyntheticGifGenerator
 
-
 # ---------------------------------------------------------------------------
 # Full Pipeline Integration Tests (from test_phase5_full_pipeline.py)
 # ---------------------------------------------------------------------------
-
 
 class TestFullPipelineIntegration:
     """Integration tests for full metric calculation pipeline."""
@@ -84,10 +85,10 @@ class TestFullPipelineIntegration:
     def generate_test_gif_frames(
         self,
         frame_count: int = 10,
-        size: Tuple[int, int] = (200, 200),
+        size: tuple[int, int] = (200, 200),
         quality: str = "medium",
         content: str = "mixed"
-    ) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Generate test GIF frames with specific characteristics.
 
         Args:
@@ -97,7 +98,7 @@ class TestFullPipelineIntegration:
             content: Content type ('text', 'gradient', 'animation', 'static', 'mixed')
 
         Returns:
-            Tuple of (original_frames, compressed_frames)
+            tuple of (original_frames, compressed_frames)
         """
         np.random.seed(42)  # Ensure deterministic generation
         width, height = size
@@ -231,7 +232,7 @@ class TestFullPipelineIntegration:
                 baseline_val = baseline_metrics[key]
                 optimized_val = optimized_metrics[key]
 
-                if isinstance(baseline_val, (int, float)):
+                if isinstance(baseline_val, int | float):
                     if baseline_val != 0:
                         relative_diff = abs(optimized_val - baseline_val) / abs(baseline_val)
                         assert relative_diff < tolerance, \
@@ -253,7 +254,7 @@ class TestFullPipelineIntegration:
         os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
 
         results = []
-        for i in range(3):
+        for _ in range(3):
             metrics = calculate_comprehensive_metrics_from_frames(
                 frames_orig,
                 frames_comp
@@ -267,7 +268,7 @@ class TestFullPipelineIntegration:
                     val0 = results[0][key]
                     vali = results[i][key]
 
-                    if isinstance(val0, (int, float)):
+                    if isinstance(val0, int | float):
                         assert abs(val0 - vali) < 1e-6, \
                             f"Non-deterministic result for {key}: run 1={val0}, run {i + 1}={vali}"
 
@@ -352,7 +353,7 @@ class TestFullPipelineIntegration:
         os.environ['GIFLAB_USE_MODEL_CACHE'] = 'true'
 
         start_time = time.perf_counter()
-        metrics = calculate_comprehensive_metrics_from_frames(
+        calculate_comprehensive_metrics_from_frames(
             frames_orig,
             frames_comp
         )
@@ -365,7 +366,7 @@ class TestFullPipelineIntegration:
         )
 
         start_time = time.perf_counter()
-        metrics = calculate_comprehensive_metrics_from_frames(
+        calculate_comprehensive_metrics_from_frames(
             frames_orig,
             frames_comp
         )
@@ -387,13 +388,13 @@ class TestFullPipelineIntegration:
         )
 
         initial_info = cache.get_cache_info()
-        metrics1 = calculate_comprehensive_metrics_from_frames(
+        calculate_comprehensive_metrics_from_frames(
             frames_orig,
             frames_comp
         )
         after_first = cache.get_cache_info()
 
-        metrics2 = calculate_comprehensive_metrics_from_frames(
+        calculate_comprehensive_metrics_from_frames(
             frames_orig,
             frames_comp
         )
@@ -479,11 +480,9 @@ class TestFullPipelineIntegration:
         if speedup < 1.0:
             print("WARNING: Parallel processing slower than sequential - may be due to system load or small workload")
 
-
 # ---------------------------------------------------------------------------
 # Validation Pipeline Tests (from test_validation_pipeline.py)
 # ---------------------------------------------------------------------------
-
 
 class TestFullPipelineValidation:
     """Test Phase 2 metrics integration within the complete validation pipeline."""
@@ -520,7 +519,7 @@ class TestFullPipelineValidation:
 
         # Create original GIF with smooth gradient
         original_frames = []
-        for i in range(5):
+        for _ in range(5):
             frame = np.zeros((64, 64, 3), dtype=np.uint8)
             for y in range(64):
                 for x in range(64):
@@ -782,7 +781,6 @@ class TestFullPipelineValidation:
         assert borderline_result.metrics.lpips_quality_mean is not None
         assert borderline_result.metrics.deep_perceptual_frame_count is not None
 
-
 class TestRegressionPrevention:
     """Test regression prevention with golden reference comparisons."""
 
@@ -901,7 +899,6 @@ class TestRegressionPrevention:
         assert (
             quality_failure_detected
         ), f"Expected quality issues to be detected with catastrophic metrics. Categories: {issue_categories}"
-
 
 class TestValidationSystemIntegrationPipeline:
     """Test validation system integration with Phase 2 metrics."""
@@ -1047,11 +1044,9 @@ class TestValidationSystemIntegrationPipeline:
         assert isinstance(result_invalid, ValidationResult)
         assert result_invalid.status != ValidationStatus.UNKNOWN
 
-
 # ---------------------------------------------------------------------------
 # Performance Integration Tests (from test_performance_integration.py)
 # ---------------------------------------------------------------------------
-
 
 class TestPerformanceIntegration:
     """Integration tests for performance improvements."""
@@ -1217,7 +1212,6 @@ class TestPerformanceIntegration:
                 elapsed < max_time
             ), f"{content_type} took {elapsed:.4f}s, expected < {max_time}s"
             assert img.size == size
-
 
 @pytest.mark.integration
 class TestRealWorldPerformance:

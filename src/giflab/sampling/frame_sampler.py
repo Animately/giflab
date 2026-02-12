@@ -1,15 +1,15 @@
 """Base frame sampler interface and data structures."""
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Tuple, Optional, Dict, Any
-import numpy as np
-import logging
 from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 class SamplingStrategy(Enum):
     """Available sampling strategies."""
@@ -19,17 +19,16 @@ class SamplingStrategy(Enum):
     SCENE_AWARE = "scene_aware"
     FULL = "full"  # No sampling, process all frames
 
-
 @dataclass
 class SamplingResult:
     """Result of frame sampling operation."""
-    sampled_indices: List[int]  # Indices of sampled frames
+    sampled_indices: list[int]  # Indices of sampled frames
     total_frames: int  # Total number of frames
     sampling_rate: float  # Percentage of frames sampled
-    confidence_level: Optional[float] = None  # Statistical confidence
-    confidence_interval: Optional[Tuple[float, float]] = None  # CI bounds
+    confidence_level: float | None = None  # Statistical confidence
+    confidence_interval: tuple[float, float] | None = None  # CI bounds
     strategy_used: str = ""  # Name of strategy used
-    metadata: Dict[str, Any] = None  # Additional strategy-specific data
+    metadata: dict[str, Any] = None  # Additional strategy-specific data
     
     def __post_init__(self):
         if self.metadata is None:
@@ -47,7 +46,6 @@ class SamplingResult:
     def is_full_sampling(self) -> bool:
         """Check if all frames were sampled."""
         return self.num_sampled == self.total_frames
-
 
 class FrameSampler(ABC):
     """Abstract base class for frame sampling strategies."""
@@ -73,14 +71,14 @@ class FrameSampler(ABC):
     @abstractmethod
     def sample(
         self,
-        frames: List[np.ndarray],
+        frames: list[np.ndarray],
         **kwargs
     ) -> SamplingResult:
         """
         Sample frames based on strategy.
         
         Args:
-            frames: List of frames to sample from
+            frames: list of frames to sample from
             **kwargs: Strategy-specific parameters
             
         Returns:
@@ -102,9 +100,9 @@ class FrameSampler(ABC):
     
     def calculate_confidence_interval(
         self,
-        samples: List[float],
+        samples: list[float],
         confidence_level: float = None
-    ) -> Tuple[float, float]:
+    ) -> tuple[float, float]:
         """
         Calculate confidence interval for sampled metrics.
         
@@ -113,7 +111,7 @@ class FrameSampler(ABC):
             confidence_level: Confidence level (uses default if None)
             
         Returns:
-            Tuple of (lower_bound, upper_bound)
+            tuple of (lower_bound, upper_bound)
         """
         if confidence_level is None:
             confidence_level = self.confidence_level
@@ -152,7 +150,6 @@ class FrameSampler(ABC):
                     f"[{result.confidence_interval[0]:.4f}, "
                     f"{result.confidence_interval[1]:.4f}]"
                 )
-
 
 class FrameDifferenceCalculator:
     """Helper class for calculating frame differences."""
@@ -227,7 +224,6 @@ class FrameDifferenceCalculator:
         )
         return diff > threshold
 
-
 def create_sampler(
     strategy: SamplingStrategy,
     min_frames_threshold: int = 30,
@@ -249,10 +245,10 @@ def create_sampler(
         FrameSampler instance
     """
     from .strategies import (
-        UniformSampler,
         AdaptiveSampler,
         ProgressiveSampler,
         SceneAwareSampler,
+        UniformSampler,
     )
     
     samplers = {

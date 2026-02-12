@@ -1,12 +1,12 @@
 """Performance benchmarks for conditional metrics optimization."""
 
-import time
 import os
-import numpy as np
-import pytest
-from typing import List, Dict, Any
+import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import pytest
 from giflab.conditional_metrics import ConditionalMetricsCalculator, QualityTier
 from giflab.metrics import calculate_comprehensive_metrics_from_frames
 
@@ -137,7 +137,7 @@ class TestConditionalMetricsPerformance:
         
         # Create test frames
         np.random.seed(42)
-        frames = [np.random.randint(0, 256, (100, 100, 3), dtype=np.uint8) 
+        frames = [np.random.randint(0, 256, (100, 100, 3), dtype=np.uint8)
                  for _ in range(50)]
         
         # First pass - no cache hits
@@ -156,7 +156,7 @@ class TestConditionalMetricsPerformance:
         stats = cache.get_cache_stats()
         assert stats["cache_hits"] > 0
         
-        print(f"\n=== Frame Hash Cache Performance ===")
+        print("\n=== Frame Hash Cache Performance ===")
         print(f"First pass (50 frames): {first_pass_time:.4f}s")
         print(f"Second pass (25 frames): {second_pass_time:.4f}s")
         print(f"Cache hit rate: {stats['hit_rate']:.2%}")
@@ -169,15 +169,15 @@ class TestConditionalMetricsPerformance:
         
         # Test quick mode
         start = time.perf_counter()
-        profile_quick = calc.detect_content_profile(compressed, quick_mode=True)
+        calc.detect_content_profile(compressed, quick_mode=True)
         quick_time = time.perf_counter() - start
         
         # Test full mode
         start = time.perf_counter()
-        profile_full = calc.detect_content_profile(compressed, quick_mode=False)
+        calc.detect_content_profile(compressed, quick_mode=False)
         full_time = time.perf_counter() - start
         
-        print(f"\n=== Content Detection Performance ===")
+        print("\n=== Content Detection Performance ===")
         print(f"Quick mode: {quick_time:.4f}s")
         print(f"Full mode: {full_time:.4f}s")
         print(f"Speedup: {full_time/quick_time:.2f}x")
@@ -241,7 +241,7 @@ class TestConditionalMetricsPerformance:
         
         optimized_memory_mb = peak / 1024 / 1024
         
-        print(f"\n=== Memory Efficiency ===")
+        print("\n=== Memory Efficiency ===")
         print(f"Peak memory usage: {optimized_memory_mb:.2f} MB")
         print(f"Quality tier: {quality.tier.value}")
         print(f"Metrics selected: {sum(1 for v in selected.values() if v)}")
@@ -285,7 +285,7 @@ class TestConditionalMetricsPerformance:
         
         overall_speedup = total_time_estimated / total_time_optimized
         
-        print(f"\n=== Overall Real-World Performance ===")
+        print("\n=== Overall Real-World Performance ===")
         print(f"Total optimized time: {total_time_optimized:.4f}s")
         print(f"Estimated full time: {total_time_estimated:.4f}s")
         print(f"Overall speedup: {overall_speedup:.2f}x")
@@ -308,7 +308,7 @@ class TestConditionalMetricsPerformance:
         
         stats = calc.get_optimization_stats()
         
-        print(f"\n=== Optimization Statistics ===")
+        print("\n=== Optimization Statistics ===")
         print(f"Metrics calculated: {stats['metrics_calculated']}")
         print(f"Metrics skipped: {stats['metrics_skipped']}")
         print(f"Optimization ratio: {stats['optimization_ratio']:.2%}")
@@ -318,7 +318,6 @@ class TestConditionalMetricsPerformance:
         assert stats['metrics_calculated'] > 0
         assert stats['metrics_skipped'] > 0
         assert 0 < stats['optimization_ratio'] < 1
-
 
 @pytest.mark.benchmark
 class TestConditionalMetricsIntegration:
@@ -330,7 +329,7 @@ class TestConditionalMetricsIntegration:
         
         # Create test frames
         num_frames = 20
-        original = [np.ones((200, 200, 3), dtype=np.uint8) * (100 + i * 5) 
+        original = [np.ones((200, 200, 3), dtype=np.uint8) * (100 + i * 5)
                    for i in range(num_frames)]
         
         # High quality compression (minor changes)
@@ -346,7 +345,7 @@ class TestConditionalMetricsIntegration:
         # Mock the expensive calculations
         with patch("giflab.metrics.calculate_comprehensive_metrics_from_frames") as mock_full:
             mock_full.return_value = {"all_metrics": "calculated"}
-            result_without = mock_full(original, compressed)
+            mock_full(original, compressed)
             time_without = time.perf_counter() - start
         
         # Test with optimization enabled
@@ -358,14 +357,12 @@ class TestConditionalMetricsIntegration:
         if quality.tier == QualityTier.HIGH:
             # Simulated optimized path
             time_with = time.perf_counter() - start
-            result_with = {"optimized": True, "quality_tier": "high"}
         else:
             time_with = time_without  # No optimization for non-high quality
-            result_with = result_without
         
         speedup = time_without / max(time_with, 0.001)
         
-        print(f"\n=== Full Pipeline Comparison ===")
+        print("\n=== Full Pipeline Comparison ===")
         print(f"Without optimization: {time_without:.4f}s")
         print(f"With optimization: {time_with:.4f}s")
         print(f"Speedup: {speedup:.2f}x")
@@ -373,7 +370,6 @@ class TestConditionalMetricsIntegration:
         
         # Reset environment
         os.environ["GIFLAB_ENABLE_CONDITIONAL_METRICS"] = "true"
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short", "-k", "performance"])

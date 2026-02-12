@@ -3,12 +3,13 @@ Integration module for instrumenting GifLab optimization systems with metrics.
 """
 
 import functools
-import time
-from typing import Any, Callable
 import logging
+import time
+from collections.abc import Callable
+from typing import Any
 
-from .metrics_collector import get_metrics_collector
 from .decorators import MetricTracker
+from .metrics_collector import get_metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ def instrument_validation_cache():
             )
             
             # Track result values
-            if isinstance(result, (int, float)):
+            if isinstance(result, int | float):
                 collector.record_histogram(
                     f"validation.{metric_type}.values",
                     result
@@ -220,7 +221,7 @@ def instrument_resize_cache():
     - cache.resize.memory_usage_mb
     """
     try:
-        from ..caching.resized_frame_cache import ResizedFrameCache, FrameBufferPool
+        from ..caching.resized_frame_cache import FrameBufferPool, ResizedFrameCache
         
         collector = get_metrics_collector()
         
@@ -425,7 +426,7 @@ def instrument_metrics_calculation():
     try:
         from .. import metrics
         
-        collector = get_metrics_collector()
+        get_metrics_collector()
         tracker = MetricTracker("metrics")
         
         # Instrument calculate_comprehensive_metrics_from_frames
@@ -443,7 +444,7 @@ def instrument_metrics_calculation():
                     
                     # Track quality scores
                     for metric_name, value in result.items():
-                        if isinstance(value, (int, float)) and not metric_name.startswith("_"):
+                        if isinstance(value, int | float) and not metric_name.startswith("_"):
                             tracker.histogram(
                                 "quality_scores",
                                 value,

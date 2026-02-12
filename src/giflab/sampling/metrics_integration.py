@@ -1,35 +1,35 @@
 """Integration of frame sampling with metrics calculation."""
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-import numpy as np
 from pathlib import Path
+from typing import Any, Optional
 
-from ..config import FRAME_SAMPLING, DEFAULT_METRICS_CONFIG, MetricsConfig
+import numpy as np
+
+from ..config import DEFAULT_METRICS_CONFIG, FRAME_SAMPLING, MetricsConfig
 from ..metrics import (
-    calculate_comprehensive_metrics_from_frames,
     align_frames,
+    calculate_comprehensive_metrics_from_frames,
     resize_to_common_dimensions,
 )
 from .frame_sampler import (
-    SamplingStrategy,
     SamplingResult,
+    SamplingStrategy,
     create_sampler,
 )
 
 logger = logging.getLogger(__name__)
 
-
 def calculate_metrics_with_sampling(
-    original_frames: List[np.ndarray],
-    compressed_frames: List[np.ndarray],
-    config: Optional[MetricsConfig] = None,
-    sampling_enabled: Optional[bool] = None,
-    sampling_strategy: Optional[str] = None,
+    original_frames: list[np.ndarray],
+    compressed_frames: list[np.ndarray],
+    config: MetricsConfig | None = None,
+    sampling_enabled: bool | None = None,
+    sampling_strategy: str | None = None,
     frame_reduction_context: bool = False,
-    file_metadata: Optional[Dict[str, Any]] = None,
+    file_metadata: dict[str, Any] | None = None,
     return_sampling_info: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Calculate comprehensive metrics with optional frame sampling.
     
@@ -38,8 +38,8 @@ def calculate_metrics_with_sampling(
     calculates metrics on the subset, providing confidence intervals for accuracy.
     
     Args:
-        original_frames: List of original frames as numpy arrays
-        compressed_frames: List of compressed frames as numpy arrays
+        original_frames: list of original frames as numpy arrays
+        compressed_frames: list of compressed frames as numpy arrays
         config: Optional metrics configuration (uses default if None)
         sampling_enabled: Override sampling enable/disable (uses config if None)
         sampling_strategy: Override sampling strategy (uses config if None)
@@ -139,7 +139,7 @@ def calculate_metrics_with_sampling(
                 # Remove duplicates while preserving order
                 seen = set()
                 compressed_indices = [
-                    x for x in compressed_indices 
+                    x for x in compressed_indices
                     if not (x in seen or seen.add(x))
                 ]
                 sampled_compressed = [compressed_frames[i] for i in compressed_indices]
@@ -196,26 +196,25 @@ def calculate_metrics_with_sampling(
     
     return metrics
 
-
 def apply_sampling_to_frames(
-    frames: List[np.ndarray],
+    frames: list[np.ndarray],
     sampling_strategy: str = "adaptive",
     confidence_level: float = 0.95,
     verbose: bool = False,
-) -> Tuple[List[np.ndarray], SamplingResult]:
+) -> tuple[list[np.ndarray], SamplingResult]:
     """
     Apply sampling to a list of frames.
     
     This is a utility function for applying sampling independently of metrics.
     
     Args:
-        frames: List of frames to sample
+        frames: list of frames to sample
         sampling_strategy: Strategy to use (uniform, adaptive, progressive, scene_aware)
         confidence_level: Target confidence level for sampling
         verbose: Enable verbose logging
         
     Returns:
-        Tuple of (sampled_frames, sampling_result)
+        tuple of (sampled_frames, sampling_result)
     """
     # Map strategy string to enum
     strategy_map = {
@@ -250,7 +249,6 @@ def apply_sampling_to_frames(
     sampled_frames = [frames[i] for i in sampling_result.sampled_indices]
     
     return sampled_frames, sampling_result
-
 
 def estimate_sampling_speedup(
     num_frames: int,

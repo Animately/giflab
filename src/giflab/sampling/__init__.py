@@ -6,10 +6,10 @@ from .frame_sampler import (
     SamplingStrategy,
 )
 from .strategies import (
-    UniformSampler,
     AdaptiveSampler,
     ProgressiveSampler,
     SceneAwareSampler,
+    UniformSampler,
 )
 
 __all__ = [

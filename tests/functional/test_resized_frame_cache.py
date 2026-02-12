@@ -1,13 +1,12 @@
 """Unit tests for ResizedFrameCache and FrameBufferPool."""
 
-import time
 import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
 import pytest
-
 from giflab.caching.resized_frame_cache import (
     FrameBufferPool,
     InterpolationMethod,
@@ -121,7 +120,7 @@ class TestFrameBufferPool:
         # Perform some operations
         b1 = pool.get_buffer((100, 100, 3))
         pool.release_buffer(b1)
-        b2 = pool.get_buffer((100, 100, 3))
+        pool.get_buffer((100, 100, 3))
         
         stats = pool.get_stats()
         assert stats["allocations"] == 1
@@ -199,7 +198,7 @@ class TestResizedFrameCache:
         frames = [np.random.randint(0, 255, (200, 200, 3), dtype=np.uint8) for _ in range(5)]
 
         # Add frames to cache
-        for i, frame in enumerate(frames):
+        for _i, frame in enumerate(frames):
             cache.get(frame, (100, 100), cv2.INTER_AREA)
 
         stats = cache.get_stats()

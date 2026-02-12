@@ -7,7 +7,7 @@ terminal content, and various perceptual quality scenarios.
 
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
 from unittest.mock import Mock, patch
 
 import cv2
@@ -34,7 +34,6 @@ try:
 except ImportError:
     Phase3FixtureGenerator = None
 
-
 @pytest.fixture
 def fixture_generator():
     """Create fixture generator for tests."""
@@ -44,7 +43,6 @@ def fixture_generator():
     with tempfile.TemporaryDirectory() as tmpdir:
         generator = Phase3FixtureGenerator(Path(tmpdir))
         yield generator
-
 
 class TestUIHeavyContentScenarios:
     """Test scenarios with UI-heavy content types."""
@@ -248,7 +246,6 @@ class TestUIHeavyContentScenarios:
 
         # OCR analysis is optional without OCR libraries
         # The bilateral filter may reduce edge sharpness but UI should still be detected
-
 
 class TestTextHeavyContentScenarios:
     """Test scenarios with text-heavy content."""
@@ -479,7 +476,6 @@ class TestTextHeavyContentScenarios:
             result["text_ui_edge_density"] > 0.045
         )  # Adjusted to match actual edge density from simulated UI
 
-
 class TestNonTextContentValidation:
     """Test validation with non-text content to ensure no false positives."""
 
@@ -621,7 +617,6 @@ class TestNonTextContentValidation:
         result = calculate_text_ui_metrics(orig_frames, comp_frames)
         assert result["text_ui_component_count"] <= 2  # Allow minimal noise components
 
-
 class TestSsimulacra2QualityScenarios:
     """Test SSIMULACRA2 with various quality scenarios."""
 
@@ -743,7 +738,6 @@ class TestSsimulacra2QualityScenarios:
             # Should detect quality issues
             assert result["ssimulacra2_mean"] < 0.5
             assert result["ssimulacra2_triggered"] == 1.0
-
 
 class TestCombinedScenarios:
     """Test combined scenarios with both text/UI and quality metrics."""
@@ -930,7 +924,6 @@ class TestCombinedScenarios:
                 assert 0.0 <= composite <= 1.0
                 # Should be reasonable for good quality with slight degradation
                 assert composite > 0.5
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

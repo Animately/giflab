@@ -7,8 +7,6 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from giflab.caching import (
     CacheStats,
     FrameCache,
@@ -16,6 +14,7 @@ from giflab.caching import (
     get_frame_cache,
     reset_frame_cache,
 )
+from PIL import Image
 
 
 @pytest.fixture
@@ -147,7 +146,7 @@ class TestFrameCacheEntry:
         assert restored_entry.file_mtime == original_entry.file_mtime
         
         # Check frame data is preserved
-        for orig_frame, restored_frame in zip(original_entry.frames, restored_entry.frames):
+        for orig_frame, restored_frame in zip(original_entry.frames, restored_entry.frames, strict=True):
             np.testing.assert_array_equal(orig_frame, restored_frame)
     
     def test_entry_memory_size(self, sample_frames):
@@ -242,7 +241,7 @@ class TestFrameCache:
         assert duration_ms == 1000
         
         # Check frames match
-        for orig_frame, cached_frame in zip(sample_frames, frames):
+        for orig_frame, cached_frame in zip(sample_frames, frames, strict=True):
             np.testing.assert_array_equal(orig_frame, cached_frame)
     
     def test_cache_hit_miss_stats(self, frame_cache, sample_frames, sample_gif):
@@ -327,7 +326,7 @@ class TestFrameCache:
         assert stats.evictions > 0
         
         # First entries should have been evicted
-        result = cache.get(gif_files[0], max_frames=None)
+        cache.get(gif_files[0], max_frames=None)
         # May be in disk cache but not memory
     
     def test_cache_ttl_expiration(self, temp_cache_dir, sample_frames, sample_gif):

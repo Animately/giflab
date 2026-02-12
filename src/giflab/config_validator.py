@@ -8,14 +8,15 @@ resource availability checks.
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 
 class ValidationRule:
     """Represents a validation rule for a configuration value."""
     
-    def __init__(self, 
+    def __init__(self,
                  name: str,
                  validator: Callable[[Any], bool],
                  error_message: str,
@@ -33,11 +34,11 @@ class ValidationRule:
         self.error_message = error_message
         self.severity = severity
     
-    def validate(self, value: Any) -> Tuple[bool, Optional[str]]:
+    def validate(self, value: Any) -> tuple[bool, str | None]:
         """Validate a value against this rule.
         
         Returns:
-            Tuple of (is_valid, error_message)
+            tuple of (is_valid, error_message)
         """
         try:
             if self.validator(value):
@@ -45,7 +46,6 @@ class ValidationRule:
             return False, self.error_message
         except Exception as e:
             return False, f"{self.error_message}: {e}"
-
 
 class TypeValidator:
     """Validators for type checking."""
@@ -58,7 +58,7 @@ class TypeValidator:
     @staticmethod
     def is_float(value: Any) -> bool:
         """Check if value is a float."""
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        return isinstance(value, int | float) and not isinstance(value, bool)
     
     @staticmethod
     def is_bool(value: Any) -> bool:
@@ -93,16 +93,15 @@ class TypeValidator:
                 return False
         return False
 
-
 class RangeValidator:
     """Validators for range checking."""
     
     @staticmethod
-    def in_range(min_val: Optional[float] = None, 
-                 max_val: Optional[float] = None) -> Callable:
+    def in_range(min_val: float | None = None,
+                 max_val: float | None = None) -> Callable:
         """Create a range validator."""
         def validator(value: Any) -> bool:
-            if not isinstance(value, (int, float)):
+            if not isinstance(value, int | float):
                 return False
             if min_val is not None and value < min_val:
                 return False
@@ -114,23 +113,22 @@ class RangeValidator:
     @staticmethod
     def positive(value: Any) -> bool:
         """Check if value is positive."""
-        return isinstance(value, (int, float)) and value > 0
+        return isinstance(value, int | float) and value > 0
     
     @staticmethod
     def non_negative(value: Any) -> bool:
         """Check if value is non-negative."""
-        return isinstance(value, (int, float)) and value >= 0
+        return isinstance(value, int | float) and value >= 0
     
     @staticmethod
     def percentage(value: Any) -> bool:
         """Check if value is a valid percentage (0-1)."""
-        return isinstance(value, (int, float)) and 0 <= value <= 1
+        return isinstance(value, int | float) and 0 <= value <= 1
     
     @staticmethod
     def port_number(value: Any) -> bool:
         """Check if value is a valid port number."""
         return isinstance(value, int) and 1 <= value <= 65535
-
 
 class ResourceValidator:
     """Validators for system resources."""
@@ -153,7 +151,7 @@ class ResourceValidator:
         return validator
     
     @staticmethod
-    def disk_space_available(path: Union[str, Path], required_mb: int) -> bool:
+    def disk_space_available(path: str | Path, required_mb: int) -> bool:
         """Check if enough disk space is available."""
         try:
             path = Path(path) if isinstance(path, str) else path
@@ -172,7 +170,7 @@ class ResourceValidator:
         return shutil.which(name) is not None
     
     @staticmethod
-    def file_exists(path: Union[str, Path]) -> bool:
+    def file_exists(path: str | Path) -> bool:
         """Check if a file exists."""
         try:
             path = Path(path) if isinstance(path, str) else path
@@ -181,7 +179,7 @@ class ResourceValidator:
             return False
     
     @staticmethod
-    def directory_exists(path: Union[str, Path]) -> bool:
+    def directory_exists(path: str | Path) -> bool:
         """Check if a directory exists."""
         try:
             path = Path(path) if isinstance(path, str) else path
@@ -190,7 +188,7 @@ class ResourceValidator:
             return False
     
     @staticmethod
-    def directory_writable(path: Union[str, Path]) -> bool:
+    def directory_writable(path: str | Path) -> bool:
         """Check if a directory is writable."""
         try:
             path = Path(path) if isinstance(path, str) else path
@@ -208,14 +206,13 @@ class ResourceValidator:
         except Exception:
             return False
 
-
 class DependencyValidator:
     """Validators for configuration dependencies."""
     
     @staticmethod
     def requires(other_path: str, condition: Callable) -> Callable:
         """Create a validator that depends on another config value."""
-        def validator(value: Any, config: Dict[str, Any]) -> bool:
+        def validator(value: Any, config: dict[str, Any]) -> bool:
             other_value = _get_value_by_path(config, other_path)
             return condition(other_value, value)
         return validator
@@ -223,7 +220,7 @@ class DependencyValidator:
     @staticmethod
     def mutually_exclusive(*paths: str) -> Callable:
         """Create a validator for mutually exclusive options."""
-        def validator(value: Any, config: Dict[str, Any]) -> bool:
+        def validator(value: Any, config: dict[str, Any]) -> bool:
             if not value:
                 return True
             
@@ -237,31 +234,30 @@ class DependencyValidator:
     @staticmethod
     def sum_equals(target: float, *paths: str) -> Callable:
         """Create a validator that checks if values sum to target."""
-        def validator(value: Any, config: Dict[str, Any]) -> bool:
-            total = value if isinstance(value, (int, float)) else 0
+        def validator(value: Any, config: dict[str, Any]) -> bool:
+            total = value if isinstance(value, int | float) else 0
             
             for path in paths:
                 other_value = _get_value_by_path(config, path)
-                if isinstance(other_value, (int, float)):
+                if isinstance(other_value, int | float):
                     total += other_value
             
             return abs(total - target) < 1e-6
         return validator
 
-
 class ConfigurationValidator:
     """Main configuration validator with comprehensive rules."""
     
     def __init__(self):
-        self.rules: Dict[str, List[ValidationRule]] = {}
+        self.rules: dict[str, list[ValidationRule]] = {}
         self._register_default_rules()
     
     def _register_default_rules(self):
         """Register default validation rules for known configurations."""
         
         # Frame cache rules
-        self.add_rule("FRAME_CACHE.enabled", 
-                     ValidationRule("type", TypeValidator.is_bool, 
+        self.add_rule("FRAME_CACHE.enabled",
+                     ValidationRule("type", TypeValidator.is_bool,
                                    "enabled must be a boolean"))
         
         self.add_rule("FRAME_CACHE.memory_limit_mb",
@@ -298,8 +294,8 @@ class ConfigurationValidator:
                                    "confidence_level must be between 0.5 and 0.99"))
         
         self.add_rule("FRAME_SAMPLING.default_strategy",
-                     ValidationRule("enum", 
-                                   lambda x: x in ["uniform", "adaptive", "progressive", 
+                     ValidationRule("enum",
+                                   lambda x: x in ["uniform", "adaptive", "progressive",
                                                   "scene_aware", "full"],
                                    "default_strategy must be a valid strategy"))
         
@@ -320,7 +316,7 @@ class ConfigurationValidator:
         # Engine path rules
         self.add_rule("engine.GIFSICLE_PATH",
                      ValidationRule("executable", ResourceValidator.executable_exists,
-                                   "gifsicle executable not found", 
+                                   "gifsicle executable not found",
                                    severity="warning"))
         
         self.add_rule("engine.ANIMATELY_PATH",
@@ -349,7 +345,7 @@ class ConfigurationValidator:
             self.rules[path] = []
         self.rules[path].append(rule)
     
-    def validate(self, config: Dict[str, Any]) -> Dict[str, List[str]]:
+    def validate(self, config: dict[str, Any]) -> dict[str, list[str]]:
         """Validate a configuration dictionary.
         
         Returns:
@@ -380,7 +376,7 @@ class ConfigurationValidator:
         
         return results
     
-    def validate_relationships(self, config: Dict[str, Any]) -> List[str]:
+    def validate_relationships(self, config: dict[str, Any]) -> list[str]:
         """Validate relationships between configuration values."""
         errors = []
         
@@ -441,8 +437,8 @@ class ConfigurationValidator:
             if metrics.get("USE_ENHANCED_COMPOSITE_QUALITY"):
                 enhanced_weights = [
                     metrics.get(f"ENHANCED_{name}_WEIGHT", 0)
-                    for name in ["SSIM", "MS_SSIM", "PSNR", "MSE", "FSIM", 
-                                "EDGE", "GMSD", "CHIST", "SHARPNESS", 
+                    for name in ["SSIM", "MS_SSIM", "PSNR", "MSE", "FSIM",
+                                "EDGE", "GMSD", "CHIST", "SHARPNESS",
                                 "TEXTURE", "TEMPORAL", "LPIPS", "SSIMULACRA2"]
                 ]
                 
@@ -452,7 +448,7 @@ class ConfigurationValidator:
         
         return errors
     
-    def check_resources(self, config: Dict[str, Any]) -> List[str]:
+    def check_resources(self, config: dict[str, Any]) -> list[str]:
         """Check if required system resources are available."""
         warnings = []
         
@@ -476,7 +472,7 @@ class ConfigurationValidator:
         # Check disk space for cache directories
         cache_paths = []
         if "FRAME_CACHE" in config and config["FRAME_CACHE"].get("disk_path"):
-            cache_paths.append((config["FRAME_CACHE"]["disk_path"], 
+            cache_paths.append((config["FRAME_CACHE"]["disk_path"],
                               config["FRAME_CACHE"].get("disk_limit_mb", 0)))
         
         for path, limit_mb in cache_paths:
@@ -492,8 +488,7 @@ class ConfigurationValidator:
         
         return warnings
 
-
-def _get_value_by_path(config: Dict[str, Any], path: str) -> Any:
+def _get_value_by_path(config: dict[str, Any], path: str) -> Any:
     """Get a value from nested dict using dot-separated path."""
     parts = path.split(".")
     value = config
@@ -508,8 +503,7 @@ def _get_value_by_path(config: Dict[str, Any], path: str) -> Any:
     
     return value
 
-
-def validate_config_file(config_path: Path) -> Dict[str, List[str]]:
+def validate_config_file(config_path: Path) -> dict[str, list[str]]:
     """Validate a configuration file.
     
     Args:

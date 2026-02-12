@@ -130,7 +130,7 @@ class FrameCache:
     def __init__(
         self,
         memory_limit_mb: int = 500,
-        disk_path: Optional[Path] = None,
+        disk_path: Path | None = None,
         disk_limit_mb: int = 2000,
         ttl_seconds: int = 86400,  # 24 hours default
         enabled: bool = True
@@ -187,11 +187,11 @@ class FrameCache:
             
             # Create indices for efficient queries
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_last_accessed 
+                CREATE INDEX IF NOT EXISTS idx_last_accessed
                 ON frame_cache(last_accessed)
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_file_path 
+                CREATE INDEX IF NOT EXISTS idx_file_path
                 ON frame_cache(file_path)
             """)
             conn.commit()
@@ -216,8 +216,8 @@ class FrameCache:
     def get(
         self,
         file_path: Path,
-        max_frames: Optional[int] = None
-    ) -> Optional[tuple[list[np.ndarray], int, tuple[int, int], int]]:
+        max_frames: int | None = None
+    ) -> tuple[list[np.ndarray], int, tuple[int, int], int] | None:
         """Get frames from cache if available.
         
         Args:
@@ -268,7 +268,7 @@ class FrameCache:
                 # Validate file hasn't changed
                 try:
                     stat = file_path.stat()
-                    if (entry.file_size != stat.st_size or 
+                    if (entry.file_size != stat.st_size or
                         abs(entry.file_mtime - stat.st_mtime) > 0.001):
                         # File has changed, invalidate cache
                         self._invalidate_disk_entry(cache_key)
@@ -384,8 +384,8 @@ class FrameCache:
             
             with sqlite3.connect(str(self.disk_path)) as conn:
                 conn.execute("""
-                    INSERT OR REPLACE INTO frame_cache 
-                    (cache_key, data, file_path, file_size, file_mtime, 
+                    INSERT OR REPLACE INTO frame_cache
+                    (cache_key, data, file_path, file_size, file_mtime,
                      created_at, last_accessed, access_count, data_size)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
@@ -404,7 +404,7 @@ class FrameCache:
         except Exception as e:
             logger.error(f"Failed to store to disk cache: {e}")
 
-    def _load_from_disk(self, cache_key: str) -> Optional[FrameCacheEntry]:
+    def _load_from_disk(self, cache_key: str) -> FrameCacheEntry | None:
         """Load entry from disk cache."""
         try:
             with sqlite3.connect(str(self.disk_path)) as conn:
@@ -416,7 +416,7 @@ class FrameCache:
                 if row:
                     # Update access time
                     conn.execute("""
-                        UPDATE frame_cache 
+                        UPDATE frame_cache
                         SET last_accessed = ?, access_count = access_count + 1
                         WHERE cache_key = ?
                     """, (time.time(), cache_key))
@@ -455,8 +455,8 @@ class FrameCache:
             with sqlite3.connect(str(self.disk_path)) as conn:
                 # Get entries sorted by last access time
                 cursor = conn.execute("""
-                    SELECT cache_key, data_size 
-                    FROM frame_cache 
+                    SELECT cache_key, data_size
+                    FROM frame_cache
                     ORDER BY last_accessed ASC
                 """)
                 
@@ -562,7 +562,7 @@ class FrameCache:
                     
             return stats
 
-    def warm_cache(self, file_paths: list[Path], max_frames: Optional[int] = None) -> None:
+    def warm_cache(self, file_paths: list[Path], max_frames: int | None = None) -> None:
         """Pre-load files into cache for better performance.
         
         Args:
@@ -591,7 +591,7 @@ class FrameCache:
 
 
 # Global frame cache instance
-_frame_cache_instance: Optional[FrameCache] = None
+_frame_cache_instance: FrameCache | None = None
 _frame_cache_lock = threading.Lock()
 
 

@@ -49,7 +49,7 @@ ls frame_study/
 GIF compression has 3 main stages called "slots":
 - **Frame**: Reduce animation frames (`animately-frame`, `ffmpeg-frame`, etc.)
 - **Color**: Reduce colors/dithering (`ffmpeg-color`, `gifsicle-color`, etc.)
-- **Lossy**: Lossy compression (`animately-advanced-lossy`, `gifski-lossy`, etc.)
+- **Lossy**: Lossy compression (`animately-advanced`, `gifski-lossy`, etc.)
 
 ### Variable vs Locked
 - **Variable slot**: Test multiple algorithms (what you're comparing)
@@ -58,7 +58,7 @@ GIF compression has 3 main stages called "slots":
 ### Example: Frame Focus Study
 - **Variable**: Frame slot (test all frame algorithms)
 - **Locked**: Color slot (use `ffmpeg-color` with 32 colors)
-- **Locked**: Lossy slot (use `animately-advanced-lossy` at level 40)
+- **Locked**: Lossy slot (use `animately-advanced` at level 40)
 
 **Result**: Compare frame algorithms fairly while controlling other variables.
 

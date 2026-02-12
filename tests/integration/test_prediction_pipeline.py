@@ -6,15 +6,15 @@ works correctly and that predicted outcomes align with actual compression.
 
 import subprocess
 import tempfile
+from datetime import UTC
 from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from giflab.prediction.features import extract_gif_features
 from giflab.prediction.models import CurvePredictionModel
 from giflab.prediction.schemas import CurveType, Engine
+from PIL import Image
 
 
 def create_synthetic_gif(
@@ -40,7 +40,7 @@ def create_synthetic_gif(
             arr = np.random.randint(0, 256, (size[1], size[0], 3), dtype=np.uint8)
         elif pattern == "animation":
             bar_pos = (i * 20) % size[0]
-            arr[:, max(0, bar_pos):min(size[0], bar_pos + 10), :] = [255, 255, 255]
+            arr[:, max(0, bar_pos) : min(size[0], bar_pos + 10), :] = [255, 255, 255]
 
         img = Image.fromarray(arr, mode="RGB")
         images.append(img)
@@ -105,7 +105,7 @@ def synthetic_training_data(tmp_path: Path) -> tuple[list, list]:
 
     patterns = ["gradient", "solid", "noise", "animation"]
 
-    for idx, pattern in enumerate(patterns):
+    for _idx, pattern in enumerate(patterns):
         for variant in range(3):  # 3 variants per pattern
             gif_path = tmp_path / f"{pattern}_{variant}.gif"
             create_synthetic_gif(
@@ -120,13 +120,16 @@ def synthetic_training_data(tmp_path: Path) -> tuple[list, list]:
             features_list.append(features)
 
             # Get actual compression outcomes
-            from giflab.prediction.schemas import CompressionCurveV1
             from datetime import datetime, timezone
 
+            from giflab.prediction.schemas import CompressionCurveV1
+
             sizes = {}
-            for lossy in [0, 20, 40, 60, 80, 100, 120]:
+            for lossy in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]:
+                # Gifsicle native level = normalized × 3
+                native_lossy = lossy * 3
                 out_path = tmp_path / f"{pattern}_{variant}_l{lossy}.gif"
-                size = run_gifsicle_compression(gif_path, out_path, lossy)
+                size = run_gifsicle_compression(gif_path, out_path, native_lossy)
                 if size:
                     sizes[lossy] = size
 
@@ -136,14 +139,18 @@ def synthetic_training_data(tmp_path: Path) -> tuple[list, list]:
                     engine=Engine.GIFSICLE,
                     curve_type=CurveType.LOSSY,
                     is_predicted=False,
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                     size_at_lossy_0=sizes.get(0),
+                    size_at_lossy_10=sizes.get(10),
                     size_at_lossy_20=sizes.get(20),
+                    size_at_lossy_30=sizes.get(30),
                     size_at_lossy_40=sizes.get(40),
+                    size_at_lossy_50=sizes.get(50),
                     size_at_lossy_60=sizes.get(60),
+                    size_at_lossy_70=sizes.get(70),
                     size_at_lossy_80=sizes.get(80),
+                    size_at_lossy_90=sizes.get(90),
                     size_at_lossy_100=sizes.get(100),
-                    size_at_lossy_120=sizes.get(120),
                 )
                 curves_list.append(curve)
             else:
@@ -204,14 +211,14 @@ class TestFullPredictionPipeline:
         model.train(train_features, train_curves, n_estimators=20)
 
         # Predict
-        for features, actual_curve in zip(test_features, test_curves):
+        for features, actual_curve in zip(test_features, test_curves, strict=True):
             predicted_curve = model.predict(features)
 
             # Compare predicted vs actual
             actual_points = actual_curve.get_lossy_curve_points()
             predicted_points = predicted_curve.get_lossy_curve_points()
 
-            for level in [0, 40, 80, 120]:
+            for level in [0, 40, 80, 100]:
                 actual = actual_points.get(level)
                 predicted = predicted_points.get(level)
 
@@ -231,13 +238,14 @@ class TestFullPredictionPipeline:
     ) -> None:
         """Test that different GIF patterns produce different predictions."""
         from datetime import datetime, timezone
+
         from giflab.prediction.schemas import CompressionCurveV1
 
         # Create training data with complete curves
         features_list = []
         curves_list = []
 
-        for idx, pattern in enumerate(["solid", "noise"]):
+        for _idx, pattern in enumerate(["solid", "noise"]):
             for i in range(5):
                 gif_path = tmp_path / f"train_{pattern}_{i}.gif"
                 create_synthetic_gif(gif_path, pattern=pattern, frames=3)
@@ -246,30 +254,33 @@ class TestFullPredictionPipeline:
 
                 # Run actual compression for all levels
                 sizes = {}
-                all_successful = True
-                for lossy in [0, 20, 40, 60, 80, 100, 120]:
+                for lossy in [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]:
+                    # Gifsicle native level = normalized × 3
+                    native_lossy = lossy * 3
                     out_path = tmp_path / f"train_{pattern}_{i}_l{lossy}.gif"
-                    size = run_gifsicle_compression(gif_path, out_path, lossy)
+                    size = run_gifsicle_compression(gif_path, out_path, native_lossy)
                     if size:
                         sizes[lossy] = size
-                    else:
-                        all_successful = False
 
                 # Only add if we got all compression levels
-                if len(sizes) == 7:
+                if len(sizes) == 11:
                     curve = CompressionCurveV1(
                         gif_sha=features.gif_sha,
                         engine=Engine.GIFSICLE,
                         curve_type=CurveType.LOSSY,
                         is_predicted=False,
-                        created_at=datetime.now(timezone.utc),
+                        created_at=datetime.now(UTC),
                         size_at_lossy_0=sizes[0],
+                        size_at_lossy_10=sizes[10],
                         size_at_lossy_20=sizes[20],
+                        size_at_lossy_30=sizes[30],
                         size_at_lossy_40=sizes[40],
+                        size_at_lossy_50=sizes[50],
                         size_at_lossy_60=sizes[60],
+                        size_at_lossy_70=sizes[70],
                         size_at_lossy_80=sizes[80],
+                        size_at_lossy_90=sizes[90],
                         size_at_lossy_100=sizes[100],
-                        size_at_lossy_120=sizes[120],
                     )
                     features_list.append(features)
                     curves_list.append(curve)
@@ -298,6 +309,9 @@ class TestFullPredictionPipeline:
         assert noise_prediction.size_at_lossy_0 is not None
         assert solid_prediction.size_at_lossy_0 > 0
         assert noise_prediction.size_at_lossy_0 > 0
+
+        # Different patterns should produce different predictions
+        assert solid_prediction.size_at_lossy_0 != noise_prediction.size_at_lossy_0
 
 
 class TestPredictionAccuracy:
@@ -331,7 +345,7 @@ class TestPredictionAccuracy:
 
         # MAPE should be a valid percentage (finite, non-negative)
         assert mape >= 0
-        assert mape < float("inf")
+        assert mape < 10_000  # generous bound to catch NaN/overflow
         # Note: MAPE may be very high (>100%) with small synthetic datasets
         # This test validates the pipeline works, not accuracy
 
@@ -350,7 +364,11 @@ class TestEndToEndCLI:
 
         result = subprocess.run(
             [
-                "poetry", "run", "giflab", "predict",
+                "poetry",
+                "run",
+                "giflab",
+                "predict",
+                "extract-features",
                 str(gif_path),
             ],
             capture_output=True,

@@ -7,12 +7,11 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Any
-from unittest.mock import patch, MagicMock
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-
 from giflab.caching.validation_cache import (
     ValidationCache,
     ValidationCacheStats,
@@ -218,7 +217,7 @@ class TestValidationCache:
         )
 
         frames = []
-        for i in range(10):
+        for _ in range(10):
             frame = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
             frames.append(frame)
 
@@ -287,8 +286,8 @@ class TestValidationCache:
                 for i in range(10):
                     # Write
                     cache.put(
-                        frame1, frame2, 
-                        f"metric_{thread_id}_{i}", 
+                        frame1, frame2,
+                        f"metric_{thread_id}_{i}",
                         float(thread_id * 100 + i)
                     )
                     
@@ -490,7 +489,6 @@ class TestValidationCache:
         
         assert result1 == 0.1
         assert result2 == 0.15
-
 
 class TestValidationResult:
     """Test ValidationResult dataclass."""

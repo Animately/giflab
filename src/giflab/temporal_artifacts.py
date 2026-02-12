@@ -1094,17 +1094,17 @@ print(f"Quality Oscillation Freq: {pumping_metrics['quality_oscillation_frequenc
 
 #### Integration with GIF Analysis
 ```python
-from giflab.core.runner import ComprehensiveGifAnalyzer
+from giflab.temporal_artifacts import calculate_enhanced_temporal_metrics_from_paths
 
-analyzer = ComprehensiveGifAnalyzer()
-results = analyzer.analyze_gif(
-    "test.gif",
-    "output/",
-    include_temporal_artifacts=True  # Enable temporal analysis
+# Calculate temporal metrics from original and compressed GIF paths
+metrics = calculate_enhanced_temporal_metrics_from_paths(
+    original_path="original.gif",
+    compressed_path="compressed.gif",
 )
 
-# Temporal metrics are included in results
-temporal_data = results.get('temporal_artifacts', {})
+# Access temporal artifact scores
+print(f"Flicker excess: {metrics.get('flicker_excess', 0):.3f}")
+print(f"Temporal pumping: {metrics.get('temporal_pumping_score', 0):.3f}")
 ```
 
 ### Interpretation Guide
@@ -1168,7 +1168,7 @@ temporal_data = results.get('temporal_artifacts', {})
 ### Integration Points
 
 This system integrates with:
-- `giflab.core.runner.ComprehensiveGifAnalyzer`
+- `giflab.prediction_runner.PredictionRunner` for pipeline execution
 - `giflab.validation` systems for automated quality checks
 - `giflab.metrics` for comprehensive quality assessment
 - `giflab.cli` commands for batch processing

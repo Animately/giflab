@@ -1,17 +1,17 @@
 """Unit tests for frame sampling strategies."""
 
-import pytest
-import numpy as np
 from unittest.mock import Mock, patch
 
+import numpy as np
+import pytest
 from giflab.sampling import (
+    AdaptiveSampler,
     FrameSampler,
+    ProgressiveSampler,
     SamplingResult,
     SamplingStrategy,
-    UniformSampler,
-    AdaptiveSampler,
-    ProgressiveSampler,
     SceneAwareSampler,
+    UniformSampler,
 )
 from giflab.sampling.frame_sampler import (
     FrameDifferenceCalculator,
@@ -201,7 +201,7 @@ class TestAdaptiveSampler:
         """Test adaptive sampling with high motion frames."""
         # Create frames with large differences
         frames = []
-        for i in range(50):
+        for _i in range(50):
             frame = np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
             frames.append(frame)
         
@@ -220,7 +220,7 @@ class TestAdaptiveSampler:
     
     def test_adaptive_metadata(self):
         """Test that adaptive sampling provides motion metadata."""
-        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8) 
+        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
                   for _ in range(30)]
         sampler = AdaptiveSampler(min_frames_threshold=10)
         
@@ -238,7 +238,7 @@ class TestProgressiveSampler:
     
     def test_progressive_sampling_basic(self):
         """Test basic progressive sampling."""
-        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8) 
+        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
                   for _ in range(50)]
         
         sampler = ProgressiveSampler(
@@ -257,7 +257,7 @@ class TestProgressiveSampler:
     
     def test_progressive_with_metric(self):
         """Test progressive sampling with custom metric function."""
-        frames = [np.ones((10, 10, 3), dtype=np.uint8) * i 
+        frames = [np.ones((10, 10, 3), dtype=np.uint8) * i
                   for i in range(30)]
         
         def simple_metric(idx):
@@ -277,7 +277,7 @@ class TestProgressiveSampler:
     
     def test_progressive_convergence(self):
         """Test that progressive sampling converges."""
-        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8) 
+        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
                   for _ in range(100)]
         
         sampler = ProgressiveSampler(
@@ -490,7 +490,7 @@ class TestSamplerIntegration:
     
     def test_sampling_includes_endpoints(self):
         """Test that all strategies include first and last frames."""
-        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8) 
+        frames = [np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
                   for _ in range(50)]
         
         strategies = [

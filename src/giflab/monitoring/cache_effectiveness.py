@@ -6,7 +6,7 @@ effectiveness monitoring, statistical analysis, and actionable optimization reco
 
 Key Components:
     CacheEffectivenessMonitor: Real-time cache operation tracking and analysis
-    CacheEffectivenessStats: Statistical aggregation with time-windowed analysis  
+    CacheEffectivenessStats: Statistical aggregation with time-windowed analysis
     BaselineComparison: A/B testing framework for cached vs non-cached performance
     CacheOperationType: Enumeration of trackable cache operations
 
@@ -44,7 +44,7 @@ Effectiveness Algorithms:
         hit_ratio_5min = hits_in_window / (hits_in_window + misses_in_window)
         effectiveness_score = weighted_average([
             (hit_ratio_overall, 0.4),
-            (hit_ratio_1hour, 0.4), 
+            (hit_ratio_1hour, 0.4),
             (hit_ratio_5min, 0.2)
         ])
         ```
@@ -132,7 +132,7 @@ Use Cases:
         - Detect cache thrashing and recommend configuration changes
     
     Capacity Planning:
-        - Predict cache effectiveness under different memory constraints  
+        - Predict cache effectiveness under different memory constraints
         - Estimate performance impact of cache size changes
         - Plan cache deployment strategies for production environments
     
@@ -155,18 +155,18 @@ Version:
 """
 
 import logging
+import statistics
 import threading
 import time
-from collections import deque, defaultdict
+from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Dict, Optional, List, Tuple, Any, Callable
 from enum import Enum
-import statistics
+from typing import Any, Optional
 
-from .memory_monitor import MemoryStats, MemoryPressureLevel
+from .memory_monitor import MemoryPressureLevel, MemoryStats
 
 logger = logging.getLogger(__name__)
-
 
 class CacheOperationType(Enum):
     """Types of cache operations for effectiveness tracking."""
@@ -175,7 +175,6 @@ class CacheOperationType(Enum):
     PUT = "put"
     EVICT = "evict"
     EXPIRE = "expire"
-
 
 @dataclass
 class CacheOperation:
@@ -186,8 +185,7 @@ class CacheOperation:
     key_hash: str  # Hashed key for privacy
     data_size_mb: float = 0.0
     processing_time_ms: float = 0.0
-    memory_pressure_level: Optional[MemoryPressureLevel] = None
-
+    memory_pressure_level: MemoryPressureLevel | None = None
 
 @dataclass
 class CacheEffectivenessStats:
@@ -227,7 +225,6 @@ class CacheEffectivenessStats:
     last_update_time: float = field(default_factory=time.time)
     analysis_duration_seconds: float = 0.0
 
-
 @dataclass
 class BaselineComparison:
     """Performance comparison between cached and non-cached operations."""
@@ -240,11 +237,10 @@ class BaselineComparison:
     confidence_level: float = 0.95
     statistical_significance: bool = False
 
-
 class CacheEffectivenessMonitor:
     """Monitor and analyze cache effectiveness across all cache types."""
     
-    def __init__(self, 
+    def __init__(self,
                  max_operations_history: int = 10000,
                  time_window_minutes: int = 60,
                  baseline_sample_size: int = 100):
@@ -258,28 +254,28 @@ class CacheEffectivenessMonitor:
         self._operations: deque[CacheOperation] = deque(maxlen=max_operations_history)
         
         # Per-cache-type statistics
-        self._cache_stats: Dict[str, CacheEffectivenessStats] = {}
+        self._cache_stats: dict[str, CacheEffectivenessStats] = {}
         
         # Performance baselines for comparison
-        self._baseline_times: Dict[str, List[float]] = defaultdict(list)
-        self._cached_times: Dict[str, List[float]] = defaultdict(list)
+        self._baseline_times: dict[str, list[float]] = defaultdict(list)
+        self._cached_times: dict[str, list[float]] = defaultdict(list)
         
         # Memory pressure correlation tracking
-        self._memory_stats_history: deque[Tuple[float, MemoryPressureLevel]] = deque(maxlen=1000)
+        self._memory_stats_history: deque[tuple[float, MemoryPressureLevel]] = deque(maxlen=1000)
         
         # Analysis cache to avoid recalculation
-        self._analysis_cache: Dict[str, Tuple[float, Any]] = {}
+        self._analysis_cache: dict[str, tuple[float, Any]] = {}
         self._analysis_cache_ttl: float = 300.0  # 5 minutes
         
         logger.info("Cache effectiveness monitor initialized")
     
-    def record_operation(self, 
-                        cache_type: str, 
+    def record_operation(self,
+                        cache_type: str,
                         operation: CacheOperationType,
                         key: str,
                         data_size_mb: float = 0.0,
                         processing_time_ms: float = 0.0,
-                        memory_pressure_level: Optional[MemoryPressureLevel] = None) -> None:
+                        memory_pressure_level: MemoryPressureLevel | None = None) -> None:
         """Record a cache operation for effectiveness analysis."""
         # Hash key for privacy while maintaining uniqueness
         import hashlib
@@ -351,11 +347,11 @@ class CacheEffectivenessMonitor:
         """Update memory pressure tracking for correlation analysis."""
         with self._lock:
             self._memory_stats_history.append((
-                memory_stats.timestamp, 
+                memory_stats.timestamp,
                 memory_stats.pressure_level
             ))
     
-    def get_cache_effectiveness(self, cache_type: str) -> Optional[CacheEffectivenessStats]:
+    def get_cache_effectiveness(self, cache_type: str) -> CacheEffectivenessStats | None:
         """Get comprehensive effectiveness statistics for a cache type."""
         if cache_type not in self._cache_stats:
             return None
@@ -405,7 +401,7 @@ class CacheEffectivenessMonitor:
             
             return result
     
-    def get_baseline_comparison(self, operation_type: str) -> Optional[BaselineComparison]:
+    def get_baseline_comparison(self, operation_type: str) -> BaselineComparison | None:
         """Compare performance between cached and non-cached operations."""
         cache_key = f"baseline_{operation_type}"
         current_time = time.time()
@@ -455,7 +451,7 @@ class CacheEffectivenessMonitor:
             
             return result
     
-    def get_all_cache_stats(self) -> Dict[str, CacheEffectivenessStats]:
+    def get_all_cache_stats(self) -> dict[str, CacheEffectivenessStats]:
         """Get effectiveness statistics for all monitored cache types."""
         result = {}
         for cache_type in self._cache_stats:
@@ -464,7 +460,7 @@ class CacheEffectivenessMonitor:
                 result[cache_type] = stats
         return result
     
-    def get_system_effectiveness_summary(self) -> Dict[str, Any]:
+    def get_system_effectiveness_summary(self) -> dict[str, Any]:
         """Get system-wide cache effectiveness summary."""
         cache_key = "system_summary"
         current_time = time.time()
@@ -555,7 +551,7 @@ class CacheEffectivenessMonitor:
         
         return evictions_under_pressure / total_evictions
     
-    def clear_statistics(self, cache_type: Optional[str] = None) -> None:
+    def clear_statistics(self, cache_type: str | None = None) -> None:
         """Clear statistics for a specific cache type or all caches."""
         with self._lock:
             if cache_type:
@@ -578,11 +574,9 @@ class CacheEffectivenessMonitor:
         
         logger.info(f"Cleared cache effectiveness statistics for {cache_type or 'all caches'}")
 
-
 # Global instance for singleton access
-_effectiveness_monitor: Optional[CacheEffectivenessMonitor] = None
+_effectiveness_monitor: CacheEffectivenessMonitor | None = None
 _effectiveness_lock = threading.RLock()
-
 
 def get_cache_effectiveness_monitor() -> CacheEffectivenessMonitor:
     """Get singleton cache effectiveness monitor."""
@@ -591,7 +585,6 @@ def get_cache_effectiveness_monitor() -> CacheEffectivenessMonitor:
         if _effectiveness_monitor is None:
             _effectiveness_monitor = CacheEffectivenessMonitor()
         return _effectiveness_monitor
-
 
 def is_cache_effectiveness_monitoring_enabled() -> bool:
     """Check if cache effectiveness monitoring is enabled in configuration."""

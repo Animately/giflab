@@ -11,12 +11,24 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+# Single source of truth for lossy compression sample points.
+# lossy_level is a 0-100 integer representing compression intensity:
+#   0 = no lossy compression (best quality, largest file)
+#   100 = maximum lossy compression (worst quality, smallest file)
+# Each engine maps this to its native parameter space in tool_wrappers.py.
+LOSSY_LEVELS: list[int] = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
 
 class Engine(str, Enum):
-    """Supported compression engines."""
+    """The 7 lossy compression engines."""
 
     GIFSICLE = "gifsicle"
-    ANIMATELY = "animately"
+    ANIMATELY_STANDARD = "animately-standard"
+    ANIMATELY_ADVANCED = "animately-advanced"
+    ANIMATELY_HARD = "animately-hard"
+    IMAGEMAGICK = "imagemagick"
+    FFMPEG = "ffmpeg"
+    GIFSKI = "gifski"
 
 
 class CurveType(str, Enum):
@@ -219,40 +231,61 @@ class CompressionCurveV1(BaseModel):
     created_at: datetime = Field(..., description="Generation timestamp")
 
     # Lossy curve points (populated when curve_type=lossy)
+    # 11 points at 10-unit intervals over the 0-100 normalized scale
     size_at_lossy_0: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=0",
+    )
+    size_at_lossy_10: float | None = Field(
+        None,
+        gt=0,
+        description="File size KB at lossy=10",
     )
     size_at_lossy_20: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=20",
     )
+    size_at_lossy_30: float | None = Field(
+        None,
+        gt=0,
+        description="File size KB at lossy=30",
+    )
     size_at_lossy_40: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=40",
+    )
+    size_at_lossy_50: float | None = Field(
+        None,
+        gt=0,
+        description="File size KB at lossy=50",
     )
     size_at_lossy_60: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=60",
     )
+    size_at_lossy_70: float | None = Field(
+        None,
+        gt=0,
+        description="File size KB at lossy=70",
+    )
     size_at_lossy_80: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=80",
     )
+    size_at_lossy_90: float | None = Field(
+        None,
+        gt=0,
+        description="File size KB at lossy=90",
+    )
     size_at_lossy_100: float | None = Field(
         None,
         gt=0,
         description="File size KB at lossy=100",
-    )
-    size_at_lossy_120: float | None = Field(
-        None,
-        gt=0,
-        description="File size KB at lossy=120",
     )
 
     # Color curve points (populated when curve_type=colors)
@@ -292,21 +325,23 @@ class CompressionCurveV1(BaseModel):
         if v is not None:
             for score in v:
                 if not 0.0 <= score <= 1.0:
-                    raise ValueError(
-                        "confidence_scores must be between 0.0 and 1.0"
-                    )
+                    raise ValueError("confidence_scores must be between 0.0 and 1.0")
         return v
 
     def get_lossy_curve_points(self) -> dict[int, float | None]:
         """Return lossy curve as dict of level -> size."""
         return {
             0: self.size_at_lossy_0,
+            10: self.size_at_lossy_10,
             20: self.size_at_lossy_20,
+            30: self.size_at_lossy_30,
             40: self.size_at_lossy_40,
+            50: self.size_at_lossy_50,
             60: self.size_at_lossy_60,
+            70: self.size_at_lossy_70,
             80: self.size_at_lossy_80,
+            90: self.size_at_lossy_90,
             100: self.size_at_lossy_100,
-            120: self.size_at_lossy_120,
         }
 
     def get_color_curve_points(self) -> dict[int, float | None]:

@@ -16,7 +16,12 @@ from skimage.feature import local_binary_pattern
 from skimage.metrics import peak_signal_noise_ratio as psnr
 from skimage.metrics import structural_similarity as ssim
 
-from .config import DEFAULT_METRICS_CONFIG, ENABLE_EXPERIMENTAL_CACHING, FRAME_CACHE, MetricsConfig
+from .config import (
+    DEFAULT_METRICS_CONFIG,
+    ENABLE_EXPERIMENTAL_CACHING,
+    FRAME_CACHE,
+    MetricsConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +245,7 @@ def extract_gif_frames(
         ValueError: If GIF is invalid or corrupted
     """
     # Check if caching is available and enabled
-    # Try dynamic import if runtime config is enabled but modules weren't loaded  
+    # Try dynamic import if runtime config is enabled but modules weren't loaded
     global get_frame_cache, CACHING_ENABLED
     
     runtime_enabled = FRAME_CACHE.get("enabled", False)

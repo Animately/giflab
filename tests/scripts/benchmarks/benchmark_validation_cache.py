@@ -1,30 +1,29 @@
 """Performance benchmarks for ValidationCache."""
 
-import time
 import tempfile
+import time
 from pathlib import Path
-from typing import List, Tuple, Dict, Any
+from typing import Any
 
 import numpy as np
 import pytest
-
-from giflab.caching.validation_cache import ValidationCache, reset_validation_cache
 from giflab.caching.metrics_integration import (
+    calculate_lpips_cached,
     calculate_ms_ssim_cached,
     calculate_ssim_cached,
-    calculate_lpips_cached,
 )
+from giflab.caching.validation_cache import ValidationCache, reset_validation_cache
 
 
 class BenchmarkValidationCache:
     """Benchmark suite for ValidationCache performance."""
     
     @staticmethod
-    def generate_test_frames(num_frames: int = 10, size: Tuple[int, int] = (100, 100)) -> List[np.ndarray]:
+    def generate_test_frames(num_frames: int = 10, size: tuple[int, int] = (100, 100)) -> list[np.ndarray]:
         """Generate random test frames for benchmarking."""
         np.random.seed(42)
         frames = []
-        for i in range(num_frames):
+        for _i in range(num_frames):
             frame = np.random.randint(0, 255, (size[0], size[1], 3), dtype=np.uint8)
             frames.append(frame)
         return frames
@@ -61,7 +60,7 @@ class BenchmarkValidationCache:
             
             start = time.perf_counter()
             cache.put(
-                frame1, frame2, 
+                frame1, frame2,
                 f"metric_{i % 5}",  # Rotate through 5 metric types
                 float(i),
                 config={"param": i % 10},
@@ -76,7 +75,7 @@ class BenchmarkValidationCache:
             frame2 = frames[(i + 1) % len(frames)]
             
             start = time.perf_counter()
-            result = cache.get(
+            cache.get(
                 frame1, frame2,
                 f"metric_{i % 5}",
                 config={"param": i % 10},
@@ -91,7 +90,7 @@ class BenchmarkValidationCache:
             frame2 = frames[1]
             
             start = time.perf_counter()
-            result = cache.get(
+            cache.get(
                 frame1, frame2,
                 "nonexistent_metric",
                 config={"nonexistent": i},
@@ -181,7 +180,7 @@ class BenchmarkValidationCache:
             frame2 = frames[(i + 1) % len(frames)]
             
             start = time.perf_counter()
-            result = cache1.get(frame1, frame2, f"metric_{i}")
+            cache1.get(frame1, frame2, f"metric_{i}")
             disk_read_times.append(time.perf_counter() - start)
         
         return {
@@ -236,12 +235,12 @@ class BenchmarkValidationCache:
                                 
                                 # First calculation
                                 start = time.perf_counter()
-                                result1 = calculate_ms_ssim_cached(frame1, frame2)
+                                calculate_ms_ssim_cached(frame1, frame2)
                                 ms_ssim_times["first"].append(time.perf_counter() - start)
                                 
                                 # Cached calculation
                                 start = time.perf_counter()
-                                result2 = calculate_ms_ssim_cached(frame1, frame2)
+                                calculate_ms_ssim_cached(frame1, frame2)
                                 ms_ssim_times["cached"].append(time.perf_counter() - start)
                             
                             # Benchmark SSIM
@@ -252,12 +251,12 @@ class BenchmarkValidationCache:
                                 
                                 # First calculation
                                 start = time.perf_counter()
-                                result1 = calculate_ssim_cached(frame1, frame2)
+                                calculate_ssim_cached(frame1, frame2)
                                 ssim_times["first"].append(time.perf_counter() - start)
                                 
                                 # Cached calculation
                                 start = time.perf_counter()
-                                result2 = calculate_ssim_cached(frame1, frame2)
+                                calculate_ssim_cached(frame1, frame2)
                                 ssim_times["cached"].append(time.perf_counter() - start)
                             
                             # Benchmark LPIPS
@@ -268,12 +267,12 @@ class BenchmarkValidationCache:
                                 
                                 # First calculation
                                 start = time.perf_counter()
-                                result1 = calculate_lpips_cached(frame1, frame2)
+                                calculate_lpips_cached(frame1, frame2)
                                 lpips_times["first"].append(time.perf_counter() - start)
                                 
                                 # Cached calculation
                                 start = time.perf_counter()
-                                result2 = calculate_lpips_cached(frame1, frame2)
+                                calculate_lpips_cached(frame1, frame2)
                                 lpips_times["cached"].append(time.perf_counter() - start)
         
         return {
@@ -296,8 +295,8 @@ class BenchmarkValidationCache:
     
     def benchmark_concurrent_access(self, temp_cache_dir: Path):
         """Benchmark concurrent cache access."""
-        import threading
         import queue
+        import threading
         
         cache = ValidationCache(
             memory_limit_mb=50,
@@ -360,7 +359,7 @@ class BenchmarkValidationCache:
         
         return results
     
-    def run_all_benchmarks(self, temp_cache_dir: Path) -> Dict[str, Any]:
+    def run_all_benchmarks(self, temp_cache_dir: Path) -> dict[str, Any]:
         """Run all benchmarks and return results."""
         print("Running ValidationCache Performance Benchmarks...")
         print("=" * 60)
@@ -409,7 +408,6 @@ class BenchmarkValidationCache:
         
         return results
 
-
 def test_validation_cache_performance():
     """Run performance benchmarks as a test."""
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -425,7 +423,6 @@ def test_validation_cache_performance():
         assert results["metrics"]["ssim"]["speedup"] > 3, "SSIM should have > 3x speedup"
         assert results["metrics"]["lpips"]["speedup"] > 10, "LPIPS should have > 10x speedup"
 
-
 if __name__ == "__main__":
     # Run benchmarks directly
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -437,4 +434,4 @@ if __name__ == "__main__":
         with open("validation_cache_benchmark_results.json", "w") as f:
             json.dump(results, f, indent=2)
         
-        print(f"\nResults saved to validation_cache_benchmark_results.json")
+        print("\nResults saved to validation_cache_benchmark_results.json")

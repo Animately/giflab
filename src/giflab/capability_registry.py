@@ -178,3 +178,19 @@ def all_single_variable_strategies() -> list[str]:
             }[var]
             names.append(f"{cls.NAME}_{suffix}")
     return names
+
+
+def get_tool_class_by_name(name: str) -> type[ExternalTool] | None:
+    """Look up a tool wrapper class by its NAME attribute.
+
+    Args:
+        name: The tool NAME string (e.g., ``"gifsicle-lossy"``, ``"animately-standard"``)
+
+    Returns:
+        The tool wrapper class, or ``None`` if not found.
+    """
+    for classes in _REGISTRY.values():
+        for cls in classes:
+            if cls.NAME == name:
+                return cls
+    return None

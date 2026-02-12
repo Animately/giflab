@@ -3,19 +3,18 @@ Pluggable backends for metrics storage.
 """
 
 import json
+import logging
 import sqlite3
-import time
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import logging
+from typing import Any, Optional
 
 from .metrics_collector import MetricPoint, MetricType
 
 logger = logging.getLogger(__name__)
-
 
 class MetricsBackend(ABC):
     """Abstract base class for metrics storage backends."""
@@ -26,7 +25,7 @@ class MetricsBackend(ABC):
         pass
     
     @abstractmethod
-    def write_batch(self, metrics: List[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]):
         """Write batch of metric points."""
         pass
     
@@ -37,9 +36,9 @@ class MetricsBackend(ABC):
         end_time: float = None,
         name: str = None,
         metric_type: MetricType = None,
-        tags: Dict[str, str] = None,
+        tags: dict[str, str] = None,
         limit: int = 1000,
-    ) -> List[MetricPoint]:
+    ) -> list[MetricPoint]:
         """Query metrics with filters."""
         pass
     
@@ -49,10 +48,9 @@ class MetricsBackend(ABC):
         pass
     
     @abstractmethod
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get backend statistics."""
         pass
-
 
 class InMemoryBackend(MetricsBackend):
     """
@@ -72,7 +70,7 @@ class InMemoryBackend(MetricsBackend):
             self.metrics.append(metric)
             self.total_written += 1
     
-    def write_batch(self, metrics: List[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]):
         """Write batch of metric points."""
         with self.lock:
             self.metrics.extend(metrics)
@@ -84,9 +82,9 @@ class InMemoryBackend(MetricsBackend):
         end_time: float = None,
         name: str = None,
         metric_type: MetricType = None,
-        tags: Dict[str, str] = None,
+        tags: dict[str, str] = None,
         limit: int = 1000,
-    ) -> List[MetricPoint]:
+    ) -> list[MetricPoint]:
         """Query metrics with filters."""
         with self.lock:
             results = []
@@ -115,7 +113,7 @@ class InMemoryBackend(MetricsBackend):
             self.metrics.clear()
             self.total_written = 0
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get backend statistics."""
         with self.lock:
             return {
@@ -127,7 +125,6 @@ class InMemoryBackend(MetricsBackend):
                 "newest_timestamp": self.metrics[-1].timestamp if self.metrics else None,
             }
 
-
 class SQLiteBackend(MetricsBackend):
     """
     SQLite-based metrics backend for persistent storage.
@@ -136,7 +133,7 @@ class SQLiteBackend(MetricsBackend):
     
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path: Path | None = None,
         retention_days: float = 7.0,
         max_size_mb: float = 100.0,
     ):
@@ -184,15 +181,15 @@ class SQLiteBackend(MetricsBackend):
                 
                 # Create indexes for efficient querying
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_metrics_timestamp 
+                    CREATE INDEX IF NOT EXISTS idx_metrics_timestamp
                     ON metrics(timestamp DESC)
                 """)
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_metrics_name_timestamp 
+                    CREATE INDEX IF NOT EXISTS idx_metrics_name_timestamp
                     ON metrics(name, timestamp DESC)
                 """)
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_metrics_type_timestamp 
+                    CREATE INDEX IF NOT EXISTS idx_metrics_type_timestamp
                     ON metrics(metric_type, timestamp DESC)
                 """)
                 
@@ -204,7 +201,7 @@ class SQLiteBackend(MetricsBackend):
         """Write single metric point."""
         self.write_batch([metric])
     
-    def write_batch(self, metrics: List[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]):
         """Write batch of metric points."""
         if not metrics:
             return
@@ -246,9 +243,9 @@ class SQLiteBackend(MetricsBackend):
         end_time: float = None,
         name: str = None,
         metric_type: MetricType = None,
-        tags: Dict[str, str] = None,
+        tags: dict[str, str] = None,
         limit: int = 1000,
-    ) -> List[MetricPoint]:
+    ) -> list[MetricPoint]:
         """Query metrics with filters."""
         with self.lock:
             conn = sqlite3.connect(str(self.db_path))
@@ -307,14 +304,14 @@ class SQLiteBackend(MetricsBackend):
             finally:
                 conn.close()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get backend statistics."""
         with self.lock:
             conn = sqlite3.connect(str(self.db_path))
             try:
                 # Get counts and timestamps
                 cursor = conn.execute("""
-                    SELECT 
+                    SELECT
                         COUNT(*) as count,
                         MIN(timestamp) as oldest,
                         MAX(timestamp) as newest
@@ -368,7 +365,6 @@ class SQLiteBackend(MetricsBackend):
             logger.error(f"Error during cleanup: {e}")
         finally:
             conn.close()
-
 
 class StatsDBackend(MetricsBackend):
     """
@@ -432,12 +428,12 @@ class StatsDBackend(MetricsBackend):
             logger.error(f"Error sending to StatsD: {e}")
             self.fallback_buffer.append(metric)
     
-    def write_batch(self, metrics: List[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]):
         """Write batch of metric points."""
         for metric in metrics:
             self.write(metric)
     
-    def query(self, **kwargs) -> List[MetricPoint]:
+    def query(self, **kwargs) -> list[MetricPoint]:
         """StatsD backend doesn't support querying."""
         # Return fallback buffer contents if requested
         return list(self.fallback_buffer)
@@ -446,7 +442,7 @@ class StatsDBackend(MetricsBackend):
         """Clear fallback buffer."""
         self.fallback_buffer.clear()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get backend statistics."""
         return {
             "backend": "statsd",
@@ -457,7 +453,7 @@ class StatsDBackend(MetricsBackend):
             "fallback_buffer_size": len(self.fallback_buffer),
         }
     
-    def _format_name(self, name: str, tags: Dict[str, str]) -> str:
+    def _format_name(self, name: str, tags: dict[str, str]) -> str:
         """Format metric name with tags for StatsD."""
         if not tags:
             return name
@@ -465,13 +461,12 @@ class StatsDBackend(MetricsBackend):
         tag_str = ".".join(f"{k}_{v}" for k, v in sorted(tags.items()))
         return f"{name}.{tag_str}"
 
-
 def create_backend(backend_type: str, **kwargs) -> MetricsBackend:
     """
     Factory function to create metrics backend.
     
     Args:
-        backend_type: Type of backend ("memory", "sqlite", "statsd")
+        backend_type: type of backend ("memory", "sqlite", "statsd")
         **kwargs: Backend-specific configuration
     
     Returns:

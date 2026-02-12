@@ -1,19 +1,28 @@
 # 🎞️ GifLab
 
-GIF compression and analysis laboratory for systematic performance evaluation.
+Training dataset generation for GIF compression curve prediction.
 
 ---
 
 ## Overview
 
-GifLab analyzes GIF compression by generating variants with configurable parameters across multiple dimensions:
+GifLab processes raw GIFs through 7 compression engines, measures quality with comprehensive GIF-specific metrics, and produces normalized SQLite datasets for training ML models that predict compression curves.
 
-- **Frame reduction**: Configurable keep ratios from full frames to aggressive reduction
-- **Color quantization**: Flexible palette sizes and dithering algorithms  
-- **Lossy compression**: Variable quality levels mapped to engine-specific implementations
-- **Engines**: **gifsicle**, **Animately**, **ImageMagick**, **FFmpeg**, **gifski**
+**Data flow**: Raw GIFs → Visual feature extraction (25+ features) → Compression across 7 engines → Quality metrics → SQLite → Training data
 
-Each variant is measured for file size, comprehensive quality metrics (11 different measures), render time, and efficiency score.
+### The 7 Engines
+
+| Engine | Tool | Description |
+|--------|------|-------------|
+| `gifsicle` | gifsicle | Standard GIF optimizer |
+| `animately-standard` | animately | Standard lossy (`--lossy`) |
+| `animately-advanced` | animately | Advanced lossy (`--advanced-lossy`) |
+| `animately-hard` | animately | Hard mode (`--hard --lossy`) |
+| `imagemagick` | convert/magick | ImageMagick lossy compression |
+| `ffmpeg` | ffmpeg | FFmpeg GIF encoding |
+| `gifski` | gifski | High-quality GIF encoder |
+
+Each variant is measured for file size, comprehensive quality metrics (11+ measures), and efficiency score. All results are stored in SQLite.
 
 ### Compression Pipeline
 

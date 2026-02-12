@@ -5,11 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from giflab.caching import get_frame_cache, reset_frame_cache
 from giflab.config import FRAME_CACHE
 from giflab.metrics import extract_gif_frames
+from PIL import Image
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +32,7 @@ def create_test_gif(tmp_path):
             color = (
                 (i * 255 // frames),
                 ((i * 128) % 256),
-                ((255 - i * 255 // frames))
+                (255 - i * 255 // frames)
             )
             frame = Image.new("RGB", size, color=color)
             images.append(frame)
@@ -94,9 +93,9 @@ class TestFrameCacheIntegration:
         assert len(result1.frames) == len(result2.frames)
         
         # Frames should be identical
-        for f1, f2 in zip(result1.frames, result2.frames):
+        for f1, f2 in zip(result1.frames, result2.frames, strict=True):
             np.testing.assert_array_equal(f1, f2)
-    
+
     def test_extract_gif_frames_cache_disabled(self, create_test_gif, disable_cache):
         """Test that extract_gif_frames works without cache."""
         gif_path = create_test_gif("test", frames=10)
@@ -160,7 +159,7 @@ class TestFrameCacheIntegration:
         assert stats1.misses == 1
         
         # Extract again (should hit)
-        result2 = extract_gif_frames(gif_path)
+        extract_gif_frames(gif_path)
         stats2 = cache.get_stats()
         assert stats2.hits == 1
         
@@ -247,9 +246,9 @@ class TestFrameCacheIntegration:
         
         # Verify results are identical
         assert len(result1.frames) == len(result2.frames)
-        for f1, f2 in zip(result1.frames, result2.frames):
+        for f1, f2 in zip(result1.frames, result2.frames, strict=True):
             np.testing.assert_array_equal(f1, f2)
-    
+
     def test_cache_with_corrupted_gif(self, tmp_path, enable_cache):
         """Test cache behavior with corrupted GIF files."""
         # Create a corrupted GIF (invalid data)

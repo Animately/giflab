@@ -37,8 +37,8 @@ A systematic three-phase approach transformed GifLab's test infrastructure from 
 
 **Tasks**:
 - Systematic find/replace across all test files
-- Fixed `src.giflab.pipeline_elimination` → `giflab.experimental`
-- Updated `PipelineEliminator` → `ExperimentalRunner`
+- Fixed outdated import paths to match refactored module structure
+- Updated class references to match renamed components
 - Corrected all `@patch()` decorator targets
 
 **Results**: Eliminated all `ModuleNotFoundError` failures, established solid foundation
@@ -72,24 +72,24 @@ A systematic three-phase approach transformed GifLab's test infrastructure from 
 
 ```python
 # ❌ BROKEN PATTERN
-@patch('giflab.experimental.ExperimentalRunner')
+@patch('giflab.prediction_runner.PredictionRunner')
 def test_integration(self, mock_class, tmp_path):
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
-    
-    # BUG: Creates real object instead of using mock
-    eliminator = ExperimentalRunner(tmp_path)  # 82.47s execution
-    result = eliminator.run_experimental_analysis()
 
-# ✅ FIXED PATTERN  
-@patch('giflab.experimental.ExperimentalRunner')
+    # BUG: Creates real object instead of using mock
+    runner = PredictionRunner(tmp_path)  # 82.47s execution
+    result = runner.run()
+
+# ✅ FIXED PATTERN
+@patch('giflab.prediction_runner.PredictionRunner')
 def test_integration(self, mock_class, tmp_path):
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
-    
+
     # FIX: Use the mock class instead of real instantiation
-    eliminator = mock_class(tmp_path)  # 0.04s execution
-    result = eliminator.run_experimental_analysis()
+    runner = mock_class(tmp_path)  # 0.04s execution
+    result = runner.run()
 ```
 
 **Performance Impact**: **2061x speedup** (82.47s → 0.04s)

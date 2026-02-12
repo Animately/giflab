@@ -21,7 +21,8 @@ import time
 import tracemalloc
 import weakref
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
+
 import numpy as np
 import psutil
 import pytest
@@ -30,18 +31,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from giflab.config import MetricsConfig
-from giflab.metrics import calculate_comprehensive_metrics_from_frames, cleanup_all_validators
-from giflab.model_cache import LPIPSModelCache
-from giflab.ssimulacra2_metrics import Ssimulacra2Validator
-from giflab.text_ui_validation import TextUIContentDetector
-from giflab.temporal_artifacts import (
-    get_temporal_detector,
-    cleanup_global_temporal_detector
-)
 from giflab.deep_perceptual_metrics import (
     _get_or_create_validator,
-    cleanup_global_validator
+    cleanup_global_validator,
 )
+from giflab.metrics import (
+    calculate_comprehensive_metrics_from_frames,
+    cleanup_all_validators,
+)
+from giflab.model_cache import LPIPSModelCache
+from giflab.ssimulacra2_metrics import Ssimulacra2Validator
+from giflab.temporal_artifacts import (
+    cleanup_global_temporal_detector,
+    get_temporal_detector,
+)
+from giflab.text_ui_validation import TextUIContentDetector
 
 
 class MemoryLeakDetector:
@@ -72,7 +76,7 @@ class MemoryLeakDetector:
         self.memory_samples.append(current_memory)
         return current_memory
     
-    def stop_monitoring(self) -> Dict:
+    def stop_monitoring(self) -> dict:
         """Stop monitoring and analyze results.
         
         Returns:
@@ -123,7 +127,7 @@ class MemoryLeakDetector:
         """
         self.weak_refs.append(weakref.ref(obj))
     
-    def check_tracked_objects(self) -> Dict:
+    def check_tracked_objects(self) -> dict:
         """Check if tracked objects have been garbage collected.
         
         Returns:
@@ -141,7 +145,6 @@ class MemoryLeakDetector:
             "collection_rate": dead_count / len(self.weak_refs) if self.weak_refs else 0
         }
 
-
 class TestMemoryStability:
     """Test suite for memory stability and leak detection."""
     
@@ -158,7 +161,7 @@ class TestMemoryStability:
         cleanup_all_validators()
         gc.collect()
     
-    def generate_test_frames(self, count: int, size: Tuple[int, int]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    def generate_test_frames(self, count: int, size: tuple[int, int]) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Generate test frames for memory testing.
         
         Args:
@@ -166,12 +169,12 @@ class TestMemoryStability:
             size: Frame size (width, height)
             
         Returns:
-            Tuple of (original_frames, compressed_frames)
+            tuple of (original_frames, compressed_frames)
         """
         frames_orig = []
         frames_comp = []
         
-        for i in range(count):
+        for _i in range(count):
             frame = np.random.randint(0, 256, (*size[::-1], 3), dtype=np.uint8)
             frames_orig.append(frame)
             
@@ -220,7 +223,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nMemory Analysis:")
+        print("\nMemory Analysis:")
         print(f"  Initial: {results['initial_memory_mb']:.1f} MB")
         print(f"  Final: {results['final_memory_mb']:.1f} MB")
         print(f"  Growth: {results['memory_growth_mb']:.1f} MB")
@@ -274,7 +277,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nRapid Size Changes Analysis:")
+        print("\nRapid Size Changes Analysis:")
         print(f"  Memory growth: {results['memory_growth_mb']:.1f} MB")
         print(f"  Max memory: {results['max_memory_mb']:.1f} MB")
         
@@ -296,7 +299,7 @@ class TestMemoryStability:
         
         for i in range(iterations):
             # Force cache operations
-            model = cache.get_model("alex")
+            cache.get_model("alex")
             cache.release_model("alex")
             
             # Sometimes force clear
@@ -314,7 +317,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nCache Thrashing Analysis:")
+        print("\nCache Thrashing Analysis:")
         print(f"  Memory growth: {results['memory_growth_mb']:.1f} MB")
         
         # Assert cache doesn't leak (LPIPS model is ~500MB one-time load)
@@ -352,7 +355,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nParallel Processing Analysis:")
+        print("\nParallel Processing Analysis:")
         print(f"  Memory growth: {results['memory_growth_mb']:.1f} MB")
         
         # Assert no significant leak from parallel processing (LPIPS model adds ~200MB one-time)
@@ -364,14 +367,13 @@ class TestMemoryStability:
         detector.start_monitoring()
         
         # Track validator objects
-        validators_created = []
         
         for i in range(20):
             # Create validators
             ssim_validator = Ssimulacra2Validator()
             text_validator = TextUIContentDetector()
-            temporal_detector = get_temporal_detector()
-            deep_validator = _get_or_create_validator()
+            get_temporal_detector()
+            _get_or_create_validator()
             
             # Track with weak references
             detector.track_object(ssim_validator)
@@ -401,7 +403,7 @@ class TestMemoryStability:
         tracking_results = detector.check_tracked_objects()
         results = detector.stop_monitoring()
         
-        print(f"\nValidator Lifecycle Analysis:")
+        print("\nValidator Lifecycle Analysis:")
         print(f"  Objects tracked: {tracking_results['total_tracked']}")
         print(f"  Objects collected: {tracking_results['collected']}")
         print(f"  Collection rate: {tracking_results['collection_rate']:.1%}")
@@ -427,7 +429,7 @@ class TestMemoryStability:
                     # Simulate error by passing invalid data
                     frames_comp = None
                 
-                metrics = calculate_comprehensive_metrics_from_frames(
+                calculate_comprehensive_metrics_from_frames(
                     frames_orig,
                     frames_comp
                 )
@@ -451,7 +453,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nError Recovery Analysis:")
+        print("\nError Recovery Analysis:")
         print(f"  Memory growth: {results['memory_growth_mb']:.1f} MB")
         
         # Assert no leak despite errors (LPIPS model loading adds ~500MB+ one-time overhead)
@@ -520,7 +522,7 @@ class TestMemoryStability:
         # Analyze results
         results = detector.stop_monitoring()
         
-        print(f"\nStress Test Analysis:")
+        print("\nStress Test Analysis:")
         print(f"  Initial memory: {results['initial_memory_mb']:.1f} MB")
         print(f"  Final memory: {results['final_memory_mb']:.1f} MB")
         print(f"  Memory growth: {results['memory_growth_mb']:.1f} MB")
@@ -531,7 +533,6 @@ class TestMemoryStability:
         # LPIPS model loading adds ~500MB overhead; allow generous headroom for stress scenarios
         assert results['memory_growth_mb'] < 600, f"Stress test leaked {results['memory_growth_mb']:.1f} MB"
         assert results['max_memory_mb'] - results['initial_memory_mb'] < 1200, "Peak memory too high under stress"
-
 
 def run_memory_analysis():
     """Run comprehensive memory analysis and generate report."""
@@ -606,7 +607,6 @@ def run_memory_analysis():
                 print(f"  - {test_name}: {result}")
     
     return results
-
 
 if __name__ == "__main__":
     run_memory_analysis()

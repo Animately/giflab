@@ -18,7 +18,6 @@ from giflab.external_engines.common import run_command
 from giflab.lossy import (
     LossyEngine,
     _is_executable,
-    apply_lossy_compression,
     compress_with_animately,
     compress_with_gifsicle,
 )
@@ -181,51 +180,13 @@ class TestAnimatelyIntegration:
 
         # Verify results
         assert output_path.exists(), "Output file was not created"
-        assert result["engine"] == "animately"
+        assert result["engine"] == "animately-standard"
         assert result["lossy_level"] == 0
         assert result["render_ms"] > 0
         assert "command" in result
 
         # Verify output is a valid GIF
         assert output_path.stat().st_size > 0, "Output file is empty"
-
-
-@pytest.mark.slow
-class TestHighLevelAPI:
-    """Test the high-level API with both engines."""
-
-    @pytest.fixture
-    def test_gif(self):
-        """Create a temporary test GIF."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            gif_path = Path(temp_dir) / "test.gif"
-            create_test_gif(gif_path)
-            yield gif_path
-
-    def test_apply_lossy_compression_gifsicle(self, test_gif):
-        """Test high-level API with gifsicle."""
-        gifsicle_path = DEFAULT_ENGINE_CONFIG.GIFSICLE_PATH
-
-        try:
-            subprocess.run(
-                [gifsicle_path, "--version"], capture_output=True, check=True, timeout=5
-            )
-        except Exception:
-            pytest.skip(f"gifsicle not available at {gifsicle_path}")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "output.gif"
-
-            result = apply_lossy_compression(
-                test_gif,
-                output_path,
-                lossy_level=0,
-                frame_keep_ratio=1.0,
-                engine=LossyEngine.GIFSICLE,
-            )
-
-            assert output_path.exists()
-            assert result["engine"] == "gifsicle"
 
 
 # ===========================================================================
@@ -283,102 +244,6 @@ class TestEngineIntegrationFast:
             assert result["lossy_level"] == 50
 
     @patch("giflab.lossy.compress_with_gifsicle")
-    def test_apply_lossy_compression_gifsicle_fast(self, mock_gifsicle):
-        """Test apply_lossy_compression with gifsicle engine using fast fixture."""
-
-        # Configure mock to copy file and return expected results
-        def mock_compress(
-            input_path,
-            output_path,
-            lossy_level=0,
-            frame_keep_ratio=1.0,
-            color_keep_count=None,
-        ):
-            import shutil
-
-            shutil.copyfile(input_path, output_path)
-            return {
-                "render_ms": 1,
-                "engine": "noop",
-                "command": "noop-copy",
-                "ssim": 1.0,
-                "lossy_level": lossy_level,
-                "frame_keep_ratio": frame_keep_ratio,
-            }
-
-        mock_gifsicle.side_effect = mock_compress
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "test_input.gif"
-            output_path = Path(tmpdir) / "test_output.gif"
-
-            create_test_gif(input_path)
-
-            result = apply_lossy_compression(
-                input_path=input_path,
-                output_path=output_path,
-                lossy_level=40,
-                frame_keep_ratio=1.0,
-                engine=LossyEngine.GIFSICLE,
-            )
-
-            # Check result structure
-            assert isinstance(result, dict)
-            assert "render_ms" in result
-            assert "engine" in result
-            assert result["engine"] == "noop"
-            assert result["frame_keep_ratio"] == 1.0
-            assert result["lossy_level"] == 40
-
-    @patch("giflab.lossy.compress_with_animately")
-    def test_apply_lossy_compression_animately_fast(self, mock_animately):
-        """Test apply_lossy_compression with animately engine using fast fixture."""
-
-        # Configure mock to copy file and return expected results
-        def mock_compress(
-            input_path,
-            output_path,
-            lossy_level=0,
-            frame_keep_ratio=1.0,
-            color_keep_count=None,
-        ):
-            import shutil
-
-            shutil.copyfile(input_path, output_path)
-            return {
-                "render_ms": 1,
-                "engine": "noop",
-                "command": "noop-copy",
-                "ssim": 1.0,
-                "lossy_level": lossy_level,
-                "frame_keep_ratio": frame_keep_ratio,
-            }
-
-        mock_animately.side_effect = mock_compress
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "test_input.gif"
-            output_path = Path(tmpdir) / "test_output.gif"
-
-            create_test_gif(input_path)
-
-            result = apply_lossy_compression(
-                input_path=input_path,
-                output_path=output_path,
-                lossy_level=60,
-                frame_keep_ratio=1.0,
-                engine=LossyEngine.ANIMATELY,
-            )
-
-            # Check result structure
-            assert isinstance(result, dict)
-            assert "render_ms" in result
-            assert "engine" in result
-            assert result["engine"] == "noop"
-            assert result["frame_keep_ratio"] == 1.0
-            assert result["lossy_level"] == 60
-
-    @patch("giflab.lossy.compress_with_gifsicle")
     def test_compression_error_handling_fast(self, mock_gifsicle):
         """Test error handling in compression functions using fast fixture."""
 
@@ -418,11 +283,13 @@ class TestEngineUtilsFast:
     def test_engine_enum_values(self):
         """Test LossyEngine enum values."""
         assert LossyEngine.GIFSICLE.value == "gifsicle"
-        assert LossyEngine.ANIMATELY.value == "animately"
+        assert LossyEngine.ANIMATELY_STANDARD.value == "animately-standard"
+        # ANIMATELY is a legacy alias for ANIMATELY_STANDARD
+        assert LossyEngine.ANIMATELY is LossyEngine.ANIMATELY_STANDARD
 
         # Test that enum can be converted to string
         assert str(LossyEngine.GIFSICLE) == "LossyEngine.GIFSICLE"
-        assert str(LossyEngine.ANIMATELY) == "LossyEngine.ANIMATELY"
+        assert str(LossyEngine.ANIMATELY_STANDARD) == "LossyEngine.ANIMATELY_STANDARD"
 
 
 # ===========================================================================

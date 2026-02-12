@@ -16,7 +16,6 @@ from giflab.optimization_validation.validation_checker import ValidationChecker
 from giflab.temporal_artifacts import calculate_enhanced_temporal_metrics_from_paths
 from giflab.tool_wrappers import GifsicleColorReducer, GifsicleLossyCompressor
 
-# from giflab.core.runner import ComprehensiveGifAnalyzer  # May not exist
 from tests.fixtures.generate_temporal_artifact_fixtures import (
     create_background_flicker_gif,
     create_disposal_artifact_gif,
@@ -59,12 +58,6 @@ class TestTemporalArtifactDetectionE2E:
             temporal_consistency_threshold=0.6,  # Relaxed for real compression
         )
 
-    @pytest.fixture
-    def analyzer(self):
-        """Create analyzer for testing."""
-        from giflab.core.runner import ComprehensiveGifAnalyzer
-
-        return ComprehensiveGifAnalyzer()
 
     def test_gifsicle_lossy_compression_temporal_artifacts(
         self, validation_config, tmp_path
@@ -232,47 +225,6 @@ class TestTemporalArtifactDetectionE2E:
 
         except Exception as e:
             pytest.skip(f"Temporal artifact detection failed: {e}")
-
-    def test_comprehensive_pipeline_with_temporal_artifacts(self, analyzer, tmp_path):
-        """Test complete analysis pipeline with temporal artifact detection."""
-        # Create test fixture with known temporal artifacts
-        input_gif = create_temporal_pumping_gif(pumping=True)
-
-        try:
-            # Run comprehensive analysis
-            results = analyzer.analyze_gif(
-                gif_path=input_gif, output_dir=tmp_path, include_temporal_artifacts=True
-            )
-
-            print("Comprehensive analysis results:")
-            for key, value in results.items():
-                if isinstance(value, dict):
-                    print(f"  {key}:")
-                    for subkey, subvalue in value.items():
-                        print(f"    {subkey}: {subvalue}")
-                else:
-                    print(f"  {key}: {value}")
-
-            # Should include temporal artifact metrics
-            if "temporal_artifacts" in results:
-                temporal = results["temporal_artifacts"]
-                assert isinstance(temporal, dict)
-
-                # Should have at least some temporal metrics
-                expected_metrics = [
-                    "flicker_excess",
-                    "temporal_pumping_score",
-                    "lpips_t_mean",
-                ]
-                found_metrics = [
-                    metric for metric in expected_metrics if metric in temporal
-                ]
-                assert (
-                    len(found_metrics) > 0
-                ), f"Should find temporal metrics: {expected_metrics}"
-
-        except Exception as e:
-            pytest.skip(f"Comprehensive analysis failed: {e}")
 
     @pytest.mark.slow
     def test_real_world_gif_temporal_validation(self, validation_config):

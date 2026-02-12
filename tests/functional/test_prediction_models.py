@@ -4,16 +4,15 @@ Uses synthetic GIFs to test model training and prediction.
 """
 
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import pytest
-
 from giflab.prediction.models import (
-    CurvePredictionModel,
     FEATURE_COLUMNS,
     MODEL_VERSION,
+    CurvePredictionModel,
 )
 from giflab.prediction.schemas import (
     CompressionCurveV1,
@@ -32,7 +31,7 @@ def create_mock_features(
         gif_sha=gif_sha,
         gif_name="test.gif",
         extraction_version="1.0.0",
-        extracted_at=datetime.now(timezone.utc),
+        extracted_at=datetime.now(UTC),
         width=100,
         height=100,
         frame_count=10,
@@ -70,14 +69,18 @@ def create_mock_lossy_curve(
         engine=Engine.GIFSICLE,
         curve_type=CurveType.LOSSY,
         is_predicted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         size_at_lossy_0=base_size,
+        size_at_lossy_10=base_size * 0.95,
         size_at_lossy_20=base_size * 0.9,
+        size_at_lossy_30=base_size * 0.85,
         size_at_lossy_40=base_size * 0.8,
+        size_at_lossy_50=base_size * 0.75,
         size_at_lossy_60=base_size * 0.7,
+        size_at_lossy_70=base_size * 0.65,
         size_at_lossy_80=base_size * 0.6,
+        size_at_lossy_90=base_size * 0.55,
         size_at_lossy_100=base_size * 0.5,
-        size_at_lossy_120=base_size * 0.45,
     )
 
 
@@ -91,7 +94,7 @@ def create_mock_color_curve(
         engine=Engine.GIFSICLE,
         curve_type=CurveType.COLORS,
         is_predicted=False,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         size_at_colors_256=base_size,
         size_at_colors_128=base_size * 0.85,
         size_at_colors_64=base_size * 0.7,
@@ -117,9 +120,9 @@ class TestCurvePredictionModel:
         model = CurvePredictionModel(Engine.GIFSICLE, CurveType.LOSSY)
         targets = model.target_columns
 
-        assert len(targets) == 7
+        assert len(targets) == 11
         assert "size_at_lossy_0" in targets
-        assert "size_at_lossy_120" in targets
+        assert "size_at_lossy_100" in targets
 
     def test_target_columns_colors(self) -> None:
         """Test target columns for color curve."""
@@ -261,7 +264,7 @@ class TestModelPrediction:
         curve = trained_model.predict(features)
 
         assert curve.confidence_scores is not None
-        assert len(curve.confidence_scores) == 7  # 7 lossy levels
+        assert len(curve.confidence_scores) == 11  # 11 lossy levels
 
 
 class TestModelPersistence:

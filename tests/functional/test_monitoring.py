@@ -5,36 +5,35 @@ Comprehensive tests for the performance monitoring infrastructure.
 import json
 import sqlite3
 import tempfile
-import time
 import threading
+import time
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-
 from giflab.monitoring import (
-    MetricsCollector,
-    MetricType,
-    get_metrics_collector,
-    reset_metrics_collector,
-    InMemoryBackend,
-    SQLiteBackend,
-    track_timing,
-    track_counter,
-    track_gauge,
-    track_histogram,
     Alert,
     AlertLevel,
     AlertManager,
+    InMemoryBackend,
+    MetricsCollector,
+    MetricType,
+    SQLiteBackend,
     check_alerts,
-)
-from giflab.monitoring.metrics_collector import (
-    MetricPoint,
-    MetricSummary,
-    RingBuffer,
-    MetricsAggregator,
+    get_metrics_collector,
+    reset_metrics_collector,
+    track_counter,
+    track_gauge,
+    track_histogram,
+    track_timing,
 )
 from giflab.monitoring.decorators import MetricTracker, timer_context
+from giflab.monitoring.metrics_collector import (
+    MetricPoint,
+    MetricsAggregator,
+    MetricSummary,
+    RingBuffer,
+)
 
 
 class TestMetricPoint:

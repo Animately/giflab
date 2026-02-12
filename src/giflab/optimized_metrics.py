@@ -13,15 +13,15 @@ Performance optimizations implemented:
 5. Optimized OpenCV and NumPy operations
 """
 
-import numpy as np
-import cv2
-import time
-from typing import List, Dict, Any, Tuple, Optional
-from dataclasses import dataclass
 import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Optional
+
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 @dataclass
 class OptimizationStats:
@@ -29,9 +29,8 @@ class OptimizationStats:
     frames_processed: int
     processing_time_ms: float
     memory_peak_mb: float
-    optimizations_applied: List[str]
+    optimizations_applied: list[str]
     speedup_factor: float
-
 
 class VectorizedMetricsCalculator:
     """
@@ -126,12 +125,12 @@ class VectorizedMetricsCalculator:
         psnr_batch = 20 * np.log10(255.0 / np.sqrt(mse_batch))
         return psnr_batch
     
-    def process_frame_pairs_batched(self, frame_pairs: List[Tuple[np.ndarray, np.ndarray]]) -> Dict[str, np.ndarray]:
+    def process_frame_pairs_batched(self, frame_pairs: list[tuple[np.ndarray, np.ndarray]]) -> dict[str, np.ndarray]:
         """
         Process frame pairs in batches for optimal performance.
         
         Args:
-            frame_pairs: List of (original, compressed) frame pairs
+            frame_pairs: list of (original, compressed) frame pairs
             
         Returns:
             Dictionary with metric values for all frames
@@ -226,7 +225,7 @@ class VectorizedMetricsCalculator:
         self.optimization_stats.processing_time_ms = (end_time - start_time) * 1000
         self.optimization_stats.optimizations_applied = [
             "vectorized_batch_processing",
-            "reduced_memory_allocations", 
+            "reduced_memory_allocations",
             "opencv_optimizations"
         ]
         
@@ -236,19 +235,18 @@ class VectorizedMetricsCalculator:
             "psnr": psnr_values
         }
 
-
 class FastTemporalConsistency:
     """
     Optimized temporal consistency calculation that matches standard implementation.
     """
     
     @staticmethod
-    def calculate_optimized(frames: List[np.ndarray]) -> float:
+    def calculate_optimized(frames: list[np.ndarray]) -> float:
         """
         Calculate temporal consistency using approach consistent with standard implementation.
         
         Args:
-            frames: List of frame arrays
+            frames: list of frame arrays
             
         Returns:
             Temporal consistency score
@@ -293,7 +291,6 @@ class FastTemporalConsistency:
         
         return float(consistency)
 
-
 class MemoryEfficientFrameProcessor:
     """
     Frame processing with optimized memory allocation patterns.
@@ -303,16 +300,16 @@ class MemoryEfficientFrameProcessor:
         self.max_memory_mb = max_memory_mb
         self.frame_cache = {}
         
-    def resize_frames_batch(self, frames: List[np.ndarray], target_size: Tuple[int, int]) -> List[np.ndarray]:
+    def resize_frames_batch(self, frames: list[np.ndarray], target_size: tuple[int, int]) -> list[np.ndarray]:
         """
         Resize frames with memory-efficient batch processing.
         
         Args:
-            frames: List of frames to resize
+            frames: list of frames to resize
             target_size: (width, height) target size
             
         Returns:
-            List of resized frames
+            list of resized frames
         """
         if not frames:
             return []
@@ -341,7 +338,7 @@ class MemoryEfficientFrameProcessor:
         
         return resized_frames
     
-    def align_frames_optimized(self, original_frames: List[np.ndarray], compressed_frames: List[np.ndarray]) -> List[Tuple[np.ndarray, np.ndarray]]:
+    def align_frames_optimized(self, original_frames: list[np.ndarray], compressed_frames: list[np.ndarray]) -> list[tuple[np.ndarray, np.ndarray]]:
         """
         Optimized frame alignment with early termination for obvious matches.
         
@@ -350,11 +347,11 @@ class MemoryEfficientFrameProcessor:
             compressed_frames: Compressed frames
             
         Returns:
-            List of aligned frame pairs
+            list of aligned frame pairs
         """
         # For same-length sequences, use direct alignment (most common case)
         if len(original_frames) == len(compressed_frames):
-            return list(zip(original_frames, compressed_frames))
+            return list(zip(original_frames, compressed_frames, strict=True))
         
         # For different lengths, use simplified content-based alignment
         # This is a simplified version that should handle most cases efficiently
@@ -378,25 +375,24 @@ class MemoryEfficientFrameProcessor:
         
         return aligned_pairs
 
-
 def calculate_optimized_comprehensive_metrics(
-    original_frames: List[np.ndarray],
-    compressed_frames: List[np.ndarray],
-    config: Optional[Any] = None
-) -> Dict[str, float]:
+    original_frames: list[np.ndarray],
+    compressed_frames: list[np.ndarray],
+    config: Any | None = None
+) -> dict[str, float]:
     """
     High-performance implementation of comprehensive metrics calculation.
     
     This function provides significant performance improvements over the standard
     implementation through:
     1. Vectorized batch processing
-    2. Memory-efficient algorithms  
+    2. Memory-efficient algorithms
     3. Optimized frame alignment
     4. Reduced computational overhead
     
     Args:
-        original_frames: List of original frames
-        compressed_frames: List of compressed frames  
+        original_frames: list of original frames
+        compressed_frames: list of compressed frames
         config: Optional configuration (uses defaults if None)
         
     Returns:
@@ -489,7 +485,7 @@ def calculate_optimized_comprehensive_metrics(
     
     # Add minimal required metrics for compatibility
     default_metrics = {
-        "composite_quality": float(np.mean([result.get("ssim_mean", 0.0), 
+        "composite_quality": float(np.mean([result.get("ssim_mean", 0.0),
                                           1.0 - result.get("mse_mean", 0.0) / 10000.0])),
         "efficiency": 1.0,  # Simplified
         "compression_ratio": 1.0,  # Will be overridden if file metadata available

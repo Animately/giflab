@@ -10,19 +10,19 @@ This module provides A/B testing framework for comparing cached vs non-cached op
 Phase 3.2 Implementation: Evidence-based cache optimization framework.
 """
 
+import contextlib
 import logging
+import random
+import statistics
 import threading
 import time
-import statistics
-import random
-from collections import deque, defaultdict
+from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Callable, Tuple
 from enum import Enum
-import contextlib
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class BaselineTestMode(Enum):
     """Performance baseline testing modes."""
@@ -30,7 +30,6 @@ class BaselineTestMode(Enum):
     PASSIVE = "passive"             # Collect baselines during normal operations
     AB_TESTING = "ab_testing"       # Active A/B testing with traffic splitting
     CONTROLLED = "controlled"       # Controlled testing with synthetic workloads
-
 
 @dataclass
 class PerformanceMeasurement:
@@ -40,8 +39,7 @@ class PerformanceMeasurement:
     processing_time_ms: float
     memory_usage_mb: float
     timestamp: float
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class BaselineStatistics:
@@ -55,7 +53,7 @@ class BaselineStatistics:
     cached_p95_ms: float = 0.0
     cached_stddev_ms: float = 0.0
     
-    # Non-cached performance statistics  
+    # Non-cached performance statistics
     non_cached_samples: int = 0
     non_cached_mean_ms: float = 0.0
     non_cached_median_ms: float = 0.0
@@ -65,13 +63,12 @@ class BaselineStatistics:
     # Comparative analysis
     performance_improvement: float = 0.0  # (non_cached - cached) / non_cached
     statistical_significance: bool = False
-    confidence_interval_95: Tuple[float, float] = (0.0, 0.0)
+    confidence_interval_95: tuple[float, float] = (0.0, 0.0)
     
     # Test validity
     min_samples_met: bool = False
     last_update: float = field(default_factory=time.time)
     collection_duration_hours: float = 0.0
-
 
 @dataclass
 class WorkloadScenario:
@@ -80,9 +77,8 @@ class WorkloadScenario:
     operation_type: str
     setup_function: Callable[[], Any]
     execution_function: Callable[[Any], float]  # Returns processing time in ms
-    cleanup_function: Optional[Callable[[Any], None]] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
+    cleanup_function: Callable[[Any], None] | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 class PerformanceBaselineFramework:
     """Framework for collecting and analyzing cache performance baselines."""
@@ -100,19 +96,19 @@ class PerformanceBaselineFramework:
         self._lock = threading.RLock()
         
         # Performance measurements storage
-        self._measurements: Dict[str, deque[PerformanceMeasurement]] = defaultdict(
+        self._measurements: dict[str, deque[PerformanceMeasurement]] = defaultdict(
             lambda: deque(maxlen=max_samples_per_operation)
         )
         
         # Controlled workload scenarios
-        self._workload_scenarios: Dict[str, WorkloadScenario] = {}
+        self._workload_scenarios: dict[str, WorkloadScenario] = {}
         
         # A/B testing state
         self._ab_testing_enabled = False
-        self._ab_test_counters: Dict[str, int] = defaultdict(int)
+        self._ab_test_counters: dict[str, int] = defaultdict(int)
         
         # Analysis cache
-        self._baseline_stats_cache: Dict[str, Tuple[float, BaselineStatistics]] = {}
+        self._baseline_stats_cache: dict[str, tuple[float, BaselineStatistics]] = {}
         self._cache_ttl_seconds = 300.0  # 5 minutes
         
         # Framework state
@@ -163,7 +159,7 @@ class PerformanceBaselineFramework:
                           processing_time_ms: float,
                           cache_enabled: bool,
                           memory_usage_mb: float = 0.0,
-                          metadata: Optional[Dict[str, Any]] = None) -> None:
+                          metadata: dict[str, Any] | None = None) -> None:
         """Record a performance measurement for baseline analysis."""
         if not self._is_active:
             return
@@ -186,7 +182,7 @@ class PerformanceBaselineFramework:
         
         logger.debug(f"Recorded performance: {operation_type} - {processing_time_ms:.2f}ms (cache: {cache_enabled})")
     
-    def get_baseline_statistics(self, operation_type: str) -> Optional[BaselineStatistics]:
+    def get_baseline_statistics(self, operation_type: str) -> BaselineStatistics | None:
         """Get comprehensive baseline statistics for an operation type."""
         if operation_type not in self._measurements:
             return None
@@ -265,10 +261,10 @@ class PerformanceBaselineFramework:
             self._workload_scenarios[scenario.name] = scenario
         logger.info(f"Registered workload scenario: {scenario.name}")
     
-    def run_controlled_test(self, 
-                           scenario_name: str, 
+    def run_controlled_test(self,
+                           scenario_name: str,
                            iterations: int = 100,
-                           cache_enabled: bool = True) -> List[PerformanceMeasurement]:
+                           cache_enabled: bool = True) -> list[PerformanceMeasurement]:
         """Run controlled performance test with a specific scenario."""
         if scenario_name not in self._workload_scenarios:
             raise ValueError(f"Unknown workload scenario: {scenario_name}")
@@ -316,16 +312,16 @@ class PerformanceBaselineFramework:
         logger.info(f"Controlled test completed: {len(measurements)} measurements collected")
         return measurements
     
-    def run_comparative_test(self, 
-                            scenario_name: str, 
-                            iterations_per_mode: int = 50) -> Tuple[List[PerformanceMeasurement], List[PerformanceMeasurement]]:
+    def run_comparative_test(self,
+                            scenario_name: str,
+                            iterations_per_mode: int = 50) -> tuple[list[PerformanceMeasurement], list[PerformanceMeasurement]]:
         """Run comparative test with both cached and non-cached modes."""
         cached_measurements = self.run_controlled_test(scenario_name, iterations_per_mode, cache_enabled=True)
         non_cached_measurements = self.run_controlled_test(scenario_name, iterations_per_mode, cache_enabled=False)
         
         return cached_measurements, non_cached_measurements
     
-    def get_all_baseline_statistics(self) -> Dict[str, BaselineStatistics]:
+    def get_all_baseline_statistics(self) -> dict[str, BaselineStatistics]:
         """Get baseline statistics for all monitored operation types."""
         result = {}
         for operation_type in self._measurements.keys():
@@ -334,7 +330,7 @@ class PerformanceBaselineFramework:
                 result[operation_type] = stats
         return result
     
-    def generate_performance_report(self) -> Dict[str, Any]:
+    def generate_performance_report(self) -> dict[str, Any]:
         """Generate comprehensive performance analysis report."""
         all_stats = self.get_all_baseline_statistics()
         
@@ -349,7 +345,7 @@ class PerformanceBaselineFramework:
         total_operations = sum(stats.cached_samples + stats.non_cached_samples for stats in all_stats.values())
         
         valid_comparisons = [
-            stats for stats in all_stats.values() 
+            stats for stats in all_stats.values()
             if stats.min_samples_met and stats.statistical_significance
         ]
         
@@ -389,7 +385,7 @@ class PerformanceBaselineFramework:
             "report_timestamp": time.time()
         }
     
-    def clear_measurements(self, operation_type: Optional[str] = None) -> None:
+    def clear_measurements(self, operation_type: str | None = None) -> None:
         """Clear performance measurements for analysis reset."""
         with self._lock:
             if operation_type:
@@ -403,7 +399,7 @@ class PerformanceBaselineFramework:
         
         logger.info(f"Cleared baseline measurements for {operation_type or 'all operations'}")
     
-    def _calculate_percentile(self, values: List[float], percentile: float) -> float:
+    def _calculate_percentile(self, values: list[float], percentile: float) -> float:
         """Calculate percentile for a list of values."""
         if not values:
             return 0.0
@@ -411,7 +407,7 @@ class PerformanceBaselineFramework:
         index = int(percentile * (len(sorted_values) - 1))
         return sorted_values[index]
     
-    def _test_statistical_significance(self, cached_times: List[float], non_cached_times: List[float]) -> bool:
+    def _test_statistical_significance(self, cached_times: list[float], non_cached_times: list[float]) -> bool:
         """Simple statistical significance test (t-test approximation)."""
         if len(cached_times) < self.min_samples_for_analysis or len(non_cached_times) < self.min_samples_for_analysis:
             return False
@@ -431,7 +427,7 @@ class PerformanceBaselineFramework:
         except Exception:
             return False
     
-    def _calculate_confidence_interval(self, cached_times: List[float], non_cached_times: List[float]) -> Tuple[float, float]:
+    def _calculate_confidence_interval(self, cached_times: list[float], non_cached_times: list[float]) -> tuple[float, float]:
         """Calculate 95% confidence interval for performance improvement."""
         # Simplified confidence interval calculation
         # In production, would use proper statistical methods
@@ -448,7 +444,7 @@ class PerformanceBaselineFramework:
         except Exception:
             return (0.0, 0.0)
     
-    def _generate_recommendations(self, valid_comparisons: List[BaselineStatistics]) -> List[str]:
+    def _generate_recommendations(self, valid_comparisons: list[BaselineStatistics]) -> list[str]:
         """Generate actionable recommendations based on performance analysis."""
         recommendations = []
         
@@ -480,10 +476,9 @@ class PerformanceBaselineFramework:
         
         return recommendations
 
-
 # Context manager for baseline testing
 @contextlib.contextmanager
-def baseline_performance_test(framework: PerformanceBaselineFramework, 
+def baseline_performance_test(framework: PerformanceBaselineFramework,
                              operation_type: str,
                              force_baseline: bool = False):
     """Context manager for automatic performance measurement."""
@@ -500,11 +495,9 @@ def baseline_performance_test(framework: PerformanceBaselineFramework,
             cache_enabled=cache_enabled
         )
 
-
 # Global instance for singleton access
-_baseline_framework: Optional[PerformanceBaselineFramework] = None
+_baseline_framework: PerformanceBaselineFramework | None = None
 _baseline_lock = threading.RLock()
-
 
 def get_baseline_framework() -> PerformanceBaselineFramework:
     """Get singleton performance baseline framework."""
@@ -514,13 +507,12 @@ def get_baseline_framework() -> PerformanceBaselineFramework:
             _baseline_framework = PerformanceBaselineFramework()
         return _baseline_framework
 
-
 def is_baseline_testing_enabled() -> bool:
     """Check if baseline testing is enabled in configuration."""
     try:
         from ..config import MONITORING
         return (
-            MONITORING.get("enabled", True) and 
+            MONITORING.get("enabled", True) and
             MONITORING.get("systems", {}).get("frame_cache", True)
         )
     except ImportError:

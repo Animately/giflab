@@ -10,21 +10,31 @@ Trimmed test suite covering representative scenarios:
 Phase 3.2 Implementation: Ensure cache effectiveness monitoring is robust and reliable.
 """
 
-import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
-from src.giflab.monitoring.cache_effectiveness import (
-    CacheEffectivenessMonitor, CacheOperationType, CacheEffectivenessStats,
-    BaselineComparison, get_cache_effectiveness_monitor
-)
+import pytest
+
 from src.giflab.monitoring.baseline_framework import (
-    PerformanceBaselineFramework, BaselineTestMode, BaselineStatistics,
-    PerformanceMeasurement, WorkloadScenario, baseline_performance_test
+    BaselineStatistics,
+    BaselineTestMode,
+    PerformanceBaselineFramework,
+    PerformanceMeasurement,
+    WorkloadScenario,
+    baseline_performance_test,
+)
+from src.giflab.monitoring.cache_effectiveness import (
+    BaselineComparison,
+    CacheEffectivenessMonitor,
+    CacheEffectivenessStats,
+    CacheOperationType,
+    get_cache_effectiveness_monitor,
 )
 from src.giflab.monitoring.effectiveness_analysis import (
-    CacheEffectivenessAnalyzer, CacheRecommendation, CacheEffectivenessAnalysis,
-    analyze_cache_effectiveness
+    CacheEffectivenessAnalysis,
+    CacheEffectivenessAnalyzer,
+    CacheRecommendation,
+    analyze_cache_effectiveness,
 )
 from src.giflab.monitoring.memory_monitor import MemoryPressureLevel
 

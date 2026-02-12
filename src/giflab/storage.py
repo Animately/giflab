@@ -17,17 +17,57 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Generator
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
+
+from giflab.prediction.schemas import LOSSY_LEVELS
 
 # Feature extraction version - bump when feature extraction logic changes
 FEATURE_EXTRACTION_VERSION = "1.0.0"
 
 # Compression parameters for prediction training
-LOSSY_LEVELS = [0, 20, 40, 60, 80, 100, 120]
 COLOR_COUNTS = [256, 128, 64, 32, 16]
 FRAME_RATIOS = [1.0]  # Can expand later
+
+# Single source of truth for all quality metric columns in compression_runs.
+# Used for schema migration, INSERT statements, and result extraction.
+QUALITY_METRIC_COLUMNS: list[str] = [
+    # Base metrics with aggregations
+    "ssim_mean", "ssim_std", "ssim_min", "ssim_max",
+    "ms_ssim_mean", "ms_ssim_std", "ms_ssim_min", "ms_ssim_max",
+    "psnr_mean", "psnr_std", "psnr_min", "psnr_max",
+    "mse_mean", "mse_std", "mse_min", "mse_max",
+    "rmse_mean", "rmse_std", "rmse_min", "rmse_max",
+    "fsim_mean", "fsim_std", "fsim_min", "fsim_max",
+    "gmsd_mean", "gmsd_std", "gmsd_min", "gmsd_max",
+    # Perceptual
+    "chist_mean", "edge_similarity_mean",
+    "texture_similarity_mean", "sharpness_similarity_mean",
+    # Temporal
+    "temporal_consistency", "temporal_consistency_pre",
+    "temporal_consistency_post", "temporal_consistency_delta",
+    # Disposal artifacts
+    "disposal_artifacts", "disposal_artifacts_delta",
+    # Enhanced temporal
+    "flicker_excess", "flicker_frame_ratio", "temporal_pumping_score",
+    # Gradient/color
+    "banding_score_mean", "banding_score_p95",
+    "deltae_mean", "deltae_p95", "deltae_max",
+    # Deep perceptual
+    "lpips_quality_mean", "lpips_quality_p95",
+    # SSIMULACRA2
+    "ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min",
+    # Text/UI
+    "edge_sharpness_score", "mtf50_ratio_mean",
+    # Composite
+    "composite_quality",
+]
 
 
 class GifLabStorage:
@@ -244,6 +284,15 @@ class GifLabStorage:
             """
             )
 
+            # Idempotent migration: add any new metric columns
+            for col in QUALITY_METRIC_COLUMNS:
+                try:
+                    conn.execute(
+                        f"ALTER TABLE compression_runs ADD COLUMN {col} REAL"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already exists
+
             conn.commit()
             self.logger.debug(f"Initialized GifLab storage: {self.db_path}")
 
@@ -286,10 +335,43 @@ class GifLabStorage:
 
     @contextmanager
     def _connect(self) -> Generator[sqlite3.Connection, None, None]:
-        """Context manager for database connections."""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
+        """Context manager for database connections with retry on lock.
+
+        Uses exponential backoff to handle concurrent database access
+        when establishing the connection. Retries up to 5 times with
+        delays of 0.1s, 0.2s, 0.4s, 0.8s, 1.6s.
+
+        Raises:
+            RuntimeError: If the database remains locked after all retry attempts.
+        """
+        max_retries = 5
+        base_delay = 0.1
+        conn: sqlite3.Connection | None = None
+
+        for attempt in range(max_retries):
+            try:
+                conn = sqlite3.connect(self.db_path, timeout=30)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA foreign_keys = ON")
+                break
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logging.warning(
+                        "Database locked (attempt %d/%d), retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        delay,
+                    )
+                    time.sleep(delay)
+                elif "database is locked" in str(e):
+                    raise RuntimeError(
+                        "Database locked after 5 retry attempts"
+                    ) from e
+                else:
+                    raise
+
+        assert conn is not None
         try:
             yield conn
         finally:
@@ -403,23 +485,23 @@ class GifLabStorage:
         self,
         frame_tool: str | None,
         color_tool: str | None,
-        lossy_tool: str,
+        lossy_tool: str | None,
     ) -> int:
         """Get or create a pipeline ID for the given tool combination.
 
         Args:
-            frame_tool: Frame tool name (None for noop)
-            color_tool: Color tool name
-            lossy_tool: Lossy tool name
+            frame_tool: Frame tool name (None for no frame reduction)
+            color_tool: Color tool name (None for no color reduction)
+            lossy_tool: Lossy tool name (None for no lossy compression)
 
         Returns:
             Pipeline ID
         """
-        # Build canonical pipeline name
-        frame_part = f"{frame_tool or 'noop'}-frame"
-        color_part = f"{color_tool or 'noop'}-color"
-        lossy_part = f"{lossy_tool}-lossy"
-        name = f"{color_part}__{lossy_part}__{frame_part}"
+        # Build canonical pipeline name matching Pipeline.identifier() format
+        frame_part = f"{frame_tool or 'none-frame'}_Frame"
+        color_part = f"{color_tool or 'none-color'}_Color"
+        lossy_part = f"{lossy_tool or 'none-lossy'}_Lossy"
+        name = f"{frame_part}__{color_part}__{lossy_part}"
 
         return self.register_pipeline(name, frame_tool, color_tool, lossy_tool)
 
@@ -472,7 +554,7 @@ class GifLabStorage:
             try:
                 tools = tools_for(variable)
                 for tool_cls in tools:
-                    name = getattr(tool_cls, "NAME", tool_cls.__name__).split("-")[0]
+                    name = getattr(tool_cls, "NAME", tool_cls.__name__)
                     version = (
                         tool_cls.version() if hasattr(tool_cls, "version") else None
                     )
@@ -504,7 +586,7 @@ class GifLabStorage:
                 lossy_tool = None
 
                 for step in pipeline.steps:
-                    tool_name = getattr(step.tool_cls, "NAME", "").split("-")[0]
+                    tool_name = getattr(step.tool_cls, "NAME", "")
                     if step.variable == "frame_reduction":
                         frame_tool = tool_name if tool_name else None
                     elif step.variable == "color_reduction":
@@ -536,7 +618,7 @@ class GifLabStorage:
         """
         with self._connect() as conn:
             row = conn.execute(
-                """SELECT compression_complete, feature_extraction_version 
+                """SELECT compression_complete, feature_extraction_version
                    FROM gif_features WHERE gif_sha = ?""",
                 (gif_sha,),
             ).fetchone()
@@ -573,19 +655,10 @@ class GifLabStorage:
                 ).fetchall()
 
                 for row in rows:
-                    existing_map[row["gif_sha"]] = bool(
-                        row["compression_complete"]
-                    )
+                    existing_map[row["gif_sha"]] = bool(row["compression_complete"])
 
-            new_gifs = [
-                sha for sha in gif_shas
-                if sha not in existing_map
-            ]
-            incomplete = [
-                sha for sha, complete
-                in existing_map.items()
-                if not complete
-            ]
+            new_gifs = [sha for sha in gif_shas if sha not in existing_map]
+            incomplete = [sha for sha, complete in existing_map.items() if not complete]
 
             return new_gifs, incomplete
 
@@ -723,27 +796,19 @@ class GifLabStorage:
             run: Dict with 'gif_sha', 'pipeline_id', 'param_preset_id',
                  'size_kb', quality metrics, etc.
         """
+        fixed_cols = [
+            "gif_sha", "pipeline_id", "param_preset_id",
+            "size_kb", "compression_ratio",
+        ]
+        tail_cols = ["render_ms", "giflab_version", "created_at"]
+        all_cols = fixed_cols + QUALITY_METRIC_COLUMNS + tail_cols
+        col_list = ", ".join(all_cols)
+        placeholders = ", ".join(f":{c}" for c in all_cols)
+
         with self._connect() as conn:
             conn.execute(
-                """
-                INSERT OR REPLACE INTO compression_runs (
-                    gif_sha, pipeline_id, param_preset_id,
-                    size_kb, compression_ratio,
-                    ssim_mean, ssim_std, ssim_min, ssim_max,
-                    ms_ssim_mean, psnr_mean, temporal_consistency,
-                    mse_mean, fsim_mean, gmsd_mean, edge_similarity_mean,
-                    composite_quality, render_ms,
-                    giflab_version, created_at
-                ) VALUES (
-                    :gif_sha, :pipeline_id, :param_preset_id,
-                    :size_kb, :compression_ratio,
-                    :ssim_mean, :ssim_std, :ssim_min, :ssim_max,
-                    :ms_ssim_mean, :psnr_mean, :temporal_consistency,
-                    :mse_mean, :fsim_mean, :gmsd_mean, :edge_similarity_mean,
-                    :composite_quality, :render_ms,
-                    :giflab_version, :created_at
-                )
-            """,
+                f"INSERT OR REPLACE INTO compression_runs"
+                f" ({col_list}) VALUES ({placeholders})",
                 run,
             )
             conn.commit()
@@ -757,27 +822,19 @@ class GifLabStorage:
         if not runs:
             return
 
+        fixed_cols = [
+            "gif_sha", "pipeline_id", "param_preset_id",
+            "size_kb", "compression_ratio",
+        ]
+        tail_cols = ["render_ms", "giflab_version", "created_at"]
+        all_cols = fixed_cols + QUALITY_METRIC_COLUMNS + tail_cols
+        col_list = ", ".join(all_cols)
+        placeholders = ", ".join(f":{c}" for c in all_cols)
+
         with self._connect() as conn:
             conn.executemany(
-                """
-                INSERT OR REPLACE INTO compression_runs (
-                    gif_sha, pipeline_id, param_preset_id,
-                    size_kb, compression_ratio,
-                    ssim_mean, ssim_std, ssim_min, ssim_max,
-                    ms_ssim_mean, psnr_mean, temporal_consistency,
-                    mse_mean, fsim_mean, gmsd_mean, edge_similarity_mean,
-                    composite_quality, render_ms,
-                    giflab_version, created_at
-                ) VALUES (
-                    :gif_sha, :pipeline_id, :param_preset_id,
-                    :size_kb, :compression_ratio,
-                    :ssim_mean, :ssim_std, :ssim_min, :ssim_max,
-                    :ms_ssim_mean, :psnr_mean, :temporal_consistency,
-                    :mse_mean, :fsim_mean, :gmsd_mean, :edge_similarity_mean,
-                    :composite_quality, :render_ms,
-                    :giflab_version, :created_at
-                )
-            """,
+                f"INSERT OR REPLACE INTO compression_runs"
+                f" ({col_list}) VALUES ({placeholders})",
                 runs,
             )
             conn.commit()
@@ -864,6 +921,7 @@ class GifLabStorage:
         # Split by GIF (not by row) to avoid data leakage
         # Shuffle with fixed seed for reproducible but unbiased splits
         import random
+
         gif_shas = list(df["gif_sha"].unique())
         rng = random.Random(42)
         rng.shuffle(gif_shas)
@@ -915,7 +973,7 @@ class GifLabStorage:
             return {"lossy": lossy_curve, "color": color_curve}
 
     def get_statistics(self) -> dict[str, Any]:
-        """Get database statistics."""
+        """Get database statistics including per-engine and per-pipeline breakdowns."""
         with self._connect() as conn:
             total_gifs = conn.execute("SELECT COUNT(*) FROM gif_features").fetchone()[0]
             complete_gifs = conn.execute(
@@ -937,6 +995,46 @@ class GifLabStorage:
 
             expected = total_pipelines * total_presets if total_pipelines else 0
 
+            # Per-engine breakdown (counts by lossy tool)
+            engine_counts = dict(
+                conn.execute(
+                    """
+                    SELECT t.name, COUNT(cr.id)
+                    FROM compression_runs cr
+                    JOIN pipelines p ON cr.pipeline_id = p.id
+                    JOIN tools t ON p.lossy_tool_id = t.id
+                    GROUP BY t.name
+                    ORDER BY COUNT(cr.id) DESC
+                    """
+                ).fetchall()
+            )
+
+            # Per-pipeline breakdown
+            pipeline_counts = dict(
+                conn.execute(
+                    """
+                    SELECT p.name, COUNT(cr.id)
+                    FROM compression_runs cr
+                    JOIN pipelines p ON cr.pipeline_id = p.id
+                    GROUP BY p.name
+                    ORDER BY COUNT(cr.id) DESC
+                    """
+                ).fetchall()
+            )
+
+            # Per-GIF run counts
+            gif_counts = dict(
+                conn.execute(
+                    """
+                    SELECT gf.gif_name, COUNT(cr.id)
+                    FROM compression_runs cr
+                    JOIN gif_features gf ON cr.gif_sha = gf.gif_sha
+                    GROUP BY gf.gif_name
+                    ORDER BY COUNT(cr.id) DESC
+                    """
+                ).fetchall()
+            )
+
             return {
                 "total_gifs": total_gifs,
                 "complete_gifs": complete_gifs,
@@ -947,6 +1045,9 @@ class GifLabStorage:
                 "total_param_presets": total_presets,
                 "total_tools": total_tools,
                 "expected_runs_per_gif": expected,
+                "runs_per_engine": engine_counts,
+                "runs_per_pipeline": pipeline_counts,
+                "runs_per_gif": gif_counts,
             }
 
     def clear_incomplete(self) -> int:
@@ -966,7 +1067,8 @@ class GifLabStorage:
 
             placeholders = ",".join("?" * len(shas))
             conn.execute(
-                f"DELETE FROM compression_failures WHERE gif_sha IN ({placeholders})", shas
+                f"DELETE FROM compression_failures WHERE gif_sha IN ({placeholders})",
+                shas,
             )
             conn.execute(
                 f"DELETE FROM compression_runs WHERE gif_sha IN ({placeholders})", shas
@@ -977,3 +1079,47 @@ class GifLabStorage:
             conn.commit()
 
             return len(shas)
+
+    def export_features(self) -> pd.DataFrame:
+        """Export all GIF features as a DataFrame.
+
+        Returns:
+            DataFrame with all gif_features rows
+        """
+        import pandas as pd
+
+        with self._connect() as conn:
+            return pd.read_sql_query("SELECT * FROM gif_features", conn)
+
+    def export_compression_runs(self, lossy_tool: str | None = None) -> pd.DataFrame:
+        """Export compression runs with joined metadata.
+
+        Args:
+            lossy_tool: Optional filter by lossy tool name
+
+        Returns:
+            DataFrame with compression runs and joined tool/pipeline/param info
+        """
+        import pandas as pd
+
+        with self._connect() as conn:
+            query = """
+                SELECT c.*,
+                       p.name as pipeline_name,
+                       lt.name as lossy_tool,
+                       ct.name as color_tool,
+                       ft.name as frame_tool,
+                       pp.lossy_level, pp.color_count, pp.frame_ratio
+                FROM compression_runs c
+                JOIN pipelines p ON c.pipeline_id = p.id
+                JOIN param_presets pp ON c.param_preset_id = pp.id
+                LEFT JOIN tools lt ON p.lossy_tool_id = lt.id
+                LEFT JOIN tools ct ON p.color_tool_id = ct.id
+                LEFT JOIN tools ft ON p.frame_tool_id = ft.id
+            """
+            params: list[str] = []
+            if lossy_tool:
+                query += " WHERE lt.name = ?"
+                params.append(lossy_tool)
+
+            return pd.read_sql_query(query, conn, params=params or None)

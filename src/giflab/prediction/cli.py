@@ -1,8 +1,6 @@
 """CLI commands for compression curve prediction.
 
-Constitution Compliance:
-- Principle III (Poetry-First): Use `poetry run python -m giflab predict ...`
-- Principle VI (LLM-Optimized): Explicit patterns, type hints, docstrings
+Subcommands accessible via ``giflab predict <command>``.
 """
 
 import json
@@ -14,6 +12,17 @@ import click
 from giflab.prediction.features import extract_gif_features
 
 logger = logging.getLogger(__name__)
+
+# All 7 lossy engine choices matching Engine enum values
+ENGINE_CHOICES = [
+    "gifsicle",
+    "animately-standard",
+    "animately-advanced",
+    "animately-hard",
+    "imagemagick",
+    "ffmpeg",
+    "gifski",
+]
 
 
 @click.group(name="predict")
@@ -87,7 +96,7 @@ def extract_features_cmd(
 @click.option(
     "--engine",
     "-e",
-    type=click.Choice(["gifsicle", "animately"]),
+    type=click.Choice(ENGINE_CHOICES),
     default="gifsicle",
     help="Engine to train models for",
 )
@@ -96,7 +105,7 @@ def train_cmd(
     output: Path,
     engine: str,
 ) -> None:
-    """Train prediction models from a training dataset.
+    """Train prediction models from a JSONL dataset.
 
     Example:
         poetry run python -m giflab predict train -d data/training/ -o data/models/
@@ -124,29 +133,26 @@ def train_cmd(
 
     click.echo(f"Train: {len(train_records)}, Val: {len(val_records)}")
 
-    engine_enum = Engine.GIFSICLE if engine == "gifsicle" else Engine.ANIMATELY
+    engine_enum = Engine(engine)
     output.mkdir(parents=True, exist_ok=True)
 
     # Train lossy model
     click.echo(f"Training {engine} lossy model...")
-    # Pair features with curves, filtering out records with None curves
     lossy_paired = [
         (
             r.features,
-            r.lossy_curve_gifsicle
-            if engine == "gifsicle"
-            else r.lossy_curve_animately,
+            r.lossy_curve_gifsicle if engine == "gifsicle" else r.lossy_curve_animately,
         )
         for r in train_records
     ]
     lossy_paired = [(f, c) for f, c in lossy_paired if c is not None]
 
     if lossy_paired:
-        lossy_features, lossy_curves = zip(*lossy_paired)
+        lossy_features, lossy_curves = zip(*lossy_paired, strict=True)
         lossy_model = CurvePredictionModel(engine_enum, CurveType.LOSSY)
         lossy_model.train(list(lossy_features), list(lossy_curves))
 
-        # Validate - also pair features with curves correctly
+        # Validate
         val_lossy_paired = [
             (
                 r.features,
@@ -156,11 +162,9 @@ def train_cmd(
             )
             for r in val_records
         ]
-        val_lossy_paired = [
-            (f, c) for f, c in val_lossy_paired if c is not None
-        ]
+        val_lossy_paired = [(f, c) for f, c in val_lossy_paired if c is not None]
         if val_lossy_paired:
-            val_features, val_curves = zip(*val_lossy_paired)
+            val_features, val_curves = zip(*val_lossy_paired, strict=True)
             mape = lossy_model.validate(list(val_features), list(val_curves))
             click.echo(f"  Validation MAPE: {mape:.2f}%")
 
@@ -169,24 +173,21 @@ def train_cmd(
 
     # Train color model
     click.echo(f"Training {engine} color model...")
-    # Pair features with curves, filtering out records with None curves
     color_paired = [
         (
             r.features,
-            r.color_curve_gifsicle
-            if engine == "gifsicle"
-            else r.color_curve_animately,
+            r.color_curve_gifsicle if engine == "gifsicle" else r.color_curve_animately,
         )
         for r in train_records
     ]
     color_paired = [(f, c) for f, c in color_paired if c is not None]
 
     if color_paired:
-        color_features, color_curves = zip(*color_paired)
+        color_features, color_curves = zip(*color_paired, strict=True)
         color_model = CurvePredictionModel(engine_enum, CurveType.COLORS)
         color_model.train(list(color_features), list(color_curves))
 
-        # Validate - also pair features with curves correctly
+        # Validate
         val_color_paired = [
             (
                 r.features,
@@ -196,11 +197,9 @@ def train_cmd(
             )
             for r in val_records
         ]
-        val_color_paired = [
-            (f, c) for f, c in val_color_paired if c is not None
-        ]
+        val_color_paired = [(f, c) for f, c in val_color_paired if c is not None]
         if val_color_paired:
-            val_color_features, val_color_curves = zip(*val_color_paired)
+            val_color_features, val_color_curves = zip(*val_color_paired, strict=True)
             mape = color_model.validate(
                 list(val_color_features), list(val_color_curves)
             )
@@ -217,7 +216,7 @@ def train_cmd(
 @click.option(
     "--engine",
     "-e",
-    type=click.Choice(["gifsicle", "animately"]),
+    type=click.Choice(ENGINE_CHOICES),
     default="gifsicle",
     help="Compression engine",
 )
@@ -243,7 +242,7 @@ def lossy_curve_cmd(
     from giflab.prediction.schemas import Engine
 
     features = extract_gif_features(gif_path)
-    engine_enum = Engine.GIFSICLE if engine == "gifsicle" else Engine.ANIMATELY
+    engine_enum = Engine(engine)
 
     try:
         curve = predict_lossy_curve(features, engine_enum, model_dir)
@@ -262,7 +261,7 @@ def lossy_curve_cmd(
 @click.option(
     "--engine",
     "-e",
-    type=click.Choice(["gifsicle", "animately"]),
+    type=click.Choice(ENGINE_CHOICES),
     default="gifsicle",
     help="Compression engine",
 )
@@ -288,7 +287,7 @@ def color_curve_cmd(
     from giflab.prediction.schemas import Engine
 
     features = extract_gif_features(gif_path)
-    engine_enum = Engine.GIFSICLE if engine == "gifsicle" else Engine.ANIMATELY
+    engine_enum = Engine(engine)
 
     try:
         curve = predict_color_curve(features, engine_enum, model_dir)
@@ -300,145 +299,3 @@ def color_curve_cmd(
     for count, size in sorted(points.items(), reverse=True):
         if size:
             click.echo(f"  colors={count}: {size:.1f} KB")
-
-
-@predict_cli.command(name="build-dataset")
-@click.argument("input_dir", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Output directory for training data",
-)
-@click.option(
-    "--recursive",
-    "-r",
-    is_flag=True,
-    help="Search for GIFs recursively",
-)
-@click.option(
-    "--engine",
-    "-e",
-    type=click.Choice(["gifsicle", "animately"]),
-    default="gifsicle",
-    help="Compression engine to use",
-)
-def build_dataset_cmd(
-    input_dir: Path,
-    output: Path,
-    recursive: bool,
-    engine: str,
-) -> None:
-    """Build training dataset from GIF files.
-
-    Runs compression sweeps on all GIFs and pairs with extracted features.
-
-    INPUT_DIR: Directory containing GIF files.
-
-    Example:
-        poetry run python -m giflab predict build-dataset data/raw/ -o data/training/
-    """
-    from giflab.prediction.dataset import DatasetBuilder
-    from giflab.prediction.schemas import Engine
-
-    # Find GIF files
-    pattern = "**/*.gif" if recursive else "*.gif"
-    gif_files = list(input_dir.glob(pattern))
-
-    if not gif_files:
-        raise click.ClickException(f"No GIF files found in {input_dir}")
-
-    click.echo(f"Found {len(gif_files)} GIF files")
-
-    # Build dataset
-    engine_enum = Engine.GIFSICLE if engine == "gifsicle" else Engine.ANIMATELY
-    builder = DatasetBuilder(output)
-
-    def progress(current: int, total: int) -> None:
-        click.echo(f"\rProcessing {current}/{total}...", nl=False)
-
-    results = builder.build_dataset(
-        gif_files,
-        engines=[engine_enum],
-        progress_callback=progress,
-    )
-
-    click.echo()  # Newline after progress
-    click.echo(f"Dataset built successfully:")
-    click.echo(f"  Total: {results['total']}")
-    click.echo(f"  Success: {results['success']}")
-    click.echo(f"  Failed: {results['failed']}")
-    click.echo(f"  Train: {results['train']}")
-    click.echo(f"  Val: {results['val']}")
-    click.echo(f"  Test: {results['test']}")
-    click.echo(f"  Output: {output}")
-
-
-@predict_cli.command(name="batch-extract")
-@click.argument("input_dir", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "--output",
-    "-o",
-    type=click.Path(path_type=Path),
-    required=True,
-    help="Output CSV file for features",
-)
-@click.option(
-    "--recursive",
-    "-r",
-    is_flag=True,
-    help="Search for GIFs recursively",
-)
-def batch_extract_cmd(
-    input_dir: Path,
-    output: Path,
-    recursive: bool,
-) -> None:
-    """Extract features from all GIFs in a directory.
-
-    INPUT_DIR: Directory containing GIF files.
-
-    Example:
-        poetry run python -m giflab predict batch-extract data/raw/ -o features.csv
-    """
-    import csv
-
-    # Find GIF files
-    pattern = "**/*.gif" if recursive else "*.gif"
-    gif_files = list(input_dir.glob(pattern))
-
-    if not gif_files:
-        raise click.ClickException(f"No GIF files found in {input_dir}")
-
-    click.echo(f"Found {len(gif_files)} GIF files")
-
-    # Extract features
-    results = []
-    errors = []
-
-    with click.progressbar(gif_files, label="Extracting features") as bar:
-        for gif_path in bar:
-            try:
-                features = extract_gif_features(gif_path)
-                results.append(features.model_dump(mode="json"))
-            except Exception as e:
-                errors.append((gif_path, str(e)))
-                logger.warning(f"Failed to extract features from {gif_path}: {e}")
-
-    # Write CSV
-    if results:
-        fieldnames = list(results[0].keys())
-        with open(output, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(results)
-
-        click.echo(f"Wrote {len(results)} feature records to {output}")
-
-    if errors:
-        click.echo(f"Failed to process {len(errors)} files", err=True)
-        for path, error in errors[:5]:
-            click.echo(f"  - {path}: {error}", err=True)
-        if len(errors) > 5:
-            click.echo(f"  ... and {len(errors) - 5} more", err=True)

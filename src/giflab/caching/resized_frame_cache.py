@@ -9,17 +9,16 @@ import hashlib
 import logging
 import threading
 import time
+import weakref
 from collections import OrderedDict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Tuple, Dict, Any, List
-import weakref
+from typing import Any, Optional
 
 import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
-
 
 class InterpolationMethod(Enum):
     """Supported interpolation methods for resizing."""
@@ -38,18 +37,16 @@ class InterpolationMethod(Enum):
         # Default to AREA if unknown
         return cls.AREA
 
-
 @dataclass
 class ResizedFrameInfo:
     """Metadata for a cached resized frame."""
     frame: np.ndarray
     original_hash: str
-    target_size: Tuple[int, int]  # (width, height)
+    target_size: tuple[int, int]  # (width, height)
     interpolation: InterpolationMethod
     timestamp: float
     memory_size: int
     hit_count: int = 0
-
 
 class FrameBufferPool:
     """
@@ -63,7 +60,7 @@ class FrameBufferPool:
         Args:
             max_buffers_per_size: Maximum number of buffers to keep per size
         """
-        self.pools: Dict[Tuple[int, ...], List[np.ndarray]] = {}
+        self.pools: dict[tuple[int, ...], list[np.ndarray]] = {}
         self.max_buffers_per_size = max_buffers_per_size
         self._lock = threading.RLock()
         self._stats = {
@@ -72,7 +69,7 @@ class FrameBufferPool:
             "releases": 0,
         }
     
-    def get_buffer(self, shape: Tuple[int, ...], dtype: np.dtype = np.dtype(np.uint8)) -> np.ndarray:
+    def get_buffer(self, shape: tuple[int, ...], dtype: np.dtype = np.dtype(np.uint8)) -> np.ndarray:
         """
         Get a buffer from the pool or allocate a new one.
 
@@ -117,7 +114,7 @@ class FrameBufferPool:
         with self._lock:
             self.pools.clear()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get pool statistics."""
         with self._lock:
             total_buffers = sum(len(pool) for pool in self.pools.values())
@@ -133,7 +130,6 @@ class FrameBufferPool:
                     self._stats["reuses"] / max(1, self._stats["allocations"] + self._stats["reuses"])
                 ),
             }
-
 
 class ResizedFrameCache:
     """
@@ -181,7 +177,7 @@ class ResizedFrameCache:
     def _generate_cache_key(
         self,
         frame_hash: str,
-        target_size: Tuple[int, int],
+        target_size: tuple[int, int],
         interpolation: InterpolationMethod,
     ) -> str:
         """
@@ -230,9 +226,9 @@ class ResizedFrameCache:
     def get(
         self,
         frame: np.ndarray,
-        target_size: Tuple[int, int],
+        target_size: tuple[int, int],
         interpolation: int = cv2.INTER_AREA,
-    ) -> Optional[np.ndarray]:
+    ) -> np.ndarray | None:
         """
         Get a resized frame from cache or resize and cache it.
         
@@ -314,7 +310,7 @@ class ResizedFrameCache:
             if self._buffer_pool:
                 self._buffer_pool.clear()
     
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         with self._lock:
             total_hits = self._stats["hits"]
@@ -337,7 +333,7 @@ class ResizedFrameCache:
             
             return stats
     
-    def get_most_used(self, top_n: int = 10) -> List[Dict[str, Any]]:
+    def get_most_used(self, top_n: int = 10) -> list[dict[str, Any]]:
         """
         Get the most frequently used cache entries.
         
@@ -345,7 +341,7 @@ class ResizedFrameCache:
             top_n: Number of top entries to return
             
         Returns:
-            List of entry information dictionaries
+            list of entry information dictionaries
         """
         with self._lock:
             sorted_entries = sorted(
@@ -365,16 +361,14 @@ class ResizedFrameCache:
                 for key, info in sorted_entries
             ]
 
-
 # Global singleton instance
-_resize_cache_instance: Optional[ResizedFrameCache] = None
+_resize_cache_instance: ResizedFrameCache | None = None
 _resize_cache_lock = threading.Lock()
 
-
 def get_resize_cache(
-    memory_limit_mb: Optional[float] = None,
-    enable_pooling: Optional[bool] = None,
-    ttl_seconds: Optional[float] = None,
+    memory_limit_mb: float | None = None,
+    enable_pooling: bool | None = None,
+    ttl_seconds: float | None = None,
 ) -> ResizedFrameCache:
     """
     Get or create the global resize cache instance.
@@ -409,10 +403,9 @@ def get_resize_cache(
             )
         return _resize_cache_instance
 
-
 def resize_frame_cached(
     frame: np.ndarray,
-    target_size: Tuple[int, int],
+    target_size: tuple[int, int],
     interpolation: int = cv2.INTER_AREA,
     use_cache: bool = True,
 ) -> np.ndarray:

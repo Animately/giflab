@@ -12,14 +12,15 @@ Tests cover:
 - Error handling for import failures
 """
 
+import sys
 import tempfile
 import unittest.mock
 from pathlib import Path
-from unittest.mock import MagicMock, patch, Mock
-import sys
-import pytest
+from unittest.mock import MagicMock, Mock, patch
+
 import cv2
 import numpy as np
+import pytest
 
 # Test imports
 from giflab.config import ENABLE_EXPERIMENTAL_CACHING
@@ -146,6 +147,7 @@ class TestMetricsWithCachingDisabled:
         """Create minimal valid GIF bytes for testing."""
         # Create a proper minimal GIF using PIL
         import io
+
         from PIL import Image
         
         # Create a 1x1 black image

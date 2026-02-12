@@ -11,18 +11,20 @@ Phase 3.2 Implementation: Transform cache effectiveness data into actionable ins
 """
 
 import logging
+import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Tuple
 from enum import Enum
-import statistics
+from typing import Any, Optional
 
-from .cache_effectiveness import CacheEffectivenessStats, get_cache_effectiveness_monitor
 from .baseline_framework import BaselineStatistics, get_baseline_framework
+from .cache_effectiveness import (
+    CacheEffectivenessStats,
+    get_cache_effectiveness_monitor,
+)
 from .memory_monitor import get_cache_memory_tracker
 
 logger = logging.getLogger(__name__)
-
 
 class CacheRecommendation(Enum):
     """Cache deployment recommendations."""
@@ -32,7 +34,6 @@ class CacheRecommendation(Enum):
     KEEP_DISABLED = "keep_disabled"                   # Evidence suggests caching not beneficial
     INSUFFICIENT_DATA = "insufficient_data"           # Need more data for decision
     PERFORMANCE_REGRESSION = "performance_regression" # Caching causing performance issues
-
 
 @dataclass
 class CacheEffectivenessAnalysis:
@@ -47,24 +48,23 @@ class CacheEffectivenessAnalysis:
     memory_efficiency_score: float = 0.0
     
     # Detailed analysis
-    cache_stats_summary: Dict[str, Any] = field(default_factory=dict)
-    baseline_comparison_summary: Dict[str, Any] = field(default_factory=dict)
-    memory_analysis: Dict[str, Any] = field(default_factory=dict)
+    cache_stats_summary: dict[str, Any] = field(default_factory=dict)
+    baseline_comparison_summary: dict[str, Any] = field(default_factory=dict)
+    memory_analysis: dict[str, Any] = field(default_factory=dict)
     
     # Recommendations and insights
-    optimization_recommendations: List[str] = field(default_factory=list)
-    performance_insights: List[str] = field(default_factory=list)
-    risk_factors: List[str] = field(default_factory=list)
+    optimization_recommendations: list[str] = field(default_factory=list)
+    performance_insights: list[str] = field(default_factory=list)
+    risk_factors: list[str] = field(default_factory=list)
     
     # Configuration suggestions
-    suggested_cache_sizes: Dict[str, float] = field(default_factory=dict)
-    suggested_eviction_thresholds: Dict[str, float] = field(default_factory=dict)
+    suggested_cache_sizes: dict[str, float] = field(default_factory=dict)
+    suggested_eviction_thresholds: dict[str, float] = field(default_factory=dict)
     
     # Analysis metadata
     analysis_timestamp: float = field(default_factory=time.time)
     data_collection_period_hours: float = 0.0
     total_operations_analyzed: int = 0
-
 
 class CacheEffectivenessAnalyzer:
     """Analyzes cache effectiveness data and generates optimization recommendations."""
@@ -120,11 +120,11 @@ class CacheEffectivenessAnalyzer:
         return analysis
     
     def _perform_comprehensive_analysis(self,
-                                       cache_stats: Dict[str, CacheEffectivenessStats],
-                                       system_summary: Dict[str, Any],
-                                       baseline_stats: Dict[str, BaselineStatistics],
-                                       baseline_report: Dict[str, Any],
-                                       memory_summary: Dict[str, Any]) -> CacheEffectivenessAnalysis:
+                                       cache_stats: dict[str, CacheEffectivenessStats],
+                                       system_summary: dict[str, Any],
+                                       baseline_stats: dict[str, BaselineStatistics],
+                                       baseline_report: dict[str, Any],
+                                       memory_summary: dict[str, Any]) -> CacheEffectivenessAnalysis:
         """Perform detailed analysis and generate recommendations."""
         analysis = CacheEffectivenessAnalysis(
             recommendation=CacheRecommendation.INSUFFICIENT_DATA,
@@ -195,8 +195,8 @@ class CacheEffectivenessAnalyzer:
         return analysis
     
     def _has_sufficient_data(self,
-                            cache_stats: Dict[str, CacheEffectivenessStats],
-                            baseline_stats: Dict[str, BaselineStatistics],
+                            cache_stats: dict[str, CacheEffectivenessStats],
+                            baseline_stats: dict[str, BaselineStatistics],
                             monitoring_duration: float) -> bool:
         """Check if we have sufficient data for meaningful analysis."""
         # Need minimum monitoring duration
@@ -216,8 +216,8 @@ class CacheEffectivenessAnalyzer:
         return True
     
     def _analyze_hit_rates(self,
-                          cache_stats: Dict[str, CacheEffectivenessStats],
-                          overall_hit_rate: float) -> Dict[str, Any]:
+                          cache_stats: dict[str, CacheEffectivenessStats],
+                          overall_hit_rate: float) -> dict[str, Any]:
         """Analyze cache hit rate effectiveness."""
         if not cache_stats:
             return {"overall_assessment": "no_data", "hit_rate_score": 0.0}
@@ -250,8 +250,8 @@ class CacheEffectivenessAnalyzer:
         }
     
     def _analyze_performance_impact(self,
-                                   baseline_stats: Dict[str, BaselineStatistics],
-                                   avg_improvement: float) -> Dict[str, Any]:
+                                   baseline_stats: dict[str, BaselineStatistics],
+                                   avg_improvement: float) -> dict[str, Any]:
         """Analyze performance impact of caching."""
         if not baseline_stats:
             return {"overall_assessment": "no_data", "performance_score": 0.0}
@@ -288,8 +288,8 @@ class CacheEffectivenessAnalyzer:
         }
     
     def _analyze_memory_efficiency(self,
-                                  cache_stats: Dict[str, CacheEffectivenessStats],
-                                  memory_summary: Dict[str, Any]) -> Dict[str, Any]:
+                                  cache_stats: dict[str, CacheEffectivenessStats],
+                                  memory_summary: dict[str, Any]) -> dict[str, Any]:
         """Analyze memory efficiency of caching."""
         if "effectiveness_monitoring" in memory_summary and memory_summary["effectiveness_monitoring"] == "disabled":
             return {"overall_assessment": "monitoring_disabled", "efficiency_score": 0.5}
@@ -332,9 +332,9 @@ class CacheEffectivenessAnalyzer:
         }
     
     def _generate_overall_recommendation(self,
-                                        hit_rate_analysis: Dict[str, Any],
-                                        performance_analysis: Dict[str, Any],
-                                        memory_analysis: Dict[str, Any]) -> Tuple[CacheRecommendation, float]:
+                                        hit_rate_analysis: dict[str, Any],
+                                        performance_analysis: dict[str, Any],
+                                        memory_analysis: dict[str, Any]) -> tuple[CacheRecommendation, float]:
         """Generate overall recommendation and confidence score."""
         # Calculate weighted scores
         hit_rate_score = hit_rate_analysis.get("hit_rate_score", 0.0)
@@ -369,10 +369,10 @@ class CacheEffectivenessAnalyzer:
         return recommendation, confidence
     
     def _generate_optimization_recommendations(self,
-                                             hit_rate_analysis: Dict[str, Any],
-                                             performance_analysis: Dict[str, Any],
-                                             memory_analysis: Dict[str, Any],
-                                             cache_stats: Dict[str, CacheEffectivenessStats]) -> List[str]:
+                                             hit_rate_analysis: dict[str, Any],
+                                             performance_analysis: dict[str, Any],
+                                             memory_analysis: dict[str, Any],
+                                             cache_stats: dict[str, CacheEffectivenessStats]) -> list[str]:
         """Generate specific optimization recommendations."""
         recommendations = []
         
@@ -405,9 +405,9 @@ class CacheEffectivenessAnalyzer:
         return recommendations
     
     def _generate_performance_insights(self,
-                                     cache_stats: Dict[str, CacheEffectivenessStats],
-                                     baseline_stats: Dict[str, BaselineStatistics],
-                                     system_summary: Dict[str, Any]) -> List[str]:
+                                     cache_stats: dict[str, CacheEffectivenessStats],
+                                     baseline_stats: dict[str, BaselineStatistics],
+                                     system_summary: dict[str, Any]) -> list[str]:
         """Generate performance insights from analysis."""
         insights = []
         
@@ -435,9 +435,9 @@ class CacheEffectivenessAnalyzer:
         return insights
     
     def _identify_risk_factors(self,
-                              cache_stats: Dict[str, CacheEffectivenessStats],
-                              memory_analysis: Dict[str, Any],
-                              performance_analysis: Dict[str, Any]) -> List[str]:
+                              cache_stats: dict[str, CacheEffectivenessStats],
+                              memory_analysis: dict[str, Any],
+                              performance_analysis: dict[str, Any]) -> list[str]:
         """Identify potential risk factors with caching."""
         risks = []
         
@@ -461,8 +461,8 @@ class CacheEffectivenessAnalyzer:
         return risks
     
     def _suggest_cache_sizes(self,
-                            cache_stats: Dict[str, CacheEffectivenessStats],
-                            memory_analysis: Dict[str, Any]) -> Dict[str, float]:
+                            cache_stats: dict[str, CacheEffectivenessStats],
+                            memory_analysis: dict[str, Any]) -> dict[str, float]:
         """Suggest optimal cache sizes based on analysis."""
         suggestions = {}
         
@@ -483,7 +483,7 @@ class CacheEffectivenessAnalyzer:
         
         return suggestions
     
-    def _suggest_eviction_thresholds(self, memory_analysis: Dict[str, Any]) -> Dict[str, float]:
+    def _suggest_eviction_thresholds(self, memory_analysis: dict[str, Any]) -> dict[str, float]:
         """Suggest optimal eviction thresholds based on memory analysis."""
         current_efficiency = memory_analysis.get("efficiency_score", 0.5)
         
@@ -507,7 +507,7 @@ class CacheEffectivenessAnalyzer:
                 "emergency_threshold": 0.90
             }
     
-    def _summarize_cache_stats(self, cache_stats: Dict[str, CacheEffectivenessStats]) -> Dict[str, Any]:
+    def _summarize_cache_stats(self, cache_stats: dict[str, CacheEffectivenessStats]) -> dict[str, Any]:
         """Summarize cache statistics for the analysis report."""
         if not cache_stats:
             return {"total_cache_types": 0}
@@ -529,7 +529,7 @@ class CacheEffectivenessAnalyzer:
             }
         }
     
-    def _summarize_baseline_comparisons(self, baseline_stats: Dict[str, BaselineStatistics]) -> Dict[str, Any]:
+    def _summarize_baseline_comparisons(self, baseline_stats: dict[str, BaselineStatistics]) -> dict[str, Any]:
         """Summarize baseline performance comparisons."""
         if not baseline_stats:
             return {"total_comparisons": 0}
@@ -550,7 +550,7 @@ class CacheEffectivenessAnalyzer:
             }
         }
     
-    def _get_insufficient_data_recommendations(self) -> List[str]:
+    def _get_insufficient_data_recommendations(self) -> list[str]:
         """Get recommendations when insufficient data is available."""
         return [
             "Continue monitoring cache operations to collect more performance data.",
@@ -560,10 +560,8 @@ class CacheEffectivenessAnalyzer:
             "Consider running controlled performance tests with synthetic workloads."
         ]
 
-
 # Global analyzer instance
-_effectiveness_analyzer: Optional[CacheEffectivenessAnalyzer] = None
-
+_effectiveness_analyzer: CacheEffectivenessAnalyzer | None = None
 
 def get_effectiveness_analyzer() -> CacheEffectivenessAnalyzer:
     """Get singleton cache effectiveness analyzer."""
@@ -571,7 +569,6 @@ def get_effectiveness_analyzer() -> CacheEffectivenessAnalyzer:
     if _effectiveness_analyzer is None:
         _effectiveness_analyzer = CacheEffectivenessAnalyzer()
     return _effectiveness_analyzer
-
 
 def analyze_cache_effectiveness() -> CacheEffectivenessAnalysis:
     """Perform comprehensive cache effectiveness analysis."""

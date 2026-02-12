@@ -100,7 +100,7 @@ Lock a slot to use a specific algorithm with fixed parameters.
 --lock-slot frame=animately-frame
 
 # Lock multiple slots  
---lock-slot color=ffmpeg-color --lock-slot lossy=animately-advanced-lossy
+--lock-slot color=ffmpeg-color --lock-slot lossy=animately-advanced
 
 # Lock all non-variable slots
 --variable-slot frame=* --lock-slot color=ffmpeg-color --lock-slot lossy=none-lossy
@@ -219,7 +219,7 @@ poetry run python -m giflab run --preset tool-comparison-baseline --use-cache --
 poetry run python -m giflab run \
   --variable-slot frame=* \
   --lock-slot color=ffmpeg-color \
-  --lock-slot lossy=animately-advanced-lossy \
+  --lock-slot lossy=animately-advanced \
   --slot-params color=colors:32 \
   --slot-params lossy=level:40
 
@@ -304,8 +304,9 @@ poetry run python -m giflab run \
 
 ### Lossy Compression Tools
 
-- `animately-lossy` - Animately standard lossy compression
-- `animately-advanced-lossy` - Animately advanced lossy compression
+- `animately-standard` - Animately standard lossy compression
+- `animately-hard` - Animately hard lossy compression
+- `animately-advanced` - Animately advanced lossy compression
 - `ffmpeg-lossy` - FFmpeg lossy compression
 - `gifski-lossy` - Gifski lossy compression
 - `gifsicle-lossy` - Gifsicle standard lossy compression

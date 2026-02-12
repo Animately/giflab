@@ -11,8 +11,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
-from PIL import Image, ImageDraw
-
 from giflab.lossy import (
     _execute_animately_advanced,
     _extract_gif_metadata,
@@ -22,6 +20,7 @@ from giflab.lossy import (
     compress_with_animately_advanced_lossy,
 )
 from giflab.tool_wrappers import AnimatelyAdvancedLossyCompressor
+from PIL import Image, ImageDraw
 
 
 def create_test_gif(path: Path, frames: int = 5, size: tuple = (50, 50)) -> None:
@@ -43,7 +42,7 @@ class TestAnimatelyAdvancedLossyCompressor:
         """Test that the tool is properly registered with correct attributes."""
         tool = AnimatelyAdvancedLossyCompressor()
 
-        assert tool.NAME == "animately-advanced-lossy"
+        assert tool.NAME == "animately-advanced"
         assert tool.COMBINE_GROUP == "animately"
         assert tool.VARIABLE == "lossy_compression"
         assert hasattr(tool, "available")

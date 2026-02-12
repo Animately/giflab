@@ -14,7 +14,7 @@ import logging
 import pickle
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -22,8 +22,8 @@ from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.multioutput import MultiOutputRegressor
 
 import giflab
-
 from giflab.prediction.schemas import (
+    LOSSY_LEVELS,
     CompressionCurveV1,
     CurveType,
     Engine,
@@ -82,9 +82,6 @@ FEATURE_COLUMNS = [
     "transparency_ratio",
 ]
 
-# Lossy level targets
-LOSSY_LEVELS = [0, 20, 40, 60, 80, 100, 120]
-
 # Color count targets
 COLOR_COUNTS = [256, 128, 64, 32, 16]
 
@@ -112,7 +109,7 @@ class CurvePredictionModel:
         self.training_samples = 0
         self.validation_mape = 0.0
         self.feature_importances: dict[str, float] = {}
-        self.created_at = datetime.now(timezone.utc)
+        self.created_at = datetime.now(UTC)
 
     @property
     def target_columns(self) -> list[str]:
@@ -347,13 +344,8 @@ class CurvePredictionModel:
         for curve in curves_list:
             if self.curve_type == CurveType.LOSSY:
                 row = [
-                    curve.size_at_lossy_0,
-                    curve.size_at_lossy_20,
-                    curve.size_at_lossy_40,
-                    curve.size_at_lossy_60,
-                    curve.size_at_lossy_80,
-                    curve.size_at_lossy_100,
-                    curve.size_at_lossy_120,
+                    getattr(curve, f"size_at_lossy_{level}")
+                    for level in LOSSY_LEVELS
                 ]
             else:
                 row = [
@@ -388,6 +380,10 @@ class CurvePredictionModel:
                 [float(predictions[i]) for i in clamped],
             )
         if self.curve_type == CurveType.LOSSY:
+            lossy_kwargs = {
+                f"size_at_lossy_{level}": max(0.1, float(predictions[i]))
+                for i, level in enumerate(LOSSY_LEVELS)
+            }
             return CompressionCurveV1(
                 gif_sha=gif_sha,
                 engine=self.engine,
@@ -395,14 +391,8 @@ class CurvePredictionModel:
                 is_predicted=True,
                 model_version=MODEL_VERSION,
                 confidence_scores=confidence_scores,
-                created_at=datetime.now(timezone.utc),
-                size_at_lossy_0=max(0.1, float(predictions[0])),
-                size_at_lossy_20=max(0.1, float(predictions[1])),
-                size_at_lossy_40=max(0.1, float(predictions[2])),
-                size_at_lossy_60=max(0.1, float(predictions[3])),
-                size_at_lossy_80=max(0.1, float(predictions[4])),
-                size_at_lossy_100=max(0.1, float(predictions[5])),
-                size_at_lossy_120=max(0.1, float(predictions[6])),
+                created_at=datetime.now(UTC),
+                **lossy_kwargs,
             )
         else:
             return CompressionCurveV1(
@@ -412,7 +402,7 @@ class CurvePredictionModel:
                 is_predicted=True,
                 model_version=MODEL_VERSION,
                 confidence_scores=confidence_scores,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
                 size_at_colors_256=max(0.1, float(predictions[0])),
                 size_at_colors_128=max(0.1, float(predictions[1])),
                 size_at_colors_64=max(0.1, float(predictions[2])),
@@ -425,7 +415,7 @@ class CurvePredictionModel:
 
         Simple heuristic: higher confidence for features within training range.
         """
-        num_points = 7 if self.curve_type == CurveType.LOSSY else 5
+        num_points = len(LOSSY_LEVELS) if self.curve_type == CurveType.LOSSY else 5
         # Placeholder: return 0.8 for all points
         # TODO: Implement proper confidence based on training data distribution
         return [0.8] * num_points

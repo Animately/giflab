@@ -7,15 +7,16 @@ providing automatic memory tracking, pressure detection, and eviction policies.
 
 import logging
 import time
-from typing import Optional, Callable
+from collections.abc import Callable
+from typing import Optional
 
 from ..config import MONITORING
 from .memory_monitor import (
-    get_system_memory_monitor,
+    MemoryPressureLevel,
     get_cache_memory_tracker,
     get_memory_pressure_manager,
+    get_system_memory_monitor,
     start_memory_monitoring,
-    MemoryPressureLevel,
 )
 from .metrics_collector import get_metrics_collector
 
@@ -43,8 +44,8 @@ class MemoryPressureIntegration:
                 return False
             
             # Initialize monitoring components
-            system_monitor = get_system_memory_monitor()
-            cache_tracker = get_cache_memory_tracker()
+            get_system_memory_monitor()
+            get_cache_memory_tracker()
             pressure_manager = get_memory_pressure_manager()
             
             # Configure eviction cooldown from config
@@ -106,9 +107,9 @@ class MemoryPressureIntegration:
         return False
 
 
-def instrument_cache_with_memory_tracking(cache_type: str, 
+def instrument_cache_with_memory_tracking(cache_type: str,
                                         get_size_callback: Callable[[], float],
-                                        eviction_callback: Optional[Callable[[float], float]] = None) -> None:
+                                        eviction_callback: Callable[[float], float] | None = None) -> None:
     """
     Instrument a cache with memory tracking and eviction support.
     
@@ -191,8 +192,8 @@ def instrument_frame_cache_memory() -> None:
             return freed_mb
         
         instrument_cache_with_memory_tracking(
-            "frame_cache", 
-            get_frame_cache_size, 
+            "frame_cache",
+            get_frame_cache_size,
             evict_frame_cache
         )
         
@@ -219,7 +220,7 @@ def instrument_all_caches_memory() -> None:
 def setup_memory_pressure_alerts() -> None:
     """Set up memory pressure alerts with the existing alerting system."""
     try:
-        from .alerting import get_alert_manager, AlertRule
+        from .alerting import AlertRule, get_alert_manager
         
         alert_manager = get_alert_manager()
         config = MONITORING.get("memory_pressure", {})
@@ -237,7 +238,7 @@ def setup_memory_pressure_alerts() -> None:
         )
         alert_manager.add_rule(system_memory_rule)
         
-        # Create process memory pressure alert rule  
+        # Create process memory pressure alert rule
         process_memory_rule = AlertRule(
             name="process.memory.pressure",
             metric_pattern="process.memory.usage_mb",
@@ -280,7 +281,7 @@ def integrate_memory_monitoring_with_metrics() -> None:
                 }
                 collector.record_gauge("system.memory.pressure_level", pressure_values[stats.pressure_level])
         
-        # Record metrics immediately  
+        # Record metrics immediately
         record_memory_metrics()
         
         logger.debug("Memory monitoring integrated with metrics system")
@@ -290,7 +291,7 @@ def integrate_memory_monitoring_with_metrics() -> None:
 
 
 # Global integration instance
-_memory_integration: Optional[MemoryPressureIntegration] = None
+_memory_integration: MemoryPressureIntegration | None = None
 
 
 def get_memory_integration() -> MemoryPressureIntegration:

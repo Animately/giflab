@@ -690,7 +690,7 @@ class TestTemporalArtifactPerformanceEdgeCases:
 
         # Create test frames
         frames = []
-        for i in range(10):
+        for _ in range(10):
             frame = np.random.randint(0, 256, (32, 32, 3), dtype=np.uint8)
             frames.append(frame)
 

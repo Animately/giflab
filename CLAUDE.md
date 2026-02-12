@@ -214,6 +214,40 @@ These tests are **correctly skipped** during normal test runs:
 5. **TEST** commands with `poetry run` if unsure
 6. **REMEMBER** this is a Poetry project - dependencies require the virtual environment
 
+## Agent Teams
+
+Agent teams are enabled for this project. When using them, follow these guidelines.
+
+### When to Use Agent Teams
+- **Research and review**: multiple teammates investigate different aspects simultaneously
+- **New modules or features**: teammates each own a separate piece without conflicts
+- **Debugging with competing hypotheses**: teammates test different theories in parallel
+- **Cross-layer coordination**: changes spanning frontend, backend, and tests
+
+### When NOT to Use Agent Teams
+- Sequential tasks or same-file edits — use a single session or subagents instead
+- Simple tasks where coordination overhead exceeds the benefit
+- Work with many dependencies between steps
+
+### Best Practices
+- **Give teammates enough context**: they load CLAUDE.md but don't inherit the lead's conversation history — include task-specific details in the spawn prompt
+- **Size tasks appropriately**: self-contained units that produce a clear deliverable (a function, a test file, a review)
+- **Avoid file conflicts**: break work so each teammate owns a different set of files
+- **Wait for teammates**: don't start implementing tasks yourself — let teammates complete their work
+- **Start with research/review**: for unfamiliar tasks, use teams for investigation before implementation
+- **Use delegate mode**: press `Shift+Tab` to restrict the lead to coordination-only (no direct code changes)
+- **Require plan approval for risky work**: have teammates plan before implementing, then approve or reject
+
+### Task Management
+- Aim for 5-6 tasks per teammate to keep everyone productive
+- Tasks have three states: pending, in progress, completed
+- Tasks can have dependencies — blocked tasks auto-unblock when dependencies complete
+- Teammates self-claim the next unassigned, unblocked task after finishing one
+
+### Display Modes
+- **In-process** (default): `Shift+Up/Down` to navigate teammates, `Enter` to view, `Escape` to interrupt, `Ctrl+T` for task list
+- **Split panes**: requires tmux or iTerm2 — set `"teammateMode": "tmux"` in settings
+
 ---
 
 *This configuration ensures reliable, reproducible development workflows for both humans and AI assistants.*

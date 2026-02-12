@@ -15,24 +15,25 @@ Benchmark scenarios cover diverse GIF characteristics:
 
 import gc
 import json
+import os
+import sys
 import time
 import tracemalloc
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
+
 import numpy as np
-from PIL import Image
 import psutil
-import sys
-import os
+from PIL import Image
 
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from giflab.metrics import calculate_comprehensive_metrics
 from giflab.conditional_metrics import ConditionalMetricsCalculator
-from giflab.parallel_metrics import ParallelMetricsCalculator
+from giflab.metrics import calculate_comprehensive_metrics
 from giflab.model_cache import LPIPSModelCache
+from giflab.parallel_metrics import ParallelMetricsCalculator
 from giflab.ssimulacra2_metrics import Ssimulacra2Validator
 from giflab.text_ui_validation import TextUIContentDetector
 
@@ -43,11 +44,10 @@ class BenchmarkScenario:
     name: str
     description: str
     frame_count: int
-    resolution: Tuple[int, int]
+    resolution: tuple[int, int]
     quality_level: str  # 'high', 'medium', 'low'
     content_type: str  # 'text', 'gradient', 'animation', 'static', 'mixed'
-    expected_metrics: Dict[str, float] = field(default_factory=dict)
-
+    expected_metrics: dict[str, float] = field(default_factory=dict)
 
 @dataclass
 class BenchmarkResult:
@@ -56,19 +56,18 @@ class BenchmarkResult:
     execution_time: float
     memory_peak: float
     memory_delta: float
-    metrics_calculated: List[str]
-    metrics_skipped: List[str]
+    metrics_calculated: list[str]
+    metrics_skipped: list[str]
     cache_hits: int
     cache_misses: int
-    parallel_speedup: Optional[float] = None
-    conditional_speedup: Optional[float] = None
-    errors: List[str] = field(default_factory=list)
-
+    parallel_speedup: float | None = None
+    conditional_speedup: float | None = None
+    errors: list[str] = field(default_factory=list)
 
 class ComprehensiveBenchmarkSuite:
     """Comprehensive benchmark suite for Phase 3 optimizations."""
     
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Path | None = None):
         """Initialize benchmark suite.
         
         Args:
@@ -78,9 +77,9 @@ class ComprehensiveBenchmarkSuite:
         self.output_dir.mkdir(exist_ok=True)
         
         self.scenarios = self._define_scenarios()
-        self.results: List[BenchmarkResult] = []
+        self.results: list[BenchmarkResult] = []
         
-    def _define_scenarios(self) -> List[BenchmarkScenario]:
+    def _define_scenarios(self) -> list[BenchmarkScenario]:
         """Define comprehensive benchmark scenarios."""
         scenarios = []
         
@@ -207,14 +206,14 @@ class ComprehensiveBenchmarkSuite:
         
         return scenarios
     
-    def _generate_test_gif(self, scenario: BenchmarkScenario) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    def _generate_test_gif(self, scenario: BenchmarkScenario) -> tuple[list[np.ndarray], list[np.ndarray]]:
         """Generate synthetic test GIF frames based on scenario.
         
         Args:
             scenario: Benchmark scenario definition
             
         Returns:
-            Tuple of (original_frames, compressed_frames)
+            tuple of (original_frames, compressed_frames)
         """
         width, height = scenario.resolution
         frames_orig = []
@@ -566,7 +565,7 @@ class ComprehensiveBenchmarkSuite:
             errors=errors
         )
     
-    def run_comprehensive_benchmark(self) -> Dict:
+    def run_comprehensive_benchmark(self) -> dict:
         """Run complete benchmark suite across all scenarios.
         
         Returns:
@@ -627,7 +626,7 @@ class ComprehensiveBenchmarkSuite:
                 }
                 all_results["comparisons"].append(comparison)
                 
-                print(f"  Results:")
+                print("  Results:")
                 print(f"    Baseline: {baseline_result.execution_time:.3f}s")
                 print(f"    Parallel speedup: {parallel_speedup:.2f}x")
                 print(f"    Conditional speedup: {conditional_speedup:.2f}x")
@@ -645,7 +644,7 @@ class ComprehensiveBenchmarkSuite:
         
         return all_results
     
-    def _generate_summary(self, results: Dict) -> Dict:
+    def _generate_summary(self, results: dict) -> dict:
         """Generate summary statistics from benchmark results.
         
         Args:
@@ -709,7 +708,7 @@ class ComprehensiveBenchmarkSuite:
         by_quality = {"high": [], "medium": [], "low": []}
         by_size = {"small": [], "medium": [], "large": []}
         
-        for scenario, comparison in zip(self.scenarios, comparisons):
+        for scenario, comparison in zip(self.scenarios, comparisons, strict=True):
             by_quality[scenario.quality_level].append(comparison["full_speedup"])
             
             if scenario.frame_count <= 15:
@@ -731,7 +730,7 @@ class ComprehensiveBenchmarkSuite:
         
         return summary
     
-    def _save_results(self, results: Dict):
+    def _save_results(self, results: dict):
         """Save benchmark results to file.
         
         Args:
@@ -744,7 +743,7 @@ class ComprehensiveBenchmarkSuite:
         def convert_numpy(obj):
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
-            elif isinstance(obj, (np.integer, np.floating)):
+            elif isinstance(obj, np.integer | np.floating):
                 return float(obj)
             elif isinstance(obj, dict):
                 return {k: convert_numpy(v) for k, v in obj.items()}
@@ -766,7 +765,7 @@ class ComprehensiveBenchmarkSuite:
         self._generate_report(results, report_file)
         print(f"Report saved to: {report_file}")
     
-    def _generate_report(self, results: Dict, output_file: Path):
+    def _generate_report(self, results: dict, output_file: Path):
         """Generate human-readable benchmark report.
         
         Args:
@@ -805,7 +804,7 @@ class ComprehensiveBenchmarkSuite:
             for comparison in results.get("comparisons", []):
                 f.write(f"Scenario: {comparison['scenario']}\n")
                 f.write(f"  Baseline Time: {comparison['baseline_time']:.3f}s\n")
-                f.write(f"  Speedups:\n")
+                f.write("  Speedups:\n")
                 f.write(f"    Parallel Only: {comparison['parallel_speedup']:.2f}x\n")
                 f.write(f"    Conditional Only: {comparison['conditional_speedup']:.2f}x\n")
                 f.write(f"    Full Optimization: {comparison['full_speedup']:.2f}x\n")
@@ -834,7 +833,7 @@ class ComprehensiveBenchmarkSuite:
             f.write("-" * 40 + "\n")
             f.write(self._generate_recommendations(results))
     
-    def _generate_recommendations(self, results: Dict) -> str:
+    def _generate_recommendations(self, results: dict) -> str:
         """Generate recommendations based on benchmark results.
         
         Args:
@@ -909,7 +908,6 @@ class ComprehensiveBenchmarkSuite:
         
         return "\n".join(recommendations) + "\n"
 
-
 def main():
     """Run comprehensive benchmark suite."""
     suite = ComprehensiveBenchmarkSuite()
@@ -927,7 +925,6 @@ def main():
         print(f"Mean Memory Reduction: {summary['memory_optimization']['mean_reduction']:.1f}%")
     
     print("\nResults and report have been saved to the benchmark_results directory.")
-
 
 if __name__ == "__main__":
     main()

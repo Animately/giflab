@@ -12,13 +12,12 @@ import os
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Optional
 
 import numpy as np
 from skimage.metrics import mean_squared_error, peak_signal_noise_ratio
 
 logger = logging.getLogger(__name__)
-
 
 class QualityTier(Enum):
     """Quality tier classifications for progressive metric calculation."""
@@ -27,7 +26,6 @@ class QualityTier(Enum):
     MEDIUM = "medium"  # Quality 0.5-0.9, some artifacts
     LOW = "low"  # Quality < 0.5, significant artifacts
     UNKNOWN = "unknown"  # Unable to determine
-
 
 @dataclass
 class ContentProfile:
@@ -41,7 +39,6 @@ class ContentProfile:
     frame_similarity: float = 0.0  # Average similarity between frames
     complexity_score: float = 0.0  # Overall complexity rating
 
-
 @dataclass
 class QualityAssessment:
     """Initial quality assessment results."""
@@ -52,7 +49,6 @@ class QualityAssessment:
     base_mse: float
     frame_consistency: float
     details: dict[str, Any]
-
 
 class FrameHashCache:
     """Cache for frame hashes and similarity detection."""
@@ -113,7 +109,6 @@ class FrameHashCache:
             "cache_hits": self.hit_count,
             "hit_rate": self.hit_count / max(1, self.access_count),
         }
-
 
 class ConditionalMetricsCalculator:
     """

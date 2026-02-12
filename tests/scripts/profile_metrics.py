@@ -1,35 +1,36 @@
 #!/usr/bin/env python3
 """Profile metrics calculation to identify bottlenecks for parallelization."""
 
-import time
-from pathlib import Path
-from contextlib import contextmanager
-import numpy as np
-from typing import Any
-
 # Import metrics modules
 import sys
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+import cv2
 from giflab.metrics import (
-    extract_gif_frames,
-    resize_to_common_dimensions,
     align_frames,
-    ssim,
     calculate_ms_ssim,
     calculate_safe_psnr,
-    mse,
-    rmse,
+    calculate_temporal_consistency,
+    chist,
+    detect_disposal_artifacts,
+    edge_similarity,
+    extract_gif_frames,
     fsim,
     gmsd,
-    chist,
-    edge_similarity,
-    texture_similarity,
+    mse,
+    resize_to_common_dimensions,
+    rmse,
     sharpness_similarity,
-    calculate_temporal_consistency,
-    detect_disposal_artifacts,
+    ssim,
+    texture_similarity,
 )
-import cv2
 
 
 @contextmanager
@@ -164,7 +165,7 @@ def main():
     estimated_parallel_time = total_sequential_time / min(cpu_count, len(aligned_pairs))
     estimated_speedup = total_sequential_time / estimated_parallel_time
     
-    print(f"\n🚀 Parallelization Potential:")
+    print("\n🚀 Parallelization Potential:")
     print(f"  CPU cores available: {cpu_count}")
     print(f"  Estimated parallel time: {estimated_parallel_time:.3f}s")
     print(f"  Potential speedup: {estimated_speedup:.1f}x")

@@ -79,7 +79,13 @@ class LossyEngine(Enum):
     """Supported lossy compression engines."""
 
     GIFSICLE = "gifsicle"
-    ANIMATELY = "animately"
+    ANIMATELY_STANDARD = "animately-standard"
+    ANIMATELY = "animately-standard"  # Alias for ANIMATELY_STANDARD (legacy name)
+    ANIMATELY_ADVANCED = "animately-advanced"
+    ANIMATELY_HARD = "animately-hard"
+    IMAGEMAGICK = "imagemagick"
+    FFMPEG = "ffmpeg"
+    GIFSKI = "gifski"
 
 
 def get_gifsicle_version() -> str:
@@ -197,56 +203,6 @@ def get_engine_version(engine: LossyEngine) -> str:
         return get_gifsicle_version()
     elif engine == LossyEngine.ANIMATELY:
         return get_animately_version()
-    else:
-        raise ValueError(f"Unsupported engine: {engine}")
-
-
-def apply_lossy_compression(
-    input_path: Path,
-    output_path: Path,
-    lossy_level: int,
-    frame_keep_ratio: float = 1.0,
-    color_keep_count: int | None = None,
-    engine: LossyEngine = LossyEngine.GIFSICLE,
-) -> dict[str, Any]:
-    """Apply lossy compression to a GIF using the specified engine.
-
-    Args:
-        input_path: Path to input GIF file
-        output_path: Path to save compressed GIF
-        lossy_level: Lossy compression level (0 = lossless, higher = more lossy)
-        frame_keep_ratio: Ratio of frames to keep (0.0 to 1.0), default 1.0 (all frames)
-        color_keep_count: Number of colors to keep (optional, None = no reduction)
-        engine: Compression engine to use
-
-    Returns:
-        Dictionary with compression metadata (render_ms, etc.)
-
-    Raises:
-        ValueError: If lossy_level is negative or frame_keep_ratio is invalid
-        IOError: If input file cannot be read or output cannot be written
-        RuntimeError: If compression engine fails
-    """
-    if lossy_level < 0:
-        raise ValueError(f"lossy_level must be non-negative, got {lossy_level}")
-
-    validate_frame_keep_ratio(frame_keep_ratio)
-
-    if not input_path.exists():
-        raise OSError(f"Input file not found: {input_path}")
-
-    # Ensure output directory exists
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Dispatch to appropriate engine
-    if engine == LossyEngine.GIFSICLE:
-        return compress_with_gifsicle(
-            input_path, output_path, lossy_level, frame_keep_ratio, color_keep_count
-        )
-    elif engine == LossyEngine.ANIMATELY:
-        return compress_with_animately(
-            input_path, output_path, lossy_level, frame_keep_ratio, color_keep_count
-        )
     else:
         raise ValueError(f"Unsupported engine: {engine}")
 
@@ -871,7 +827,7 @@ def compress_with_animately(
 
         return {
             "render_ms": render_ms,
-            "engine": "animately",
+            "engine": "animately-standard",
             "engine_version": engine_version,
             "lossy_level": lossy_level,
             "frame_keep_ratio": frame_keep_ratio,
@@ -891,6 +847,96 @@ def compress_with_animately(
         raise RuntimeError(f"Animately timed out after {RUN_TIMEOUT} seconds") from e
     except Exception as e:
         raise RuntimeError(f"Animately execution failed: {str(e)}") from e
+
+
+def compress_with_animately_hard(
+    input_path: Path,
+    output_path: Path,
+    lossy_level: int,
+) -> dict[str, Any]:
+    """Compress GIF using animately CLI with --hard --lossy flags.
+
+    This uses Animately's hard compression mode which applies more aggressive
+    optimization. The --hard flag combines with --lossy for maximum size reduction.
+
+    Command: animately --input <in> --output <out> --hard --lossy <level>
+
+    Args:
+        input_path: Path to input GIF file
+        output_path: Path to save compressed GIF
+        lossy_level: Lossy compression level for animately
+
+    Returns:
+        Dictionary with compression metadata.
+
+    Raises:
+        RuntimeError: If animately command fails or binary not found
+        ValueError: If paths contain dangerous characters
+    """
+    animately_path = DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
+
+    if not animately_path or not _is_executable(animately_path):
+        raise RuntimeError(
+            "Animately launcher not found. "
+            "Please install animately or set ANIMATELY_PATH in EngineConfig."
+        )
+
+    # Build command with --hard --lossy flags
+    validated_input = validate_path_security(input_path)
+    validated_output = validate_path_security(output_path)
+
+    input_str = str(validated_input.resolve())
+    output_str = str(validated_output.resolve())
+
+    cmd = [
+        animately_path,
+        "--input",
+        input_str,
+        "--output",
+        output_str,
+        "--hard",
+        "--lossy",
+        str(lossy_level),
+    ]
+
+    start_time = time.time()
+
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=RUN_TIMEOUT
+        )
+
+        end_time = time.time()
+        elapsed_seconds = end_time - start_time
+        render_ms = min(int(elapsed_seconds * 1000), 86400000)
+
+        if not output_path.exists():
+            raise RuntimeError(f"Animately failed to create output file: {output_path}")
+
+        try:
+            engine_version = get_animately_version()
+        except RuntimeError:
+            engine_version = "unknown"
+
+        return {
+            "render_ms": render_ms,
+            "engine": "animately-hard",
+            "engine_version": engine_version,
+            "lossy_level": lossy_level,
+            "command": " ".join(cmd),
+            "stderr": result.stderr if result.stderr else None,
+        }
+
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"Animately hard mode failed with exit code {e.returncode}: {e.stderr}"
+        ) from e
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Animately hard mode timed out after {RUN_TIMEOUT} seconds"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(f"Animately hard mode execution failed: {str(e)}") from e
 
 
 def _is_executable(path: str) -> bool:

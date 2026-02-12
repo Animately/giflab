@@ -1,16 +1,18 @@
 """Concrete implementations of frame sampling strategies."""
 
-from typing import List, Optional, Dict, Any, Tuple
-import numpy as np
 import logging
+from collections.abc import Callable
+from typing import Any, Optional
+
+import numpy as np
+
 from .frame_sampler import (
+    FrameDifferenceCalculator,
     FrameSampler,
     SamplingResult,
-    FrameDifferenceCalculator,
 )
 
 logger = logging.getLogger(__name__)
-
 
 class UniformSampler(FrameSampler):
     """
@@ -38,14 +40,14 @@ class UniformSampler(FrameSampler):
     
     def sample(
         self,
-        frames: List[np.ndarray],
+        frames: list[np.ndarray],
         **kwargs
     ) -> SamplingResult:
         """
         Sample frames uniformly at regular intervals.
         
         Args:
-            frames: List of frames to sample
+            frames: list of frames to sample
             **kwargs: Additional parameters (ignored)
             
         Returns:
@@ -73,7 +75,7 @@ class UniformSampler(FrameSampler):
             indices = [int(i * step) for i in range(num_samples)]
             
             # Ensure unique indices
-            indices = sorted(list(set(indices)))
+            indices = sorted(set(indices))
         else:
             indices = [0, num_frames - 1]
         
@@ -90,7 +92,6 @@ class UniformSampler(FrameSampler):
         
         self.log_sampling_info(result)
         return result
-
 
 class AdaptiveSampler(FrameSampler):
     """
@@ -125,14 +126,14 @@ class AdaptiveSampler(FrameSampler):
     
     def sample(
         self,
-        frames: List[np.ndarray],
+        frames: list[np.ndarray],
         **kwargs
     ) -> SamplingResult:
         """
         Sample frames adaptively based on motion/change detection.
         
         Args:
-            frames: List of frames to sample
+            frames: list of frames to sample
             **kwargs: Additional parameters
             
         Returns:
@@ -184,7 +185,7 @@ class AdaptiveSampler(FrameSampler):
         if (num_frames - 1) not in indices:
             indices.append(num_frames - 1)
         
-        indices = sorted(list(set(indices)))
+        indices = sorted(set(indices))
         
         # Calculate motion statistics
         high_motion_frames = sum(1 for d in differences if d > mean_diff + std_diff)
@@ -205,7 +206,6 @@ class AdaptiveSampler(FrameSampler):
         
         self.log_sampling_info(result)
         return result
-
 
 class ProgressiveSampler(FrameSampler):
     """
@@ -243,15 +243,15 @@ class ProgressiveSampler(FrameSampler):
     
     def sample(
         self,
-        frames: List[np.ndarray],
-        metric_func: Optional[callable] = None,
+        frames: list[np.ndarray],
+        metric_func: Callable | None = None,
         **kwargs
     ) -> SamplingResult:
         """
         Sample frames progressively, refining based on confidence intervals.
         
         Args:
-            frames: List of frames to sample
+            frames: list of frames to sample
             metric_func: Optional function to calculate metric for CI
             **kwargs: Additional parameters
             
@@ -322,7 +322,7 @@ class ProgressiveSampler(FrameSampler):
         sampled_indices.add(0)
         sampled_indices.add(num_frames - 1)
         
-        indices = sorted(list(sampled_indices))
+        indices = sorted(sampled_indices)
         
         # Calculate final CI if we have metrics
         if len(indices) >= 2:
@@ -349,7 +349,6 @@ class ProgressiveSampler(FrameSampler):
         
         self.log_sampling_info(result)
         return result
-
 
 class SceneAwareSampler(FrameSampler):
     """
@@ -385,15 +384,15 @@ class SceneAwareSampler(FrameSampler):
         self.min_scene_samples = max(1, min_scene_samples)
         self.base_rate = max(0.1, min(1.0, base_rate))
     
-    def detect_scenes(self, frames: List[np.ndarray]) -> List[Tuple[int, int]]:
+    def detect_scenes(self, frames: list[np.ndarray]) -> list[tuple[int, int]]:
         """
         Detect scene boundaries in the frame sequence.
         
         Args:
-            frames: List of frames
+            frames: list of frames
             
         Returns:
-            List of (start_idx, end_idx) tuples for each scene
+            list of (start_idx, end_idx) tuples for each scene
         """
         if len(frames) < 2:
             return [(0, len(frames) - 1)]
@@ -421,14 +420,14 @@ class SceneAwareSampler(FrameSampler):
     
     def sample(
         self,
-        frames: List[np.ndarray],
+        frames: list[np.ndarray],
         **kwargs
     ) -> SamplingResult:
         """
         Sample frames with scene awareness.
         
         Args:
-            frames: List of frames to sample
+            frames: list of frames to sample
             **kwargs: Additional parameters
             
         Returns:
@@ -494,7 +493,7 @@ class SceneAwareSampler(FrameSampler):
                         new_samples = unsampled_in_scene[::step][:additional_needed]
                         sampled_indices.update(new_samples)
         
-        indices = sorted(list(sampled_indices))
+        indices = sorted(sampled_indices)
         
         result = SamplingResult(
             sampled_indices=indices,

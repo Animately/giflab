@@ -496,7 +496,7 @@ class TestConfigIntegration:
         ConfigManager._instance = None
         new_manager = ConfigManager()
         
-        with open(export_file, 'r') as f:
+        with open(export_file) as f:
             imported = json.load(f)
         
         new_manager.import_config(imported)

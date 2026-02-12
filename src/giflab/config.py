@@ -29,8 +29,10 @@ class CompressionConfig:
             self.COLOR_KEEP_COUNTS = [256, 128, 64, 32, 16]
 
         if self.LOSSY_LEVELS is None:
-            # Prediction-required granularity: 7 lossy levels for smooth curves
-            self.LOSSY_LEVELS = [0, 20, 40, 60, 80, 100, 120]
+            # Import from single source of truth
+            from giflab.prediction.schemas import LOSSY_LEVELS as _LOSSY_LEVELS
+
+            self.LOSSY_LEVELS = list(_LOSSY_LEVELS)
 
         if self.ENGINES is None:
             self.ENGINES = ["gifsicle", "animately"]

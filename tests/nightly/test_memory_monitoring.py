@@ -15,24 +15,23 @@ import unittest.mock
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from giflab.monitoring.memory_monitor import (
-    MemoryStats,
-    MemoryPressureLevel,
-    CacheMemoryUsage,
-    SystemMemoryMonitor,
-    CacheMemoryTracker,
-    MemoryPressureManager,
-    ConservativeEvictionPolicy,
-    get_system_memory_monitor,
-    get_cache_memory_tracker,
-    get_memory_pressure_manager,
-    is_memory_monitoring_available,
-)
 from giflab.monitoring.memory_integration import (
     MemoryPressureIntegration,
     get_memory_integration,
     instrument_cache_with_memory_tracking,
+)
+from giflab.monitoring.memory_monitor import (
+    CacheMemoryTracker,
+    CacheMemoryUsage,
+    ConservativeEvictionPolicy,
+    MemoryPressureLevel,
+    MemoryPressureManager,
+    MemoryStats,
+    SystemMemoryMonitor,
+    get_cache_memory_tracker,
+    get_memory_pressure_manager,
+    get_system_memory_monitor,
+    is_memory_monitoring_available,
 )
 
 
@@ -437,7 +436,7 @@ class TestSingletonAccess:
         assert isinstance(monitor1, SystemMemoryMonitor)
     
     def test_get_cache_memory_tracker(self):
-        """Test singleton access to cache memory tracker.""" 
+        """Test singleton access to cache memory tracker."""
         tracker1 = get_cache_memory_tracker()
         tracker2 = get_cache_memory_tracker()
         
@@ -482,7 +481,7 @@ class TestMemoryMonitoringIntegration:
         pass
     
     def test_memory_pressure_with_real_cache(self):
-        """Test memory pressure detection with real cache usage.""" 
+        """Test memory pressure detection with real cache usage."""
         # This test would create actual cache load and verify
         # that pressure detection and eviction work correctly
         pass

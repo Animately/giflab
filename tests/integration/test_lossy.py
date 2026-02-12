@@ -8,7 +8,6 @@ import pytest
 from giflab.lossy import (
     LossyEngine,
     apply_compression_with_all_params,
-    apply_lossy_compression,
     compress_with_animately,
     compress_with_gifsicle,
     get_compression_estimate,
@@ -22,7 +21,9 @@ class TestLossyEngine:
     def test_engine_values(self):
         """Test that enum values are correct."""
         assert LossyEngine.GIFSICLE.value == "gifsicle"
-        assert LossyEngine.ANIMATELY.value == "animately"
+        assert LossyEngine.ANIMATELY_STANDARD.value == "animately-standard"
+        # ANIMATELY is a legacy alias for ANIMATELY_STANDARD
+        assert LossyEngine.ANIMATELY is LossyEngine.ANIMATELY_STANDARD
 
 
 class TestValidateLossyLevel:
@@ -44,81 +45,6 @@ class TestValidateLossyLevel:
         """Test that invalid lossy levels raise ValueError."""
         with pytest.raises(ValueError, match="not in supported levels"):
             validate_lossy_level(99, LossyEngine.GIFSICLE)
-
-
-class TestApplyLossyCompression:
-    """Tests for apply_lossy_compression function."""
-
-    def test_negative_lossy_level(self):
-        """Test that negative lossy level raises ValueError."""
-        with pytest.raises(ValueError, match="must be non-negative"):
-            apply_lossy_compression(
-                Path("input.gif"),
-                Path("output.gif"),
-                -1,
-                1.0,  # frame_keep_ratio
-                LossyEngine.GIFSICLE,
-            )
-
-    def test_missing_input_file(self):
-        """Test that missing input file raises IOError."""
-        with pytest.raises(IOError, match="Input file not found"):
-            apply_lossy_compression(
-                Path("nonexistent.gif"),
-                Path("output.gif"),
-                0,
-                1.0,  # frame_keep_ratio
-                LossyEngine.GIFSICLE,
-            )
-
-    @patch("giflab.lossy.compress_with_gifsicle")
-    @patch("pathlib.Path.exists")
-    def test_gifsicle_engine_dispatch(self, mock_exists, mock_compress):
-        """Test that gifsicle engine is called correctly."""
-        mock_exists.return_value = True
-        mock_compress.return_value = {"render_ms": 100}
-
-        input_path = Path("input.gif")
-        output_path = Path("output.gif")
-
-        result = apply_lossy_compression(
-            input_path, output_path, 40, 1.0, engine=LossyEngine.GIFSICLE
-        )
-
-        mock_compress.assert_called_once_with(input_path, output_path, 40, 1.0, None)
-        assert result == {"render_ms": 100}
-
-    @patch("giflab.lossy.compress_with_animately")
-    @patch("pathlib.Path.exists")
-    def test_animately_engine_dispatch(self, mock_exists, mock_compress):
-        """Test that animately engine is called correctly."""
-        mock_exists.return_value = True
-        mock_compress.return_value = {"render_ms": 200}
-
-        input_path = Path("input.gif")
-        output_path = Path("output.gif")
-
-        result = apply_lossy_compression(
-            input_path, output_path, 120, 1.0, engine=LossyEngine.ANIMATELY
-        )
-
-        mock_compress.assert_called_once_with(input_path, output_path, 120, 1.0, None)
-        assert result == {"render_ms": 200}
-
-    @patch("pathlib.Path.exists")
-    def test_unsupported_engine(self, mock_exists):
-        """Test that unsupported engine raises ValueError."""
-        mock_exists.return_value = True
-
-        # Create a mock engine that's not in the enum
-        with pytest.raises(ValueError, match="Unsupported engine"):
-            apply_lossy_compression(
-                Path("input.gif"),
-                Path("output.gif"),
-                0,
-                1.0,
-                engine="invalid_engine",  # type: ignore[arg-type]  # This will cause the error
-            )
 
 
 class TestCompressWithGifsicle:
@@ -413,7 +339,7 @@ class TestCompressWithAnimately:
 
         # Timing should be approximately 300ms (allow for floating point precision)
         assert 298 <= result["render_ms"] <= 301
-        assert result["engine"] == "animately"
+        assert result["engine"] == "animately-standard"
         assert result["lossy_level"] == 0
         assert result["frame_keep_ratio"] == 1.0
         assert result["original_frames"] == 15
@@ -515,7 +441,7 @@ class TestApplyCompressionWithAllParams:
         mock_exists.return_value = True
         mock_compress.return_value = {
             "render_ms": 400,
-            "engine": "animately",
+            "engine": "animately-standard",
             "lossy_level": 120,
             "frame_keep_ratio": 1.0,
             "color_keep_count": 128,
@@ -529,7 +455,7 @@ class TestApplyCompressionWithAllParams:
             Path("input.gif"), Path("output.gif"), 120, 1.0, 128
         )
 
-        assert result["engine"] == "animately"
+        assert result["engine"] == "animately-standard"
 
     def test_parameter_validation(self):
         """Test that all parameters are validated."""
@@ -558,41 +484,6 @@ class TestApplyCompressionWithAllParams:
                 1.0,
                 4,  # 4 is not in supported counts [256, 128, 64, 32, 16, 8]
             )
-
-
-class TestFrameKeepRatioValidation:
-    """Tests for frame keep ratio validation in lossy functions."""
-
-    def test_invalid_frame_keep_ratio(self):
-        """Test that invalid frame keep ratios are rejected."""
-        with pytest.raises(ValueError, match="not in supported ratios"):
-            apply_lossy_compression(
-                Path("input.gif"),
-                Path("output.gif"),
-                0,
-                0.33,  # Not in supported ratios
-                LossyEngine.GIFSICLE,
-            )
-
-    def test_valid_frame_keep_ratios(self):
-        """Test that all configured frame keep ratios are accepted."""
-        from giflab.config import DEFAULT_COMPRESSION_CONFIG
-
-        with patch("pathlib.Path.exists") as mock_exists:
-            mock_exists.return_value = (
-                False  # Will fail with file not found, but validation should pass
-            )
-
-            for ratio in DEFAULT_COMPRESSION_CONFIG.FRAME_KEEP_RATIOS:
-                with pytest.raises(IOError, match="Input file not found"):
-                    # Should pass validation but fail on file not found
-                    apply_lossy_compression(
-                        Path("nonexistent.gif"),
-                        Path("output.gif"),
-                        0,
-                        ratio,
-                        engine=LossyEngine.GIFSICLE,
-                    )
 
 
 class TestColorIntegration:

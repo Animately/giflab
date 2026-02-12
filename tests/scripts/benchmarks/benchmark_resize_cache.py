@@ -9,26 +9,23 @@ Usage:
     poetry run python tests/performance/benchmark_resize_cache.py
 """
 
-import time
 import statistics
+import time
 from dataclasses import dataclass
-from typing import List, Tuple
 
 import cv2
 import numpy as np
-from rich.console import Console
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-
 from giflab.caching.resized_frame_cache import (
     ResizedFrameCache,
     get_resize_cache,
     resize_frame_cached,
 )
-from giflab.metrics import calculate_ms_ssim, _resize_if_needed
+from giflab.metrics import _resize_if_needed, calculate_ms_ssim
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
 
 console = Console()
-
 
 @dataclass
 class BenchmarkResult:
@@ -40,13 +37,12 @@ class BenchmarkResult:
     cache_hit_rate: float
     memory_mb: float
 
-
 class ResizeCacheBenchmark:
     """Benchmark suite for resize cache performance."""
     
     def __init__(self):
         """Initialize benchmark suite."""
-        self.results: List[BenchmarkResult] = []
+        self.results: list[BenchmarkResult] = []
         
     def setup(self):
         """Setup for benchmarks."""
@@ -55,7 +51,7 @@ class ResizeCacheBenchmark:
         cache.clear()
         console.print("[yellow]Cache cleared for benchmarking[/yellow]")
     
-    def generate_test_frames(self, size: Tuple[int, int], count: int = 10) -> List[np.ndarray]:
+    def generate_test_frames(self, size: tuple[int, int], count: int = 10) -> list[np.ndarray]:
         """Generate test frames of specified size."""
         h, w = size
         return [
@@ -63,8 +59,8 @@ class ResizeCacheBenchmark:
             for _ in range(count)
         ]
     
-    def benchmark_single_resize(self, name: str, frame_size: Tuple[int, int], 
-                               target_size: Tuple[int, int], iterations: int = 100):
+    def benchmark_single_resize(self, name: str, frame_size: tuple[int, int],
+                               target_size: tuple[int, int], iterations: int = 100):
         """Benchmark single frame resize operation."""
         console.print(f"\n[bold]Benchmarking: {name}[/bold]")
         
@@ -324,7 +320,6 @@ class ResizeCacheBenchmark:
         else:
             console.print("  🔴 [red]High memory usage - consider adjusting cache limits[/red]")
 
-
 def main():
     """Run the benchmark suite."""
     console.print("[bold cyan]Starting Resize Cache Performance Benchmarks[/bold cyan]")
@@ -342,15 +337,15 @@ def main():
         # Run benchmarks
         task = progress.add_task("[cyan]Running benchmarks...", total=7)
         
-        benchmark.benchmark_single_resize("Small frames (200x200 → 100x100)", 
+        benchmark.benchmark_single_resize("Small frames (200x200 → 100x100)",
                                          (200, 200), (100, 100))
         progress.update(task, advance=1)
         
-        benchmark.benchmark_single_resize("Medium frames (600x600 → 300x300)", 
+        benchmark.benchmark_single_resize("Medium frames (600x600 → 300x300)",
                                          (600, 600), (300, 300))
         progress.update(task, advance=1)
         
-        benchmark.benchmark_single_resize("Large frames (1200x1200 → 600x600)", 
+        benchmark.benchmark_single_resize("Large frames (1200x1200 → 600x600)",
                                          (1200, 1200), (600, 600))
         progress.update(task, advance=1)
         
@@ -370,7 +365,6 @@ def main():
     benchmark.print_results()
     
     console.print("\n[bold green]Benchmark complete![/bold green]")
-
 
 if __name__ == "__main__":
     main()

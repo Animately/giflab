@@ -525,7 +525,7 @@ def test_aligned_color_reduction(target_colors):
         # Verify alignment
         if len(results) == 2:
             gifsicle_colors = results["gifsicle"]["colors"]
-            animately_colors = results["animately"]["colors"]
+            animately_colors = results["animately-standard"]["colors"]
 
             # Both should not exceed the target
             assert (
@@ -544,7 +544,7 @@ def test_aligned_color_reduction(target_colors):
 
             # File sizes should be reasonably close (within 50% for compression differences)
             gifsicle_size = results["gifsicle"]["size"]
-            animately_size = results["animately"]["size"]
+            animately_size = results["animately-standard"]["size"]
 
             size_ratio = max(gifsicle_size, animately_size) / min(
                 gifsicle_size, animately_size
@@ -563,7 +563,7 @@ def test_aligned_color_reduction(target_colors):
             ), "Gifsicle should use --colors for reduction"
 
             # Verify animately uses --colors in command
-            animately_cmd = results["animately"]["command"]
+            animately_cmd = results["animately-standard"]["command"]
             assert (
                 "--colors" in animately_cmd
             ), "Animately should use --colors for reduction"
@@ -637,7 +637,7 @@ def test_color_reduction_consistency_across_ranges(color_range):
             # Verify consistency
             if len(results) == 2:
                 gifsicle_colors = results["gifsicle"]
-                animately_colors = results["animately"]
+                animately_colors = results["animately-standard"]
 
                 # Both should respect the target
                 assert gifsicle_colors <= target_colors
@@ -729,7 +729,7 @@ def test_color_reduction_edge_cases():
 
             # Analyze results
             gifsicle_colors = results.get("gifsicle")
-            animately_colors = results.get("animately")
+            animately_colors = results.get("animately-standard")
 
             if gifsicle_colors is not None and animately_colors is not None:
                 # Both succeeded

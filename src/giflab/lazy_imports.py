@@ -13,7 +13,7 @@ Architecture Overview:
 
 Key Components:
     LazyModule: Deferred module loading with transparent proxy behavior
-    LazyImportRegistry: Central registry preventing duplicate proxy creation  
+    LazyImportRegistry: Central registry preventing duplicate proxy creation
     Availability Checker: Thread-safe import testing with result caching
     Module Getters: Convenient lazy accessors for specific dependencies
 
@@ -106,7 +106,7 @@ Supported Dependencies:
         - subprocess: System process management
     
     Machine Learning:
-        - PyTorch: Deep learning framework  
+        - PyTorch: Deep learning framework
         - LPIPS: Perceptual similarity metrics
         - scikit-learn: Machine learning utilities
         - SciPy: Scientific computing
@@ -195,10 +195,9 @@ import importlib
 import logging
 import sys
 import threading
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
-
 
 class LazyModule:
     """
@@ -218,13 +217,13 @@ class LazyModule:
             fallback_value: Value to return if module import fails
         """
         self._module_name = module_name
-        self._module: Optional[Any] = None
+        self._module: Any | None = None
         self._fallback_value = fallback_value
         self._lock = threading.Lock()
         self._import_attempted = False
-        self._import_error: Optional[Exception] = None
+        self._import_error: Exception | None = None
     
-    def _load_module(self) -> Optional[Any]:
+    def _load_module(self) -> Any | None:
         """Thread-safe module loading."""
         if self._module is not None:
             return self._module
@@ -274,7 +273,6 @@ class LazyModule:
         module = self._load_module()
         return module is not None
 
-
 class LazyImportRegistry:
     """
     Registry for managing lazy imports across the application.
@@ -285,7 +283,7 @@ class LazyImportRegistry:
     
     def __init__(self):
         """Initialize the registry."""
-        self._modules: Dict[str, LazyModule] = {}
+        self._modules: dict[str, LazyModule] = {}
         self._lock = threading.Lock()
     
     def register(self, module_name: str, fallback_value: Any = None) -> LazyModule:
@@ -304,12 +302,12 @@ class LazyImportRegistry:
                 self._modules[module_name] = LazyModule(module_name, fallback_value)
             return self._modules[module_name]
     
-    def get_status(self) -> Dict[str, Tuple[bool, bool]]:
+    def get_status(self) -> dict[str, tuple[bool, bool]]:
         """
         Get import status for all registered modules.
         
         Returns:
-            Dict mapping module names to (registered, imported) tuples
+            dict mapping module names to (registered, imported) tuples
         """
         status = {}
         for name, module in self._modules.items():
@@ -318,12 +316,12 @@ class LazyImportRegistry:
             status[name] = (available, imported)
         return status
     
-    def preload(self, module_names: Optional[list] = None) -> None:
+    def preload(self, module_names: list | None = None) -> None:
         """
         Preload specified modules or all registered modules.
         
         Args:
-            module_names: List of module names to preload, or None for all
+            module_names: list of module names to preload, or None for all
         """
         if module_names is None:
             module_names = list(self._modules.keys())
@@ -333,10 +331,8 @@ class LazyImportRegistry:
                 # Trigger import by checking availability
                 _ = self._modules[name].is_available
 
-
 # Global registry instance
 _registry = LazyImportRegistry()
-
 
 def lazy_import(module_name: str, fallback_value: Any = None) -> LazyModule:
     """
@@ -359,7 +355,6 @@ def lazy_import(module_name: str, fallback_value: Any = None) -> LazyModule:
     """
     return _registry.register(module_name, fallback_value)
 
-
 def check_import_available(module_name: str) -> bool:
     """
     Check if a module can be imported without actually importing it.
@@ -377,18 +372,16 @@ def check_import_available(module_name: str) -> bool:
     spec = importlib.util.find_spec(module_name)
     return spec is not None
 
-
-def get_import_status() -> Dict[str, Tuple[bool, bool]]:
+def get_import_status() -> dict[str, tuple[bool, bool]]:
     """
     Get the current status of all lazy imports.
     
     Returns:
-        Dict mapping module names to (available, imported) status tuples
+        dict mapping module names to (available, imported) status tuples
     """
     return _registry.get_status()
 
-
-def preload_modules(module_names: Optional[list] = None) -> None:
+def preload_modules(module_names: list | None = None) -> None:
     """
     Preload lazy modules to avoid delays during execution.
     
@@ -396,31 +389,26 @@ def preload_modules(module_names: Optional[list] = None) -> None:
     application initialization when you know certain modules will be needed.
     
     Args:
-        module_names: List of modules to preload, or None for all registered
+        module_names: list of modules to preload, or None for all registered
     """
     _registry.preload(module_names)
-
 
 # Convenience lazy imports for heavy dependencies
 def get_torch() -> Any:
     """Get torch module with lazy loading."""
     return lazy_import('torch')
 
-
 def get_lpips() -> Any:
     """Get lpips module with lazy loading."""
     return lazy_import('lpips')
-
 
 def get_cv2() -> Any:
     """Get cv2 module with lazy loading."""
     return lazy_import('cv2')
 
-
 def get_scipy() -> Any:
     """Get scipy module with lazy loading."""
     return lazy_import('scipy')
-
 
 def get_sklearn() -> Any:
     """Get sklearn module with lazy loading."""
@@ -430,31 +418,25 @@ def get_pil() -> Any:
     """Get PIL (Pillow) module with lazy loading."""
     return lazy_import('PIL')
 
-
 def get_pil_image() -> Any:
-    """Get PIL.Image module with lazy loading.""" 
+    """Get PIL.Image module with lazy loading."""
     return lazy_import('PIL.Image')
-
 
 def get_matplotlib() -> Any:
     """Get matplotlib module with lazy loading."""
     return lazy_import('matplotlib')
 
-
 def get_matplotlib_pyplot() -> Any:
     """Get matplotlib.pyplot module with lazy loading."""
     return lazy_import('matplotlib.pyplot')
-
 
 def get_seaborn() -> Any:
     """Get seaborn module with lazy loading."""
     return lazy_import('seaborn')
 
-
 def get_plotly() -> Any:
     """Get plotly module with lazy loading."""
     return lazy_import('plotly')
-
 
 def get_subprocess() -> Any:
     """Get subprocess module with lazy loading.
@@ -464,11 +446,9 @@ def get_subprocess() -> Any:
     """
     return lazy_import('subprocess')
 
-
 # Thread-safe availability flags
-_availability_cache: Dict[str, bool] = {}
+_availability_cache: dict[str, bool] = {}
 _availability_lock = threading.Lock()
-
 
 def is_torch_available() -> bool:
     """Check if torch is available for import."""
@@ -477,14 +457,12 @@ def is_torch_available() -> bool:
             _availability_cache['torch'] = check_import_available('torch')
         return _availability_cache['torch']
 
-
 def is_lpips_available() -> bool:
     """Check if lpips is available for import."""
     with _availability_lock:
         if 'lpips' not in _availability_cache:
             _availability_cache['lpips'] = check_import_available('lpips')
         return _availability_cache['lpips']
-
 
 def is_cv2_available() -> bool:
     """Check if cv2 is available for import."""
@@ -493,14 +471,12 @@ def is_cv2_available() -> bool:
             _availability_cache['cv2'] = check_import_available('cv2')
         return _availability_cache['cv2']
 
-
 def is_scipy_available() -> bool:
     """Check if scipy is available for import."""
     with _availability_lock:
         if 'scipy' not in _availability_cache:
             _availability_cache['scipy'] = check_import_available('scipy')
         return _availability_cache['scipy']
-
 
 def is_sklearn_available() -> bool:
     """Check if sklearn is available for import."""
@@ -509,14 +485,12 @@ def is_sklearn_available() -> bool:
             _availability_cache['sklearn'] = check_import_available('sklearn')
         return _availability_cache['sklearn']
 
-
 def is_pil_available() -> bool:
     """Check if PIL (Pillow) is available for import."""
     with _availability_lock:
         if 'PIL' not in _availability_cache:
             _availability_cache['PIL'] = check_import_available('PIL')
         return _availability_cache['PIL']
-
 
 def is_matplotlib_available() -> bool:
     """Check if matplotlib is available for import."""
@@ -525,7 +499,6 @@ def is_matplotlib_available() -> bool:
             _availability_cache['matplotlib'] = check_import_available('matplotlib')
         return _availability_cache['matplotlib']
 
-
 def is_seaborn_available() -> bool:
     """Check if seaborn is available for import."""
     with _availability_lock:
@@ -533,14 +506,12 @@ def is_seaborn_available() -> bool:
             _availability_cache['seaborn'] = check_import_available('seaborn')
         return _availability_cache['seaborn']
 
-
 def is_plotly_available() -> bool:
     """Check if plotly is available for import."""
     with _availability_lock:
         if 'plotly' not in _availability_cache:
             _availability_cache['plotly'] = check_import_available('plotly')
         return _availability_cache['plotly']
-
 
 def is_subprocess_available() -> bool:
     """Check if subprocess is available for import.

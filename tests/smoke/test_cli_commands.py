@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-
 from giflab import __version__
 from giflab.cli import main
 
@@ -95,7 +94,7 @@ class TestPredictCommand:
         result = runner.invoke(main, ["predict", "--help"])
 
         assert result.exit_code == 0
-        assert "Predict compression curves" in result.output
+        assert "Compression curve prediction commands" in result.output
 
 
 class TestExportCommand:
@@ -107,4 +106,4 @@ class TestExportCommand:
         result = runner.invoke(main, ["export", "--help"])
 
         assert result.exit_code == 0
-        assert "Export trained models" in result.output
+        assert "Export database data" in result.output

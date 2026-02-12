@@ -5,22 +5,24 @@ This test suite validates the performance improvements from parallel processing
 and ensures that results remain deterministic and accurate.
 """
 
-import os
-import time
-import tempfile
-from pathlib import Path
-import numpy as np
-import pytest
-from unittest import mock
 import multiprocessing as mp
+import os
 
 # Import the modules we're testing
 import sys
+import tempfile
+import time
+from pathlib import Path
+from unittest import mock
+
+import numpy as np
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from giflab.metrics import calculate_comprehensive_metrics_from_frames
-from giflab.parallel_metrics import ParallelMetricsCalculator, ParallelConfig
 from giflab.config import DEFAULT_METRICS_CONFIG
+from giflab.metrics import calculate_comprehensive_metrics_from_frames
+from giflab.parallel_metrics import ParallelConfig, ParallelMetricsCalculator
 
 
 class TestParallelMetricsBenchmark:
@@ -225,7 +227,7 @@ class TestParallelMetricsBenchmark:
         peak_memory = process.memory_info().rss / 1024 / 1024  # MB
         memory_increase = peak_memory - baseline_memory
         
-        print(f"\nMemory usage:")
+        print("\nMemory usage:")
         print(f"  Baseline: {baseline_memory:.1f} MB")
         print(f"  Peak:     {peak_memory:.1f} MB")
         print(f"  Increase: {memory_increase:.1f} MB")

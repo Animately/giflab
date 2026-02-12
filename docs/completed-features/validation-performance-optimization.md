@@ -137,9 +137,8 @@ To deploy these optimizations:
 
 1. **Update dependencies**: `poetry install`
 2. **Run tests**: `poetry run pytest tests/`
-3. **Establish baselines**: `poetry run python -m giflab.benchmarks.regression_suite baseline`
-4. **Select profile**: `export GIFLAB_DEFAULT_PROFILE=production`
-5. **Monitor performance**: `poetry run giflab metrics monitor`
+3. **Select profile**: `export GIFLAB_DEFAULT_PROFILE=production`
+4. **Monitor performance**: `poetry run giflab metrics monitor`
 
 ## Conclusion
 

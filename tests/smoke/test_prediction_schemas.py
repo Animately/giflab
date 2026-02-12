@@ -4,11 +4,11 @@ Constitution Compliance:
 - Principle IV (Test-Driven Quality): Tests for schema validation
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 
 import pytest
-
 from giflab.prediction.schemas import (
+    LOSSY_LEVELS,
     CompressionCurveV1,
     CurveType,
     DatasetSplit,
@@ -26,7 +26,7 @@ class TestGifFeaturesV1:
             gif_sha="a" * 64,
             gif_name="test.gif",
             extraction_version="1.0.0",
-            extracted_at=datetime.now(timezone.utc),
+            extracted_at=datetime.now(UTC),
             width=100,
             height=100,
             frame_count=10,
@@ -61,7 +61,7 @@ class TestGifFeaturesV1:
                 gif_sha="abc",  # Too short
                 gif_name="test.gif",
                 extraction_version="1.0.0",
-                extracted_at=datetime.now(timezone.utc),
+                extracted_at=datetime.now(UTC),
                 width=100,
                 height=100,
                 frame_count=10,
@@ -94,7 +94,7 @@ class TestGifFeaturesV1:
                 gif_sha="g" * 64,  # 'g' is not hex
                 gif_name="test.gif",
                 extraction_version="1.0.0",
-                extracted_at=datetime.now(timezone.utc),
+                extracted_at=datetime.now(UTC),
                 width=100,
                 height=100,
                 frame_count=10,
@@ -127,7 +127,7 @@ class TestGifFeaturesV1:
                 gif_sha="a" * 64,
                 gif_name="test.gif",
                 extraction_version="1.0.0",
-                extracted_at=datetime.now(timezone.utc),
+                extracted_at=datetime.now(UTC),
                 width=100,
                 height=100,
                 frame_count=10,
@@ -164,14 +164,18 @@ class TestCompressionCurveV1:
             engine=Engine.GIFSICLE,
             curve_type=CurveType.LOSSY,
             is_predicted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             size_at_lossy_0=100.0,
+            size_at_lossy_10=95.0,
             size_at_lossy_20=90.0,
+            size_at_lossy_30=85.0,
             size_at_lossy_40=80.0,
+            size_at_lossy_50=75.0,
             size_at_lossy_60=70.0,
+            size_at_lossy_70=65.0,
             size_at_lossy_80=60.0,
+            size_at_lossy_90=55.0,
             size_at_lossy_100=50.0,
-            size_at_lossy_120=45.0,
         )
         assert curve.engine == Engine.GIFSICLE
         assert curve.curve_type == CurveType.LOSSY
@@ -180,12 +184,12 @@ class TestCompressionCurveV1:
         """Test creating valid color reduction curve."""
         curve = CompressionCurveV1(
             gif_sha="c" * 64,
-            engine=Engine.ANIMATELY,
+            engine=Engine.ANIMATELY_STANDARD,
             curve_type=CurveType.COLORS,
             is_predicted=True,
             model_version="1.0.0",
             confidence_scores=[0.9, 0.85, 0.8, 0.75, 0.7],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             size_at_colors_256=100.0,
             size_at_colors_128=85.0,
             size_at_colors_64=70.0,
@@ -202,14 +206,20 @@ class TestCompressionCurveV1:
             engine=Engine.GIFSICLE,
             curve_type=CurveType.LOSSY,
             is_predicted=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             size_at_lossy_0=100.0,
             size_at_lossy_40=80.0,
         )
         points = curve.get_lossy_curve_points()
+        assert len(points) == 11
         assert points[0] == 100.0
         assert points[40] == 80.0
         assert points[20] is None
+
+    def test_lossy_levels_constant(self) -> None:
+        """Test LOSSY_LEVELS constant is 11 points at 10-unit intervals."""
+        assert LOSSY_LEVELS == [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        assert len(LOSSY_LEVELS) == 11
 
     def test_confidence_scores_range(self) -> None:
         """Test that confidence scores must be 0-1."""
@@ -220,7 +230,7 @@ class TestCompressionCurveV1:
                 curve_type=CurveType.LOSSY,
                 is_predicted=True,
                 confidence_scores=[1.5],  # Too high
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
 
 
@@ -230,7 +240,12 @@ class TestEnums:
     def test_engine_values(self) -> None:
         """Test Engine enum values."""
         assert Engine.GIFSICLE.value == "gifsicle"
-        assert Engine.ANIMATELY.value == "animately"
+        assert Engine.ANIMATELY_STANDARD.value == "animately-standard"
+        assert Engine.ANIMATELY_ADVANCED.value == "animately-advanced"
+        assert Engine.ANIMATELY_HARD.value == "animately-hard"
+        assert Engine.IMAGEMAGICK.value == "imagemagick"
+        assert Engine.FFMPEG.value == "ffmpeg"
+        assert Engine.GIFSKI.value == "gifski"
 
     def test_curve_type_values(self) -> None:
         """Test CurveType enum values."""

@@ -13,7 +13,7 @@ import hashlib
 import logging
 import os
 import zlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -106,7 +106,7 @@ def extract_gif_features(
         gif_sha=gif_sha,
         gif_name=gif_path.name,
         extraction_version=FEATURE_EXTRACTOR_VERSION,
-        extracted_at=datetime.now(timezone.utc),
+        extracted_at=datetime.now(UTC),
         # Metadata
         width=metadata.orig_width,
         height=metadata.orig_height,
@@ -650,5 +650,5 @@ def extract_features_for_storage(
         "clip_3d_rendered": clip_scores.get("clip_3d_rendered"),
         "clip_pixel_art": clip_scores.get("clip_pixel_art"),
         "feature_extraction_version": FEATURE_EXTRACTOR_VERSION,
-        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "extracted_at": datetime.now(UTC).isoformat(),
     }

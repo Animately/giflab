@@ -129,6 +129,17 @@ from .analysis_tools import performance_matrix, pipeline_to_mermaid, recommend_t
 # Capability registry --------------------------------------------------------
 from .capability_registry import all_single_variable_strategies
 from .capability_registry import tools_for as tools_for_variable
+
+# Prediction module --------------------------------------------------------
+from .prediction import (
+    CompressionCurveV1,
+    CurveType,
+    DatasetSplit,
+    Engine,
+    GifFeaturesV1,
+    PredictionModelMetadataV1,
+    TrainingRecordV1,
+)
 from .system_tools import ToolInfo, verify_required_tools
 from .tool_interfaces import (
     ColorReductionTool,
@@ -142,17 +153,22 @@ from .tool_wrappers import (  # All Bayer scale variations for systematic elimin
     AnimatelyAdvancedLossyCompressor,
     AnimatelyColorReducer,
     AnimatelyFrameReducer,
+    AnimatelyHardLossyCompressor,
     AnimatelyLossyCompressor,
     FFmpegColorReducer,
+    FFmpegColorReducerAtkinson,
     FFmpegColorReducerBayerScale0,
     FFmpegColorReducerBayerScale1,
     FFmpegColorReducerBayerScale2,
     FFmpegColorReducerBayerScale3,
     FFmpegColorReducerBayerScale4,
     FFmpegColorReducerBayerScale5,
+    FFmpegColorReducerBurkes,
     FFmpegColorReducerFloydSteinberg,
-    FFmpegColorReducerNone,
+    FFmpegColorReducerHeckbert,
     FFmpegColorReducerSierra2,
+    FFmpegColorReducerSierra2_4a,
+    FFmpegColorReducerSierra3,
     FFmpegFrameReducer,
     FFmpegLossyCompressor,
     GifsicleColorReducer,
@@ -161,19 +177,7 @@ from .tool_wrappers import (  # All Bayer scale variations for systematic elimin
     GifskiLossyCompressor,
     ImageMagickColorReducer,
     ImageMagickColorReducerFloydSteinberg,
-    ImageMagickColorReducerNone,
     ImageMagickColorReducerRiemersma,
     ImageMagickFrameReducer,
     ImageMagickLossyCompressor,
-)
-
-# Prediction module --------------------------------------------------------
-from .prediction import (
-    CompressionCurveV1,
-    CurveType,
-    DatasetSplit,
-    Engine,
-    GifFeaturesV1,
-    PredictionModelMetadataV1,
-    TrainingRecordV1,
 )

@@ -59,17 +59,17 @@ The single most impactful optimization was fixing broken mock patterns. This les
 
 ```python
 # BROKEN PATTERN (82.47s execution)
-@patch('giflab.core.GifLabRunner')
+@patch('giflab.prediction_runner.PredictionRunner')
 def test_integration(self, mock_class, tmp_path):
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
 
     # BUG: Creates real object instead of using mock
-    eliminator = GifLabRunner(tmp_path)
+    eliminator = PredictionRunner(tmp_path)
     result = eliminator.run_experimental_analysis()
 
 # FIXED PATTERN (0.04s execution)
-@patch('giflab.core.GifLabRunner')
+@patch('giflab.prediction_runner.PredictionRunner')
 def test_integration(self, mock_class, tmp_path):
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
@@ -85,7 +85,7 @@ def test_integration(self, mock_class, tmp_path):
 
 ### Pattern A: Class-Level Mocking (Recommended)
 ```python
-@patch('giflab.core.GifLabRunner')
+@patch('giflab.prediction_runner.PredictionRunner')
 def test_integration(self, mock_class, tmp_path):
     mock_instance = MagicMock()
     mock_class.return_value = mock_instance
@@ -100,7 +100,7 @@ def test_integration(self, mock_class, tmp_path):
 ### Pattern B: Method-Level Mocking
 ```python
 def test_integration(self, tmp_path):
-    eliminator = GifLabRunner(tmp_path)
+    eliminator = PredictionRunner(tmp_path)
     with patch.object(eliminator, 'run_experimental_analysis') as mock_method:
         mock_method.return_value = mock_result
         result = eliminator.run_experimental_analysis()
@@ -110,7 +110,7 @@ def test_integration(self, tmp_path):
 ```python
 @pytest.fixture
 def fast_experimental_runner(tmp_path, monkeypatch):
-    runner = GifLabRunner(tmp_path)
+    runner = PredictionRunner(tmp_path)
     monkeypatch.setattr(runner, '_run_comprehensive_testing', lambda: mock_result)
     monkeypatch.setattr(runner, '_execute_pipeline_matrix', lambda: [])
     return runner
