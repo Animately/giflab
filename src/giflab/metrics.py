@@ -1708,10 +1708,6 @@ def calculate_selected_metrics(
                 logger.warning(f"FSIM calculation failed: {e}")
                 metric_values["fsim"].append(0.0)
 
-    if selected_metrics.get("vif", False):
-        # VIF would be calculated here if implemented
-        pass
-
     if selected_metrics.get("edge_similarity", False):
         metric_values["edge_similarity"] = []
         for orig_frame, comp_frame in aligned_pairs:

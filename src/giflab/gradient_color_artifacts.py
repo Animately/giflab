@@ -838,6 +838,234 @@ def calculate_dither_quality_metrics(
     return analyzer.analyze_dither_quality(original_frames, compressed_frames)
 
 
+def calculate_color_quantization_metrics(
+    original_frames: list[np.ndarray], compressed_frames: list[np.ndarray]
+) -> dict[str, float]:
+    """Calculate color quantization error metrics.
+
+    Measures how well the compressed GIF preserves the original color space:
+    - Unique color count in original vs compressed frames
+    - Palette distance (mean minimum Euclidean distance between color tables)
+
+    Args:
+        original_frames: List of original RGB frames [H, W, 3]
+        compressed_frames: List of compressed RGB frames [H, W, 3]
+
+    Returns:
+        Dictionary with color quantization metrics
+    """
+    from scipy.spatial.distance import cdist
+
+    try:
+        original_colors_total = 0
+        compressed_colors_total = 0
+        palette_distances = []
+
+        num_frames = min(len(original_frames), len(compressed_frames))
+        # Sample up to 10 frames for efficiency
+        sample_indices = np.linspace(0, num_frames - 1, min(10, num_frames), dtype=int)
+
+        for idx in sample_indices:
+            orig = original_frames[idx]
+            comp = compressed_frames[idx]
+
+            # Reshape to (N, 3) pixel arrays
+            orig_pixels = orig.reshape(-1, 3).astype(np.float64)
+            comp_pixels = comp.reshape(-1, 3).astype(np.float64)
+
+            # Get unique colors
+            orig_unique = np.unique(orig_pixels, axis=0)
+            comp_unique = np.unique(comp_pixels, axis=0)
+
+            original_colors_total += len(orig_unique)
+            compressed_colors_total += len(comp_unique)
+
+            # Calculate palette distance: mean of minimum distances from
+            # original colors to their nearest compressed color
+            if len(orig_unique) > 0 and len(comp_unique) > 0:
+                # Cap palette size for computational efficiency
+                # Use deterministic uniform sampling for reproducibility
+                max_palette = 256
+                if len(orig_unique) > max_palette:
+                    indices = np.linspace(
+                        0, len(orig_unique) - 1, max_palette, dtype=int
+                    )
+                    orig_unique = orig_unique[indices]
+                if len(comp_unique) > max_palette:
+                    indices = np.linspace(
+                        0, len(comp_unique) - 1, max_palette, dtype=int
+                    )
+                    comp_unique = comp_unique[indices]
+
+                dist_matrix = cdist(orig_unique, comp_unique, metric="euclidean")
+                min_distances = dist_matrix.min(axis=1)
+                palette_distances.append(float(np.mean(min_distances)))
+
+        num_sampled = len(sample_indices)
+        avg_original = original_colors_total / num_sampled if num_sampled > 0 else 0
+        avg_compressed = compressed_colors_total / num_sampled if num_sampled > 0 else 0
+        avg_palette_distance = (
+            float(np.mean(palette_distances)) if palette_distances else 0.0
+        )
+
+        return {
+            "color_count_original": float(avg_original),
+            "color_count_compressed": float(avg_compressed),
+            "palette_distance": avg_palette_distance,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to calculate color quantization metrics: {e}")
+        return {
+            "color_count_original": 0.0,
+            "color_count_compressed": 0.0,
+            "palette_distance": 0.0,
+        }
+
+
+def calculate_posterization_score(
+    original_frames: list[np.ndarray], compressed_frames: list[np.ndarray]
+) -> dict[str, float]:
+    """Calculate posterization score measuring flat bands in smooth gradients.
+
+    Detects where compression has reduced smooth gradients to discrete color steps.
+    Uses the existing GradientBandingDetector to find gradient regions, then counts
+    distinct intensity levels in those regions comparing original vs compressed.
+
+    Args:
+        original_frames: List of original RGB frames [H, W, 3]
+        compressed_frames: List of compressed RGB frames [H, W, 3]
+
+    Returns:
+        Dictionary with posterization score (0 = no posterization, 1 = severe)
+    """
+    try:
+        detector = GradientBandingDetector(patch_size=32, variance_threshold=100.0)
+        posterization_scores = []
+
+        num_frames = min(len(original_frames), len(compressed_frames))
+        sample_indices = np.linspace(0, num_frames - 1, min(10, num_frames), dtype=int)
+
+        for idx in sample_indices:
+            orig = original_frames[idx]
+            comp = compressed_frames[idx]
+
+            # Find gradient regions in the original frame
+            gradient_regions = detector.detect_gradient_regions(orig)
+
+            if not gradient_regions:
+                continue
+
+            frame_ratios = []
+            for x, y, w, h in gradient_regions:
+                # Extract patches from both frames
+                orig_patch = cv2.cvtColor(
+                    orig[y : y + h, x : x + w], cv2.COLOR_RGB2GRAY
+                )
+                comp_patch = cv2.cvtColor(
+                    comp[y : y + h, x : x + w], cv2.COLOR_RGB2GRAY
+                )
+
+                # Count unique intensity levels
+                orig_levels = len(np.unique(orig_patch))
+                comp_levels = len(np.unique(comp_patch))
+
+                if orig_levels > 1:
+                    # Ratio of level reduction: 1.0 means all levels preserved
+                    preservation_ratio = comp_levels / orig_levels
+                    # Invert: 0 = perfect, 1 = severe posterization
+                    frame_ratios.append(1.0 - min(1.0, preservation_ratio))
+
+            if frame_ratios:
+                posterization_scores.append(float(np.mean(frame_ratios)))
+
+        score = float(np.mean(posterization_scores)) if posterization_scores else 0.0
+        return {"posterization_score": max(0.0, min(1.0, score))}
+
+    except Exception as e:
+        logger.error(f"Failed to calculate posterization score: {e}")
+        return {"posterization_score": 0.0}
+
+
+def calculate_transparency_artifact_score(
+    original_frames: list[np.ndarray], compressed_frames: list[np.ndarray]
+) -> dict[str, float]:
+    """Calculate transparency artifact score for GIFs with alpha channels.
+
+    Measures corruption in transparent regions after compression:
+    - Alpha channel preservation (how well transparency is maintained)
+    - Color fidelity in semi-transparent regions
+
+    Only meaningful when frames have an alpha channel (4-channel RGBA).
+    Returns 0.0 (no artifacts) when no transparency is present.
+
+    Args:
+        original_frames: List of original frames (RGB or RGBA)
+        compressed_frames: List of compressed frames (RGB or RGBA)
+
+    Returns:
+        Dictionary with transparency artifact score (0 = no artifacts, 1 = severe)
+    """
+    try:
+        num_frames = min(len(original_frames), len(compressed_frames))
+        if num_frames == 0:
+            return {"transparency_artifact_score": 0.0}
+
+        # Check if frames have alpha channel
+        has_alpha = (
+            original_frames[0].ndim == 3
+            and original_frames[0].shape[2] == 4
+            and compressed_frames[0].ndim == 3
+            and compressed_frames[0].shape[2] == 4
+        )
+
+        if not has_alpha:
+            return {"transparency_artifact_score": 0.0}
+
+        artifact_scores = []
+        sample_indices = np.linspace(0, num_frames - 1, min(10, num_frames), dtype=int)
+
+        for idx in sample_indices:
+            orig = original_frames[idx]
+            comp = compressed_frames[idx]
+
+            orig_alpha = orig[:, :, 3].astype(np.float64)
+            comp_alpha = comp[:, :, 3].astype(np.float64)
+
+            # Check if there are any transparent pixels
+            transparency_ratio = np.mean(orig_alpha < 255)
+            if transparency_ratio < 0.01:
+                continue  # Skip frames with negligible transparency
+
+            # Alpha preservation error (normalized to 0-1)
+            alpha_error = np.mean(np.abs(orig_alpha - comp_alpha)) / 255.0
+
+            # Color fidelity in semi-transparent regions (alpha between 1-254)
+            semi_transparent = (orig_alpha > 0) & (orig_alpha < 255)
+            if np.any(semi_transparent):
+                orig_rgb = orig[:, :, :3].astype(np.float64)
+                comp_rgb = comp[:, :, :3].astype(np.float64)
+                color_diff = (
+                    np.mean(
+                        np.abs(orig_rgb[semi_transparent] - comp_rgb[semi_transparent])
+                    )
+                    / 255.0
+                )
+            else:
+                color_diff = 0.0
+
+            # Combined score: 60% alpha preservation, 40% color fidelity
+            frame_score = 0.6 * alpha_error + 0.4 * color_diff
+            artifact_scores.append(frame_score)
+
+        score = float(np.mean(artifact_scores)) if artifact_scores else 0.0
+        return {"transparency_artifact_score": max(0.0, min(1.0, score))}
+
+    except Exception as e:
+        logger.error(f"Failed to calculate transparency artifact score: {e}")
+        return {"transparency_artifact_score": 0.0}
+
+
 def calculate_gradient_color_metrics(
     original_frames: list[np.ndarray], compressed_frames: list[np.ndarray]
 ) -> dict[str, float]:
@@ -858,9 +1086,25 @@ def calculate_gradient_color_metrics(
         dither_metrics = calculate_dither_quality_metrics(
             original_frames, compressed_frames
         )
+        quantization_metrics = calculate_color_quantization_metrics(
+            original_frames, compressed_frames
+        )
+        posterization_metrics = calculate_posterization_score(
+            original_frames, compressed_frames
+        )
+        transparency_metrics = calculate_transparency_artifact_score(
+            original_frames, compressed_frames
+        )
 
         # Combine all metrics
-        combined_metrics = {**banding_metrics, **color_metrics, **dither_metrics}
+        combined_metrics = {
+            **banding_metrics,
+            **color_metrics,
+            **dither_metrics,
+            **quantization_metrics,
+            **posterization_metrics,
+            **transparency_metrics,
+        }
 
         logger.debug(
             f"Calculated gradient and color metrics: {len(combined_metrics)} metrics"
@@ -887,4 +1131,9 @@ def calculate_gradient_color_metrics(
             "dither_ratio_p95": 0.0,
             "dither_quality_score": 0.0,
             "flat_region_count": 0,
+            "color_count_original": 0.0,
+            "color_count_compressed": 0.0,
+            "palette_distance": 0.0,
+            "posterization_score": 0.0,
+            "transparency_artifact_score": 0.0,
         }

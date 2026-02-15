@@ -293,6 +293,8 @@ class TestMetricsPipelineIntegration:
             config.ENHANCED_TEMPORAL_WEIGHT,
             config.ENHANCED_LPIPS_WEIGHT,
             config.ENHANCED_SSIMULACRA2_WEIGHT,
+            config.ENHANCED_BANDING_WEIGHT,
+            config.ENHANCED_DELTAE_WEIGHT,
         ]
 
         total_weight = sum(enhanced_weights)

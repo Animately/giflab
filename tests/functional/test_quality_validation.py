@@ -62,8 +62,8 @@ class TestQualityThresholdValidator:
         assert result.is_valid
         assert result.validation_type == "quality_degradation"
         assert (
-            abs(result.details["composite_quality"] - 0.634) < 0.01
-        )  # Approximate expected value
+            abs(result.details["composite_quality"] - 0.719) < 0.01
+        )  # Approximate expected value with revised weights
         assert result.details["operation_type"] == "lossy_compression"
 
     @patch(
@@ -93,8 +93,8 @@ class TestQualityThresholdValidator:
         # Error message should contain outlier information
         assert "Metric outliers detected" in result.error_message
         assert (
-            abs(result.details["composite_quality"] - 0.114) < 0.01
-        )  # Approximate expected value
+            abs(result.details["composite_quality"] - 0.092) < 0.01
+        )  # Approximate expected value with revised weights
 
     @patch(
         "giflab.wrapper_validation.quality_validation.calculate_comprehensive_metrics"

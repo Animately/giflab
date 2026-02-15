@@ -54,6 +54,15 @@ def normalize_metric(
             return 0.0  # Negative MS-SSIM indicates very poor quality
         return max(0.0, min(1.0, value))
 
+    elif metric_name == "banding_score_mean":
+        # Banding: lower is better, range 0-1
+        return max(0.0, min(1.0, 1.0 - value))
+
+    elif metric_name == "deltae_mean":
+        # DeltaE: lower is better, typical range 0-20
+        normalized = max(0.0, 1.0 - (value / 10.0))
+        return max(0.0, min(1.0, normalized))
+
     else:
         # Standard 0-1 normalization for metrics where higher is better
         if min_val >= max_val:
@@ -185,6 +194,19 @@ def calculate_composite_quality(
         normalized_ssimulacra2 = max(0.0, min(1.0, ssimulacra2_score))
         composite_quality += config.ENHANCED_SSIMULACRA2_WEIGHT * normalized_ssimulacra2
         total_weight += config.ENHANCED_SSIMULACRA2_WEIGHT
+
+    # GIF-specific quality metrics (10% total)
+    if "banding_score_mean" in metrics:
+        normalized = normalize_metric(
+            "banding_score_mean", metrics["banding_score_mean"]
+        )
+        composite_quality += config.ENHANCED_BANDING_WEIGHT * normalized
+        total_weight += config.ENHANCED_BANDING_WEIGHT
+
+    if "deltae_mean" in metrics:
+        normalized_deltae = normalize_metric("deltae_mean", metrics["deltae_mean"])
+        composite_quality += config.ENHANCED_DELTAE_WEIGHT * normalized_deltae
+        total_weight += config.ENHANCED_DELTAE_WEIGHT
 
     # Normalize by actual weights used (handles missing metrics gracefully)
     raw_composite = composite_quality

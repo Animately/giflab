@@ -71,31 +71,35 @@ class MetricsConfig:
     PSNR_WEIGHT: float = 0.25
     TEMPORAL_WEIGHT: float = 0.10
 
-    # Enhanced 11-metric composite quality weights (comprehensive approach)
-    # Core structural similarity metrics (40% total)
-    ENHANCED_SSIM_WEIGHT: float = 0.18
-    ENHANCED_MS_SSIM_WEIGHT: float = 0.22
+    # Enhanced composite quality weights (comprehensive approach)
+    # Core structural similarity metrics (33% total)
+    ENHANCED_SSIM_WEIGHT: float = 0.15
+    ENHANCED_MS_SSIM_WEIGHT: float = 0.18
 
-    # Signal quality metrics (25% total)
-    ENHANCED_PSNR_WEIGHT: float = 0.15
-    ENHANCED_MSE_WEIGHT: float = 0.10
+    # Signal quality metrics (13% total)
+    ENHANCED_PSNR_WEIGHT: float = 0.08
+    ENHANCED_MSE_WEIGHT: float = 0.05
 
-    # Advanced structural metrics (20% total)
-    ENHANCED_FSIM_WEIGHT: float = 0.08
-    ENHANCED_EDGE_WEIGHT: float = 0.07
-    ENHANCED_GMSD_WEIGHT: float = 0.05
+    # Advanced structural metrics (17% total)
+    ENHANCED_FSIM_WEIGHT: float = 0.07
+    ENHANCED_EDGE_WEIGHT: float = 0.06
+    ENHANCED_GMSD_WEIGHT: float = 0.04
 
     # Perceptual quality metrics (10% total)
     ENHANCED_CHIST_WEIGHT: float = 0.04
     ENHANCED_SHARPNESS_WEIGHT: float = 0.03
-    ENHANCED_TEXTURE_WEIGHT: float = 0.00  # Reduced to make room for LPIPS
+    ENHANCED_TEXTURE_WEIGHT: float = 0.03  # Restored — captures dithering
 
-    # Temporal consistency (5% total)
-    ENHANCED_TEMPORAL_WEIGHT: float = 0.05
+    # Temporal consistency (10% total)
+    ENHANCED_TEMPORAL_WEIGHT: float = 0.10  # Doubled — animation quality matters
 
-    # Deep perceptual metrics (3% total)
-    ENHANCED_LPIPS_WEIGHT: float = 0.01  # Reduced to make room for SSIMULACRA2
-    ENHANCED_SSIMULACRA2_WEIGHT: float = 0.02  # Modern perceptual metric
+    # Deep perceptual metrics (7% total)
+    ENHANCED_LPIPS_WEIGHT: float = 0.04  # 4x increase — justify computation cost
+    ENHANCED_SSIMULACRA2_WEIGHT: float = 0.03  # Modern perceptual metric
+
+    # GIF-specific quality metrics (10% total)
+    ENHANCED_BANDING_WEIGHT: float = 0.05  # New — GIF banding artifacts
+    ENHANCED_DELTAE_WEIGHT: float = 0.05  # New — perceptual color accuracy
 
     # Enable enhanced composite quality calculation
     USE_ENHANCED_COMPOSITE_QUALITY: bool = True
@@ -148,6 +152,8 @@ class MetricsConfig:
             + self.ENHANCED_TEMPORAL_WEIGHT
             + self.ENHANCED_LPIPS_WEIGHT
             + self.ENHANCED_SSIMULACRA2_WEIGHT
+            + self.ENHANCED_BANDING_WEIGHT
+            + self.ENHANCED_DELTAE_WEIGHT
         )
         if abs(enhanced_total - 1.0) > tolerance:
             raise ValueError(
@@ -175,6 +181,8 @@ class MetricsConfig:
             self.ENHANCED_TEMPORAL_WEIGHT,
             self.ENHANCED_LPIPS_WEIGHT,
             self.ENHANCED_SSIMULACRA2_WEIGHT,
+            self.ENHANCED_BANDING_WEIGHT,
+            self.ENHANCED_DELTAE_WEIGHT,
         ]
         all_weights = legacy_weights + enhanced_weights
         if any(w < 0 for w in all_weights):

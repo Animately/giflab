@@ -529,7 +529,6 @@ class ConditionalMetricsCalculator:
             # Advanced metrics (conditional)
             "lpips": False,
             "fsim": False,
-            "vif": False,
             "ssimulacra2": False,
             # Specialized metrics (conditional)
             "temporal_artifacts": False,
@@ -555,7 +554,6 @@ class ConditionalMetricsCalculator:
         if quality.tier == QualityTier.LOW:
             metrics["lpips"] = True
             metrics["fsim"] = True
-            metrics["vif"] = True
             metrics["ssimulacra2"] = True
             metrics["edge_similarity"] = True
             metrics["texture_similarity"] = True
@@ -583,7 +581,6 @@ class ConditionalMetricsCalculator:
 
             # Content-based selection
             if profile.complexity_score > 0.5:
-                metrics["vif"] = True
                 metrics["texture_similarity"] = True
 
             if profile.has_temporal_changes and profile.frame_similarity < 0.8:

@@ -100,6 +100,32 @@ QUALITY_METRIC_COLUMNS: list[str] = [
     # Text/UI
     "edge_sharpness_score",
     "mtf50_ratio_mean",
+    # Dither quality (computed in gradient_color_artifacts.py DitherQualityAnalyzer)
+    "dither_ratio_mean",
+    "dither_ratio_p95",
+    "dither_quality_score",
+    "flat_region_count",
+    # Extended gradient/color stats (computed in gradient_color_artifacts.py)
+    "deltae_pct_gt1",
+    "deltae_pct_gt2",
+    "deltae_pct_gt3",
+    "deltae_pct_gt5",
+    "banding_patch_count",
+    "gradient_region_count",
+    "color_patch_count",
+    # Timing validation (computed in metrics.py via TimingGridValidator)
+    "timing_drift_score",
+    "max_timing_drift_ms",
+    "alignment_accuracy",
+    "duration_diff_ms",
+    # Color quantization (computed in gradient_color_artifacts.py)
+    "color_count_original",
+    "color_count_compressed",
+    "palette_distance",
+    # Posterization (computed in gradient_color_artifacts.py)
+    "posterization_score",
+    # Transparency artifacts (computed in gradient_color_artifacts.py)
+    "transparency_artifact_score",
     # Composite
     "composite_quality",
 ]
@@ -923,7 +949,8 @@ class GifLabStorage:
         import pandas as pd
 
         with self._connect() as conn:
-            query = """
+            quality_cols = ", ".join(f"c.{col}" for col in QUALITY_METRIC_COLUMNS)
+            query = f"""
                 SELECT f.*,
                        p.name as pipeline_name,
                        lt.name as lossy_tool,
@@ -931,8 +958,7 @@ class GifLabStorage:
                        ft.name as frame_tool,
                        pp.lossy_level, pp.color_count, pp.frame_ratio,
                        c.size_kb, c.compression_ratio,
-                       c.ssim_mean, c.ms_ssim_mean, c.psnr_mean,
-                       c.composite_quality
+                       {quality_cols}
                 FROM gif_features f
                 JOIN compression_runs c ON f.gif_sha = c.gif_sha
                 JOIN pipelines p ON c.pipeline_id = p.id

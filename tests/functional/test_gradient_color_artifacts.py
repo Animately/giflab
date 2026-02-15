@@ -280,6 +280,15 @@ class TestGradientColorIntegration:
             "deltae_pct_gt3",
             "deltae_pct_gt5",
             "color_patch_count",
+            "dither_ratio_mean",
+            "dither_ratio_p95",
+            "dither_quality_score",
+            "flat_region_count",
+            "color_count_original",
+            "color_count_compressed",
+            "palette_distance",
+            "posterization_score",
+            "transparency_artifact_score",
         ]
         assert all(key in result for key in expected_keys)
 
