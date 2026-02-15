@@ -1,4 +1,4 @@
-# 🎞️ GifLab
+# GifLab
 
 Training dataset generation for GIF compression curve prediction.
 
@@ -6,11 +6,138 @@ Training dataset generation for GIF compression curve prediction.
 
 ## Overview
 
-GifLab processes raw GIFs through 7 compression engines, measures quality with comprehensive GIF-specific metrics, and produces normalized SQLite datasets for training ML models that predict compression curves.
+GifLab processes raw GIFs through 7 compression engines, measures quality with comprehensive GIF-specific metrics, and produces normalized SQLite datasets for training ML models that predict compression curves from visual features alone.
 
-**Data flow**: Raw GIFs → Visual feature extraction (25+ features) → Compression across 7 engines → Quality metrics → SQLite → Training data
+**Data flow**: Raw GIFs → Visual feature extraction (25 features) → Compression across 7 engines → Quality metrics (13 measures) → SQLite → Training data → Curve prediction models
 
-### The 7 Engines
+## Quick Start
+
+```bash
+# Install dependencies
+poetry install
+
+# Run the compression pipeline (generates dataset)
+poetry run python -m giflab run --sampling representative
+
+# Train prediction models on collected data
+poetry run python -m giflab train
+
+# Export training data for external use
+poetry run python -m giflab export --format csv
+
+# View dataset statistics
+poetry run python -m giflab stats
+```
+
+## The Dataset
+
+GifLab's output is a SQLite database containing everything needed to train compression curve predictors.
+
+### What gets stored
+
+Each GIF produces:
+
+- **Visual features** (25 per GIF) -- spatial, temporal, compressibility, and CLIP content classification scores stored in the `gif_features` table
+- **Compression runs** -- file size, quality metrics, and efficiency scores for every engine/parameter combination stored in `compression_runs`
+- **Pipelines and presets** -- the exact engine configurations used, tracked in `pipelines` and `param_presets`
+
+### Training records
+
+A training record pairs a GIF's visual features with its compression curves:
+
+| Field | Description |
+|-------|-------------|
+| `gif_sha` | Content hash for deduplication |
+| `features` | 25-dimensional feature vector (GifFeaturesV1) |
+| `lossy_curve` | Quality scores at each lossy level per engine |
+| `color_curve` | Quality scores at each palette size per engine |
+| `engine` | Which of the 7 engines produced this curve |
+
+### Visual features (25)
+
+- **Spatial**: entropy, edge_density, color_complexity, gradient_smoothness, contrast_score, text_density, dct_energy_ratio, color_histogram_entropy, dominant_color_ratio
+- **Temporal**: motion_intensity, motion_smoothness, static_region_ratio, temporal_entropy, frame_similarity, inter_frame_mse_mean, inter_frame_mse_std
+- **Compressibility**: lossless_compression_ratio, transparency_ratio
+- **CLIP content**: screen_capture, vector_art, photography, hand_drawn, 3d_rendered, pixel_art
+
+### Exporting data
+
+```bash
+# Export features table to CSV
+poetry run python -m giflab export --format csv
+
+# View database statistics
+poetry run python -m giflab stats
+```
+
+## ML Pipeline
+
+The prediction pipeline has three stages: collect data, train models, predict curves.
+
+### 1. Collect: `giflab run`
+
+Processes GIFs through all engine/parameter combinations, extracts visual features, computes quality metrics, and stores everything in SQLite.
+
+```bash
+# Process a directory of GIFs
+poetry run python -m giflab run data/raw --workers 8
+
+# Use research presets for targeted experiments
+poetry run python -m giflab run --preset frame-focus
+
+# Intelligent sampling across parameter space
+poetry run python -m giflab run --sampling representative
+```
+
+### 2. Train: `giflab train`
+
+Trains gradient boosting models (CurvePredictionModel) that learn to predict compression curves from visual features.
+
+```bash
+# Train on collected data
+poetry run python -m giflab train
+
+# Train for a specific engine
+poetry run python -m giflab train --engine animately-advanced
+```
+
+The trained models predict two curve types:
+- **Lossy curves**: quality score at each lossy compression level
+- **Color curves**: quality score at each palette size
+
+### 3. Predict: `giflab predict`
+
+Uses trained models to predict compression curves for new GIFs without running actual compression.
+
+```bash
+# Predict curves for a new GIF
+poetry run python -m giflab predict --input new.gif
+
+# Predict for a specific engine and curve type
+poetry run python -m giflab predict --input new.gif --engine gifsicle --curve-type lossy
+```
+
+### Why prediction matters
+
+Running a GIF through all 7 engines at every parameter combination is slow. Prediction lets you estimate compression curves from visual features alone, enabling instant engine/parameter selection without trial-and-error compression.
+
+## Dataset Best Practices
+
+When creating or extending a GifLab dataset for ML tasks, follow these rules:
+
+1. **Deterministic extraction** -- lock random seeds; metric functions must be pure
+2. **Schema validation** -- export rows that pass `TrainingRecordV1` (pydantic) validation
+3. **Version tagging** -- record dataset version, `giflab` semver, and git commit hash
+4. **Canonical data-splits** -- maintain GIF-level `train/val/test` JSON split files
+5. **Feature scaling** -- persist `scaler.pkl` (z-score or min-max) alongside data
+6. **Missing-value handling** -- encode unknown metrics as `np.nan`, not `0.0`
+7. **Outlier and drift reports** -- auto-generate an HTML outlier summary and correlation dashboard
+8. **Reproducible pipeline** -- provide a `make data` target that builds the dataset end-to-end
+9. **Comprehensive logs** -- include parameter checksum and elapsed-time stats in every run
+
+Pull requests touching dataset code must address all items or explain why they do not apply.
+
+## The 7 Engines
 
 | Engine | Tool | Description |
 |--------|------|-------------|
@@ -22,29 +149,59 @@ GifLab processes raw GIFs through 7 compression engines, measures quality with c
 | `ffmpeg` | ffmpeg | FFmpeg GIF encoding |
 | `gifski` | gifski | High-quality GIF encoder |
 
-Each variant is measured for file size, comprehensive quality metrics (11+ measures), and efficiency score. All results are stored in SQLite.
+Each engine is measured for file size, quality metrics (13 measures), and efficiency score. All results are stored in SQLite.
 
-### Compression Pipeline
-
-GifLab provides a comprehensive compression pipeline with access to all major GIF processing engines:
-
-- **Purpose**: Systematic testing, pipeline analysis, and optimization discovery
-- **Usage**: `poetry run python -m giflab run --sampling representative`
-- **Focused Presets**: `poetry run python -m giflab run --preset frame-focus`
+### Compression capabilities
 
 | Engine | Color | Frame | Lossy |
-|--------|-------|-------|--------|
-| **gifsicle** | ✅ | ✅ | ✅ |
-| **Animately** | ✅ | ✅ | ✅ |
-| **ImageMagick** | ✅ | ✅ | ✅ |
-| **FFmpeg** | ✅ | ✅ | ✅ |
-| **gifski** | ❌ | ❌ | ✅ |
+|--------|-------|-------|-------|
+| **gifsicle** | yes | yes | yes |
+| **Animately** | yes | yes | yes |
+| **ImageMagick** | yes | yes | yes |
+| **FFmpeg** | yes | yes | yes |
+| **gifski** | no | no | yes |
 
-## 🎯 **Research Presets**
+## Quality Metrics
 
-Research presets provide predefined pipeline combinations for common analysis scenarios, and you can create custom presets for specific research needs.
+GifLab uses a 13-metric quality assessment system across multiple dimensions of compression quality.
 
-### Quick Start with Presets
+### Core metrics
+
+| Metric | Type | Purpose |
+|--------|------|---------|
+| SSIM | Structural similarity | Primary perceptual quality measure |
+| MS-SSIM | Multi-scale similarity | Enhanced structural assessment |
+| PSNR | Signal quality | Traditional quality measure |
+| MSE/RMSE | Pixel error | Direct difference measurement |
+| FSIM | Feature similarity | Gradient and phase feature analysis |
+| GMSD | Gradient deviation | Gradient-map based assessment |
+| CHIST | Color correlation | Histogram-based color fidelity |
+| Edge Similarity | Structural | Edge preservation analysis |
+| Texture Similarity | Perceptual | Texture pattern correlation |
+| Sharpness Similarity | Visual quality | Sharpness preservation |
+| Temporal Consistency | Animation | Frame-to-frame stability |
+
+### SSIM calculation modes
+
+| Mode | Frames Sampled | Use Case |
+|------|----------------|----------|
+| Fast | 3 keyframes | Large datasets (10,000+ GIFs) |
+| Optimized | 10-20 frames | Production pipeline |
+| Full | All frames | Research analysis |
+
+### Efficiency scoring
+
+Efficiency score (0-1 scale) uses a geometric mean of quality and compression performance:
+
+```
+efficiency = (composite_quality^0.5) * (normalized_compression^0.5)
+```
+
+Compression ratio is log-normalized and capped at 20x to handle diminishing returns.
+
+## Research Presets
+
+Research presets provide predefined pipeline combinations for common analysis scenarios.
 
 ```bash
 # List all available presets
@@ -60,77 +217,13 @@ poetry run python -m giflab run --preset color-optimization
 poetry run python -m giflab run --preset quick-test
 ```
 
-### Available Research Presets
+Available presets: `frame-focus`, `color-optimization`, `lossy-quality-sweep`, `tool-comparison-baseline`, `dithering-focus`, `png-optimization`, `quick-test`.
 
-Built-in presets cover common research scenarios:
-- **`frame-focus`**: Compare frame reduction algorithms
-- **`color-optimization`**: Compare color quantization methods
-- **`lossy-quality-sweep`**: Evaluate lossy compression effectiveness
-- **`tool-comparison-baseline`**: Cross-engine comparison
-- **`dithering-focus`**: Compare dithering algorithms
-- **`png-optimization`**: PNG sequence optimization
-- **`quick-test`**: Fast development testing
+See [Compression Testing Guide](docs/guides/experimental-testing.md) for details.
 
-### Custom Preset Creation
+## Validation and Debugging
 
-You can create custom presets by defining your own pipeline combinations. The preset system supports flexible parameter configurations for targeted research studies.
-
-### Analysis Workflow
-
-GifLab provides a comprehensive analysis workflow for systematic optimization:
-
-1. **Explore** – Generate synthetic GIFs and test pipeline combinations with intelligent sampling or research presets
-2. **Validate** – Automatic validation system detects compression issues and data integrity problems
-3. **Analyze** – Use built-in analysis tools to identify optimal pipelines for your content type
-4. **Scale** – Apply validated pipelines to full datasets
-
-Workflow summary:
-
-| Step | Command | Purpose |
-|------|---------|---------|
-| 1. Explore | `giflab run --sampling representative` | Test pipeline combinations, eliminate underperformers |
-| 2. Validate | Automatic during processing | Quality validation, artifact detection, parameter verification |
-| 3. Analyze | `giflab select-pipelines results.csv --top 3` | Identify optimal pipelines using Pareto analysis |
-| 4. Scale | `giflab run data/raw/ --pipelines winners.yaml` | Apply validated pipelines to full datasets |
-
-The system includes comprehensive validation to ensure data integrity throughout the compression pipeline.
-
-## 🔍 **Automated Validation & Debugging**
-
-GifLab includes a comprehensive validation system that automatically detects compression issues and provides detailed debugging information to help identify problems quickly.
-
-### Pipeline Validation System
-
-The optimization validation system runs automatically during compression and detects:
-
-- **Quality Degradation**: Monitors composite quality scores against configurable thresholds
-- **Efficiency Problems**: Validates efficiency scores and compression ratios
-- **Frame Reduction Issues**: Detects incorrect frame counts and FPS inconsistencies  
-- **Disposal Artifacts**: Identifies GIF disposal method artifacts and corruption
-- **Temporal Consistency**: Validates frame-to-frame stability in animations
-- **Multi-metric Combinations**: Detects unusual metric patterns that indicate problems
-
-### Validation Status Levels
-
-| Status | Description | Action |
-|--------|-------------|--------|
-| **PASS** | All validation checks passed | Continue processing |
-| **WARNING** | Minor issues detected | Compression acceptable, review settings |
-| **ERROR** | Significant issues found | Compression problematic, investigate |
-| **ARTIFACT** | Disposal artifacts detected | Severe corruption, pipeline failure |
-| **UNKNOWN** | Validation could not run | System error, check logs |
-
-### Content-Type Aware Validation
-
-The system adjusts validation thresholds based on content type:
-- **Animation Heavy**: Different frame reduction tolerances
-- **Smooth Gradients**: Adjusted quality thresholds for lossy compression
-- **Text/Graphics**: Stricter artifact detection
-- **Photo-realistic**: Enhanced temporal consistency checks
-
-### Debugging Failed Pipelines
-
-When validation detects issues, use these commands for debugging:
+GifLab includes automatic validation during compression that detects quality degradation, efficiency problems, frame reduction issues, disposal artifacts, and temporal consistency failures.
 
 ```bash
 # View detailed failure analysis
@@ -143,321 +236,82 @@ poetry run python -m giflab view-failures results/runs/latest/ --error-type gifs
 poetry run python -m giflab view-failures results/runs/latest/ --detailed
 ```
 
-The validation system helps catch problems early so you can trace issues back to specific pipeline configurations and fix them quickly.
+Validation status levels: PASS, WARNING, ERROR, ARTIFACT, UNKNOWN. The system adjusts thresholds based on content type (animation-heavy, smooth gradients, text/graphics, photo-realistic).
 
-### The Problem
-Different GIF compression tools have varying performance characteristics across content types. Optimal tool selection depends on GIF characteristics such as color complexity, animation patterns, and visual content type.
+See [Compression Testing Guide](docs/guides/experimental-testing.md) for the full validation reference.
 
-### The Solution
-GifLab's compression pipeline tests multiple algorithmic combinations to:
+## Source Detection
 
-1. Build datasets of GIF characteristics paired with optimal tool combinations
-2. Train ML models to predict optimal compression strategies
-3. Create automated tool selection based on content analysis
-4. Continuously improve through expanded testing
+GifLab automatically detects GIF sources based on directory structure:
 
-### Research Approach
-- Comprehensive multi-engine testing (gifsicle, Animately, ImageMagick, FFmpeg, gifski)
-- Automated content type classification and detection
-- Performance prediction modeling for compression/quality trade-offs
-- Novel tool combination and parameter optimization
-
-*See [ML Strategy Documentation](docs/technical/ml-strategy.md) for detailed implementation plans.*
-
-### Integration with Production Workflows
-After analysis validation, apply findings to your production compression pipeline:
-```bash
-# 1. Run experiments to identify optimal strategy
-poetry run python -m giflab run --sampling representative
-
-# 2. Select top performing pipelines
-poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 3 -o winners.yaml
-
-# 3. Run full pipeline with optimized settings
-poetry run python -m giflab run data/raw --pipelines winners.yaml
-```
-
-📖 **For detailed documentation, see:** [Compression Testing Guide](docs/guides/experimental-testing.md)
-
-## 🗂️ Directory-Based Source Detection
-
-GifLab automatically detects GIF sources based on directory structure, making it easy to organize and analyze GIFs from different platforms:
-
-### Directory Structure
 ```
 data/raw/
-├── tenor/              # GIFs from Tenor platform
-│   ├── love/           # "love" search results
-│   ├── marketing/      # "marketing" search results
-│   └── email_campaign/ # Email campaign GIFs
-├── animately/          # GIFs from Animately platform (all user uploads)
-│   ├── user_upload_1.gif
-│   ├── user_upload_2.gif
-│   └── user_upload_3.gif
-├── tgif_dataset/       # GIFs from TGIF research dataset
-│   ├── research_gif_1.gif
-│   ├── research_gif_2.gif
-│   └── research_gif_3.gif
-└── unknown/            # Ungrouped GIFs
+├── tenor/              # Tenor platform GIFs (subdirs by search query)
+├── animately/          # Animately platform uploads (flat)
+├── tgif_dataset/       # TGIF research dataset (flat)
+└── unknown/            # Unclassified GIFs
 ```
 
-### Platform Naming Convention
+Source platform and metadata are tracked in the CSV output (`source_platform`, `source_metadata` columns).
 
-| Platform | Directory Name | Type | Notes |
-|----------|----------------|------|-------|
-| Tenor | `tenor/` | Live Platform | Google's GIF search platform |
-| Animately | `animately/` | Live Platform | Your compression platform |
-| TGIF Dataset | `tgif_dataset/` | Research Dataset | Academic research dataset |
-| Unknown | `unknown/` | Fallback | Unclassified or mixed sources |
+See [Directory-Based Source Detection Guide](docs/guides/directory-source-detection.md) for details.
 
-**Why "tgif_dataset"?** The "_dataset" suffix distinguishes research datasets from live platforms, making the data source clear. Both `tgif/` and `tgif_dataset/` are supported.
+## Pareto Frontier Analysis
 
-**Why flat structure for some platforms?** Animately and TGIF files have uniform characteristics within each platform, so subdirectories don't add meaningful organization. Tenor search queries, however, create content differences worth preserving in the directory structure.
-
-### Quick Start
-```bash
-# 1. Create directory structure
-poetry run python -m giflab organize-directories data/raw/
-
-# 2. Move GIFs to appropriate directories
-# (manually or via collection scripts)
-
-# 3. Run analysis with automatic source detection
-poetry run python -m giflab run data/raw/
-
-# 4. Optional: Disable source detection
-poetry run python -m giflab run data/raw/ --no-detect-source-from-directory
-```
-
-### CSV Output
-The resulting CSV includes source tracking columns:
-- `source_platform`: Platform identifier (tenor, animately, tgif_dataset, unknown)
-- `source_metadata`: JSON metadata with query, context, and collection details
-
-📖 **For detailed documentation, see:** [Directory-Based Source Detection Guide](docs/guides/directory-source-detection.md)
-
-## Comprehensive Quality Analysis
-
-GifLab uses an 11-metric quality assessment system that evaluates multiple dimensions of compression quality:
-
-### Core Quality Metrics
-
-| Metric | Type | Purpose |
-|--------|------|---------|
-| **SSIM** | Structural similarity | Primary perceptual quality measure |
-| **MS-SSIM** | Multi-scale similarity | Enhanced structural assessment |
-| **PSNR** | Signal quality | Traditional quality measure |
-| **MSE/RMSE** | Pixel error | Direct difference measurement |
-| **FSIM** | Feature similarity | Gradient and phase feature analysis |
-| **GMSD** | Gradient deviation | Gradient-map based assessment |
-| **CHIST** | Color correlation | Histogram-based color fidelity |
-| **Edge Similarity** | Structural | Edge preservation analysis |
-| **Texture Similarity** | Perceptual | Texture pattern correlation |
-| **Sharpness Similarity** | Visual quality | Sharpness preservation |
-| **Temporal Consistency** | Animation | Frame-to-frame stability |
-
-### SSIM Calculation Modes
-
-| Mode | Frames Sampled | Processing Time | Use Case |
-|------|----------------|-----------------|----------|
-| **Fast** | 3 keyframes | ~5ms | Large datasets (10,000+ GIFs) |
-| **Optimized** | 10-20 frames | ~6-8ms | Production pipeline |
-| **Full** | All frames | ~12ms | Research analysis |
-
-### Sampling Strategies
-
-- **Uniform**: Evenly distributed frames across the GIF
-- **Keyframe**: Strategic positions (start, 1/4, 1/2, 3/4, end) + uniform fill
-- **Adaptive**: Content-aware sampling (future enhancement)
-
-### Configuration Examples
-
-```python
-from giflab.config import MetricsConfig
-
-# For large datasets (speed priority)
-fast_config = MetricsConfig(
-    SSIM_MODE="fast",                    # 3 frames only
-    CALCULATE_FRAME_METRICS=False        # Skip detailed metrics
-)
-
-# For production pipeline (balanced)
-production_config = MetricsConfig(
-    SSIM_MODE="optimized",               # Sampled frames
-    SSIM_MAX_FRAMES=15,                  # Good balance
-    SSIM_SAMPLING_STRATEGY="uniform",    # Representative sampling
-    CALCULATE_FRAME_METRICS=True         # Keep detailed metrics
-)
-
-# For research (accuracy priority)
-research_config = MetricsConfig(
-    SSIM_MODE="full",                    # All frames
-    CALCULATE_FRAME_METRICS=True         # Full analysis
-)
-```
-
-### Dataset Processing Estimates
-
-| Dataset Size | Avg Frames | Fast Mode | Optimized Mode | Full Mode |
-|-------------|------------|-----------|----------------|-----------|
-| 1,000 GIFs  | 50         | **0.03h** | 0.15h         | 0.8h      |
-| 5,000 GIFs  | 100        | **0.3h**  | 1.5h          | 8.3h      |
-| 10,000 GIFs | 100        | **0.6h**  | 3.0h          | 16.7h     |
-
-*Processing times include 24 variants per GIF (frame ratios × color counts × lossy levels × engines)*
-
-## Expanded Quality Metrics (S10)
-
-In addition to SSIM-based measures, GifLab now computes **eight complementary frame-level metrics** that capture color, texture, edge and gradient fidelity:
-
-| Metric | Abbrev. | Higher-is-better? | Notes |
-|--------|---------|-------------------|-------|
-| Mean Squared Error | MSE | ❌ (lower) | Pixel-wise error |
-| Root Mean Squared Error | RMSE | ❌ (lower) | Square-root of MSE |
-| Feature Similarity Index | FSIM | ✅ | Gradient & phase features |
-| Gradient Magnitude Similarity Deviation | GMSD | ❌ (lower) | Gradient-map deviation |
-| Color-Histogram Correlation | CHIST | ✅ | Channel-wise histogram correlation |
-| Edge-Map Jaccard Similarity | EDGE | ✅ | Edge overlap similarity |
-| Texture-Histogram Correlation | TEXTURE | ✅ | LBP histogram correlation |
-| Sharpness Similarity | SHARP | ✅ | Laplacian variance ratio |
-
-All metrics are exposed via `giflab.metrics.calculate_comprehensive_metrics` and exported to CSV with mean/std/min/max descriptors (plus optional raw values).
-
-## 🎯 Efficiency Scoring System
-
-GifLab calculates an **efficiency score** (0-1 scale) using a geometric mean of quality and compression performance:
-
-```python
-efficiency = (composite_quality^0.5) × (normalized_compression^0.5)
-```
-
-### Technical Implementation:
-- **Geometric mean**: Balanced approach requiring both quality preservation and compression effectiveness
-- **Log-normalized compression**: Compression ratio capped at 20x to handle diminishing returns
-- **Composite quality input**: Uses the comprehensive 11-metric quality system
-- **Range**: 0-1 scale for consistent interpretation
-
-
-## 🎯 Pareto Frontier Analysis
-
-GifLab uses Pareto frontier analysis to identify mathematically optimal compression pipelines by finding trade-offs where you cannot improve quality without increasing file size, or reduce file size without degrading quality.
-
-### Mathematical Optimality
-
-Pareto analysis eliminates subjective weighting by identifying pipelines that are mathematically optimal for quality-size trade-offs.
-
-### Pipeline Elimination Benefits
-
-1. Eliminates subjective quality-vs-size weighting decisions
-2. Provides mathematically rigorous pipeline comparisons
-3. Supports content-type specific analysis
-4. Works with multiple quality metrics (SSIM, MS-SSIM, composite scores)
-
-### Experimental Commands
+Pareto analysis identifies mathematically optimal compression pipelines -- trade-offs where you cannot improve quality without increasing file size, or reduce file size without degrading quality.
 
 ```bash
-# Run comprehensive experiments with Pareto analysis
+# Run experiments with Pareto analysis
 poetry run python -m giflab run --sampling representative
 
-# View experiment results and top performers
+# View top performers
 poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 5
-
-# Use quick sampling for faster testing during development
-poetry run python -m giflab run --sampling quick
 ```
-
-### Interpretation Guide
-
-Pareto frontier points represent optimal trade-offs:
-- Leftmost: Maximum quality achievable
-- Rightmost: Maximum compression at acceptable quality  
-- Middle: Balanced quality-size compromises
 
 Dominated pipelines are automatically identified and can be safely eliminated from consideration.
 
-
-
-## Quick Start
-
-```bash
-# Install dependencies (requires Poetry)
-poetry install
-
-# Test all compression strategies with intelligent sampling
-poetry run python -m giflab run --sampling representative
-
-# Pick top 3 pipelines by SSIM
-poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 3 -o winners.yaml
-
-# Run production compression on full dataset with chosen pipelines
-poetry run python -m giflab run data/raw --pipelines winners.yaml
-
-# Add AI-generated tags
-poetry run python -m giflab tag results.csv data/raw
-```
-
 ## Pipeline Usage Examples
 
-### 🏭 Standard Workflow (Reliable, Fast)
 ```bash
-# Standard production processing with gifsicle + Animately
-poetry run python -m giflab run data/raw
-
-# Production with custom settings
+# Standard production processing
 poetry run python -m giflab run data/raw --workers 8 --resume
 
-# Production with pipeline YAML (advanced)
-poetry run python -m giflab run data/raw --pipelines custom_pipelines.yaml
-```
-
-### 🧪 Comprehensive Testing (All 5 Engines)
-```bash
-# Test all 5 engines with comprehensive sampling
+# Test all engines with comprehensive sampling
 poetry run python -m giflab run --sampling representative
 
 # Quick test for development
 poetry run python -m giflab run --sampling quick
 
-# Full comprehensive testing (slower but thorough)
-poetry run python -m giflab run --sampling full
+# Select top performing pipelines
+poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 3 -o winners.yaml
 
-# Targeted testing with strategic synthetic GIFs
-poetry run python -m giflab run --sampling targeted
-```
-
-
-### 📊 Workflow Recommendations
-
-**For Production Work:**
-```bash
-# Large datasets, proven reliability
-poetry run python -m giflab run data/raw --workers 8 --resume
-```
-
-**For Engine Comparison:**
-```bash  
-# Compare all engines to find the best for your content
-poetry run python -m giflab run --sampling representative
-poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 3
-```
-
-**For Research & Development:**
-```bash
-# Full comprehensive testing with advanced analysis
-poetry run python -m giflab run --sampling full --use-gpu
+# Run with selected pipelines
+poetry run python -m giflab run data/raw --pipelines winners.yaml
 ```
 
 ## Project Structure
 
 ```
 giflab/
-├─ data/                 # Data directories
-├─ src/giflab/           # Python package
-├─ notebooks/            # Analysis notebooks  
-├─ tests/                # Test suite
-└─ pyproject.toml        # Poetry configuration
+├── data/                 # Data directories
+├── src/giflab/           # Python package
+│   ├── cli/              # CLI command definitions
+│   ├── prediction/       # ML prediction pipeline
+│   │   ├── features.py   # 25 visual feature extractors
+│   │   ├── models.py     # CurvePredictionModel (gradient boosting)
+│   │   ├── schemas.py    # Pydantic schemas (GifFeaturesV1, etc.)
+│   │   └── dataset.py    # Dataset preparation utilities
+│   ├── external_engines/ # Compression engine wrappers
+│   ├── monitoring/       # Pipeline monitoring
+│   ├── caching/          # Result caching
+│   ├── sampling/         # GIF sampling strategies
+│   ├── storage.py        # SQLite storage layer
+│   └── metrics.py        # Quality metric calculations
+├── tests/                # Test suite (4-layer)
+├── notebooks/            # Analysis notebooks
+├── results/              # Experiment results
+└── pyproject.toml        # Poetry configuration
 ```
-
 
 ## Requirements
 
@@ -469,8 +323,8 @@ giflab/
 
 Engine paths are configurable via environment variables or `src/giflab/config.py` under the `EngineConfig` class.
 
-### Environment Variables (Recommended)
-Set these environment variables to override default engine paths:
+### Environment variables
+
 ```bash
 export GIFLAB_GIFSICLE_PATH=/usr/local/bin/gifsicle
 export GIFLAB_ANIMATELY_PATH=/usr/local/bin/animately
@@ -480,187 +334,78 @@ export GIFLAB_FFPROBE_PATH=/usr/local/bin/ffprobe
 export GIFLAB_GIFSKI_PATH=/usr/local/bin/gifski
 ```
 
-### Tool Installation by Platform
+### Tool installation
 
-#### macOS
+**macOS**:
 ```bash
-# Install tools via Homebrew
-brew install python@3.11 ffmpeg gifsicle imagemagick
-
-# Install gifski for high-quality lossy compression
-brew install gifski
-
+brew install python@3.11 ffmpeg gifsicle imagemagick gifski
 # Animately binary included in repository (bin/darwin/arm64/animately)
-# Automatically detected - no additional installation required
 ```
 
-#### Linux/Ubuntu
+**Linux/Ubuntu**:
 ```bash
-# Install via package manager
-sudo apt update
 sudo apt install python3.11 ffmpeg gifsicle imagemagick-6.q16
-
-# Install gifski via cargo
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install gifski
-
-# Animately: Download from releases and place in bin/linux/x86_64/
-# See bin/linux/x86_64/PLACEHOLDER.md for instructions
+# Animately: download from releases, place in bin/linux/x86_64/
 ```
 
-#### Windows
+**Windows**:
 ```bash
-# Using Chocolatey
 choco install python ffmpeg gifsicle imagemagick
-
-# Install gifski via cargo or download binary
 winget install gifski
-
-# Animately: Download from releases and place in bin/windows/x86_64/
-# See bin/windows/x86_64/PLACEHOLDER.md for instructions
+# Animately: download from releases, place in bin/windows/x86_64/
 ```
-
-#### Repository Binaries
-GifLab includes platform-specific binaries for tools not available via package managers:
-- **Animately**: Pre-built binaries in `bin/<platform>/<architecture>/`
-- **Automatic detection**: Tool discovery checks repository binaries before system PATH
-- **Cross-platform support**: macOS ARM64, Linux x86_64, Windows x86_64
 
 ### Verification
+
 ```bash
 # Test all engines are properly configured
 poetry run python -c "from giflab.system_tools import get_available_tools; print(get_available_tools())"
 
-# Run smoke tests to verify functionality
+# Run smoke tests
 poetry run pytest tests/smoke/ -v
 ```
 
-## 📈 Machine-Learning Dataset Best Practices  
-*Why this matters: High-quality, well-documented metrics are the foundation of reliable ML models.*
+## Testing
 
-When you create or extend a GifLab dataset for ML tasks, **follow the checklist below** (detailed rationale in *Section&nbsp;8* of `QUALITY_METRICS_EXPANSION_PLAN.md`). These rules apply to *every* future contribution:
+Tests are organized into four layers. New tests must go in the correct layer.
 
-1. **Deterministic extraction** – lock random seeds; metric functions must be pure.
-2. **Schema validation** – export rows that pass `MetricRecordV1` (pydantic) validation.
-3. **Version tagging** – record dataset version, `giflab` semver, and git commit hash.
-4. **Canonical data-splits** – maintain *GIF-level* `train/val/test` JSON split files.
-5. **Feature scaling** – persist `scaler.pkl` (z-score or min-max) alongside data.
-6. **Missing-value handling** – encode unknown metrics as `np.nan`, not `0.0`.
-7. **Outlier & drift reports** – auto-generate an HTML outlier summary and correlation dashboard.
-8. **Reproducible pipeline** – provide a `make data` target that builds the dataset + EDA artifacts end-to-end.
-9. **Comprehensive logs** – include parameter checksum and elapsed-time stats in every run.
+| Layer | Path | Purpose | Time budget |
+|-------|------|---------|-------------|
+| smoke | `tests/smoke/` | Imports, types, pure logic | <5s |
+| functional | `tests/functional/` | Mocked engines, synthetic GIFs | <2min |
+| integration | `tests/integration/` | Real engines, real metrics | <5min |
+| nightly | `tests/nightly/` | Memory, perf, stress, golden | No limit |
 
-> **🚦 Gate keeper:** Pull requests touching dataset code MUST tick all items or explain why they do not apply.
-
-For implementation details, see `giflab/data_prep.py` (to be added) and the ML checklist in the plan document.
-
-## 🧪 Testing & Development
-
-GifLab maintains strict testing standards to ensure code quality and project cleanliness:
-
-### Testing Guidelines
-- **Unit/Integration Tests**: Use `tests/` directory with pytest
-- **Manual Testing**: Use `test-workspace/` structure (never root directory!)
-- **Debug Sessions**: Create organized sessions in `test-workspace/debug/`
-- **Cleanup Protocols**: Regular cleanup prevents project pollution
-
-### Test Markers
-GifLab uses pytest markers to organize and selectively run different types of tests:
-
-- **`@pytest.mark.fast`**: Quick tests safe for parallel execution (< 1 second)
-- **`@pytest.mark.slow`**: Long-running tests or those requiring external binaries
-- **`@pytest.mark.performance`**: Performance benchmark and timing-sensitive tests
-- **`@pytest.mark.serial`**: Tests requiring sequential execution (not parallel-safe)
-- **`@pytest.mark.integration`**: Integration tests with external tools/dependencies
-- **`@pytest.mark.external_tools`**: Tests requiring specific external tools
-
-**Marker-Based Test Execution:**
 ```bash
-# Run only fast tests (parallel execution)
-poetry run pytest -m "fast" -n auto
-
-# Run performance tests sequentially
-poetry run pytest -m "performance and serial" -n 1
-
-# Run performance tests that can be parallelized
-poetry run pytest -m "performance and not serial" -n auto
-
-# Skip slow and external tool tests
-poetry run pytest -m "not slow and not external_tools"
+make test           # Fast feedback: smoke + functional (<2min)
+make test-ci        # CI: + integration (<5min)
+make test-nightly   # Everything including perf/memory
+make test-file F=tests/functional/test_metrics.py  # Single file
 ```
 
-### Quick Commands
-```bash
-# Fast feedback: smoke + functional (<2min)
-make test
+See [Testing Best Practices](docs/guides/testing-best-practices.md) for full guidelines.
 
-# CI: + integration (<5min)
-make test-ci
-
-# Everything including nightly
-make test-nightly
-
-# Single file
-make test-file F=tests/functional/test_metrics.py
-
-# Create test workspace
-make test-workspace
-
-# Emergency cleanup of root directory mess
-make clean-testing-mess
-
-# Clean temporary files
-make clean-temp
-```
-
-**📋 Full Guidelines**: See [Testing Best Practices](docs/guides/testing-best-practices.md) for comprehensive testing standards and protocols.
-
-## 📚 Documentation
+## Documentation
 
 ### Core
-- **[Project Scope](SCOPE.md)** - Goals, requirements, and architecture overview
+- [Project Scope](SCOPE.md) -- Goals, requirements, and architecture overview
 
 ### User Guides
-- **[Beginner's Guide](docs/guides/beginner.md)** - Step-by-step introduction for new users
-- **[Setup Guide](docs/guides/setup.md)** - Installation and configuration instructions
+- [Beginner's Guide](docs/guides/beginner.md) -- Step-by-step introduction for new users
+- [Setup Guide](docs/guides/setup.md) -- Installation and configuration instructions
 
 ### Technical Reference
-- **[Metrics System](docs/technical/metrics-system.md)** - Comprehensive quality assessment framework
-- **[EDA Framework](docs/technical/eda-framework.md)** - Data analysis and visualization tools
-- **[ML Best Practices](docs/technical/ml-best-practices.md)** - Machine learning dataset preparation
-- **[Testing Best Practices](docs/guides/testing-best-practices.md)** - Quality assurance and testing approaches
-- **[Content Classification](docs/technical/content-classification.md)** - AI-powered content tagging system
+- [Metrics System](docs/technical/metrics-system.md) -- Quality assessment framework
+- [EDA Framework](docs/technical/eda-framework.md) -- Data analysis and visualization tools
+- [ML Best Practices](docs/technical/ml-best-practices.md) -- Dataset preparation
+- [Content Classification](docs/technical/content-classification.md) -- AI-powered content tagging
+- [Testing Best Practices](docs/guides/testing-best-practices.md) -- Quality assurance
 
-### Research & Analysis
-- **[Compression Research](docs/analysis/compression-research.md)** - Engine comparison and optimization strategies
-- **[Implementation Lessons](docs/analysis/implementation-lessons.md)** - Development insights and best practices
-
-## Common Commands & Troubleshooting
-
-### 🗑️ Clear All Cached Data
-If you need to reset all cached pipeline results (SQLite database):
-```bash
-poetry run python -m giflab run --clear-cache --estimate-time
-```
-This clears all cached test results from `results/cache/pipeline_results_cache.db`.
-
-### 🔄 Force Fresh Results (Without Clearing Cache)
-To run fresh tests while keeping cached data intact:
-```bash
-poetry run python -m giflab run --use-cache=false --sampling quick
-```
-
-### 📊 Check Cache Performance
-Cache statistics are automatically shown in pipeline elimination output.
-
-### 🔍 Debug Pipeline Failures
-View detailed failure information:
-```bash
-poetry run python -m giflab view-failures --summary
-```
-
-**📚 For more details:** See [Compression Testing Guide](docs/guides/experimental-testing.md)
+### Research and Analysis
+- [Compression Research](docs/analysis/compression-research.md) -- Engine comparison and optimization
+- [Implementation Lessons](docs/analysis/implementation-lessons.md) -- Development insights
 
 ## License
 
-MIT License – see LICENSE file for details.
+MIT License -- see LICENSE file for details.

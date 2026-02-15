@@ -155,8 +155,10 @@ Add more ratios or palette sizes via `config.py`; the pipeline renders only miss
 ## 4 CLI
 
 ```bash
-python -m giflab run    <RAW_DIR> <OUT_DIR> [options]   # compression pass
-python -m giflab tag    <CSV_FILE> [options]            # tagging pass
+poetry run python -m giflab run [options]       # compression + feature extraction
+poetry run python -m giflab train [options]      # train prediction models
+poetry run python -m giflab export [options]     # export data/models
+poetry run python -m giflab stats [options]      # database statistics
 ```
 
 Options:
@@ -165,12 +167,11 @@ Options:
   --workers, -j N   number of processes (default: CPU count)
   --resume          skip existing renders (default: true)
   --fail-dir PATH   folder for bad gifs   (default: data/bad_gifs)
-  --csv PATH        output CSV            (default: auto-date)
   --dry-run         list work only
 ```
 
-*SIGINT* finishes active tasks, flushes CSV, exits.
-Re-run with `--resume` continues where it left off, using the presence of render files and SHA dedup to skip duplicates.
+*SIGINT* finishes active tasks, flushes data, exits.
+Re-run with `--resume` continues where it left off, using SHA dedup to skip duplicates.
 
 ---
 
@@ -213,22 +214,22 @@ Re-run with `--resume` continues where it left off, using the presence of render
 git clone https://…/giflab.git
 cd giflab
 poetry install
-poetry run python -m giflab run data/raw data/
+poetry run python -m giflab run data/raw
 ```
 
-## 7  ML-Driven Tool Selection Strategy
+## 7  Prediction Training Pipeline
 
-### Experimental Framework
-- **Purpose**: Test diverse compression tools and strategies on curated GIF datasets
-- **Scope**: Small-scale validation (~10 GIFs) before large-scale analysis
-- **Tools**: Expand beyond gifsicle/animately to include ImageMagick, FFmpeg, gifski, WebP, AVIF
-- **Output**: Performance databases for training ML models
+### Dataset Generation Framework
+- **Purpose**: Generate comprehensive compression datasets across diverse GIF content
+- **Scope**: Small-scale validation (~10 GIFs) before large-scale sweeps
+- **Engines**: gifsicle, animately (standard/advanced/hard), ImageMagick, FFmpeg, gifski
+- **Output**: SQLite databases with compression results and visual features for model training
 
 ### Machine Learning Pipeline
 1. **Content Classification**: Automatically categorize GIFs (text, photo, animation, graphics)
-2. **Feature Extraction**: Extract visual, structural, and semantic features
-3. **Performance Prediction**: Predict compression results for tool combinations
-4. **Tool Selection**: Intelligently route GIFs to optimal compression strategies
+2. **Feature Extraction**: Extract 25 visual, structural, and semantic features per GIF
+3. **Compression Sweeps**: Run parameter sweeps across engines, lossy levels, and color counts
+4. **Model Training**: Train gradient boosting models to predict compression curves from features
 
 ### Prediction Model Export
 GifLab trains and exports prediction models (`.pkl` files) for use by **external tools** (e.g., Animately). The workflow is:

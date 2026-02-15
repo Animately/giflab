@@ -1,20 +1,22 @@
 # 🎞️ GifLab Beginner's Guide
 
-**A complete step-by-step guide to analyzing and compressing your GIF collection**
+**A step-by-step guide to generating prediction datasets from GIF compression sweeps**
 
 ## 👋 Welcome to GifLab!
 
-This guide will walk you through everything you need to know to get started with GifLab, even if you've never done this before.
+GifLab builds structured datasets that map visual features to compression outcomes. You feed it GIFs; it runs them through every combination of engine, lossy level, frame ratio, and palette size; measures quality after each run; and stores the results in SQLite. The end goal is training ML models that predict compression curves from visual features alone, without having to compress anything at inference time.
+
+This guide walks you through the full workflow, from setup to your first trained model.
 
 **🔧 Looking for technical details?** Check out the [**README.md**](../../README.md) for developer information, performance benchmarks, and configuration options.
 
 ---
 
 ### 🎯 What GifLab Does:
-- **Analyzes your GIF collection** to understand what you have
-- **Compresses GIFs efficiently** using different techniques
-- **Provides data-driven insights** to optimize your workflow
-- **Handles large collections** with resume functionality
+- **Extracts 25 visual features** from each GIF (color complexity, motion intensity, texture, edge density, and more)
+- **Runs compression sweeps across 7 engines** (gifsicle, three Animately modes, ImageMagick, FFmpeg, gifski) with varying lossy, frame, and palette parameters
+- **Stores structured training data in SQLite** with per-run quality metrics (SSIM, MS-SSIM, PSNR, FSIM, GMSD, temporal consistency, and more)
+- **Trains gradient boosting models** that predict compression curves from visual features, so you can estimate outcomes without compressing
 
 ### ⏱️ Time Needed:
 - **Setup**: 5-10 minutes
@@ -62,7 +64,7 @@ GifLab can automatically detect GIF sources based on directory structure, making
 
 ```bash
 # Create the directory structure with automatic source detection
-python -m giflab organize-directories data/raw/
+poetry run python -m giflab organize-directories data/raw/
 
 # This creates organized directories:
 # data/raw/tenor/          - GIFs from Tenor
@@ -131,10 +133,10 @@ jupyter notebook
 #### Step 5: Start Compression Processing
 ```bash
 # Basic processing (uses default settings)
-python -m giflab run data/raw data/ --workers 4
+poetry run python -m giflab run data/raw data/ --workers 4
 
 # Advanced processing (uses optimization data from notebooks)
-python -m giflab run data/raw data/ --workers 8 --resume --use-seed-data
+poetry run python -m giflab run data/raw data/ --workers 8 --resume --use-seed-data
 ```
 
 #### Step 6: Monitor Progress
@@ -150,7 +152,7 @@ ls data/renders/
 #### Step 7: Add AI Tags (Optional)
 ```bash
 # Add AI-generated tags to your results
-python -m giflab tag data/csv/results_YYYYMMDD.csv data/raw --workers 2
+poetry run python -m giflab tag data/csv/results_YYYYMMDD.csv data/raw --workers 2
 ```
 
 ---
@@ -272,19 +274,19 @@ python -m giflab tag data/csv/results_YYYYMMDD.csv data/raw --workers 2
 
 ```bash
 # See all available options
-python -m giflab --help
+poetry run python -m giflab --help
 
 # Basic processing
-python -m giflab run data/raw data/
+poetry run python -m giflab run data/raw data/
 
 # Processing with specific settings
-python -m giflab run data/raw data/ \
+poetry run python -m giflab run data/raw data/ \
   --workers 8 \
   --resume \
   --csv data/csv/my_results.csv
 
 # Add AI tags to results
-python -m giflab tag data/csv/results_20240115.csv data/raw
+poetry run python -m giflab tag data/csv/results_20240115.csv data/raw
 ```
 
 #### Understanding the Options:
@@ -314,24 +316,24 @@ python -m giflab tag data/csv/results_20240115.csv data/raw
 
 **For small collections (<100 GIFs):**
 ```bash
-python -m giflab run data/raw data/ --workers 4
+poetry run python -m giflab run data/raw data/ --workers 4
 ```
 
 **For medium collections (100-1000 GIFs):**
 ```bash
 # Run analysis first, then process
-python -m giflab run data/raw data/ --workers 6 --resume
+poetry run python -m giflab run data/raw data/ --workers 6 --resume
 ```
 
 **For large collections (1000+ GIFs):**
 ```bash
 # Definitely run notebooks first for optimization
-python -m giflab run data/raw data/ --workers 8 --resume --use-seed-data
+poetry run python -m giflab run data/raw data/ --workers 8 --resume --use-seed-data
 ```
 
 **To estimate processing time:**
 ```bash
-python -m giflab run data/raw data/ --dry-run
+poetry run python -m giflab run data/raw data/ --dry-run
 ```
 
 #### 🎯 Pipeline-Specific Usage:
@@ -339,40 +341,42 @@ python -m giflab run data/raw data/ --dry-run
 **🏭 Production Processing (gifsicle + Animately):**
 ```bash
 # Standard production pipeline
-python -m giflab run data/raw
+poetry run python -m giflab run data/raw
 
 # Production with custom settings
-python -m giflab run data/raw --workers 8 --resume
+poetry run python -m giflab run data/raw --workers 8 --resume
 ```
 
 **🧪 Experimental Testing (All 5 Engines):**
 ```bash
 # Test all engines with comprehensive matrix
-python -m giflab run --matrix
+poetry run python -m giflab run --matrix
 
 # Quick experimental test
-python -m giflab run --matrix --gifs 5
+poetry run python -m giflab run --matrix --gifs 5
 
 # Experimental with custom sample GIFs
-python -m giflab run --matrix --sample-gifs-dir my_test_gifs/
+poetry run python -m giflab run --matrix --sample-gifs-dir my_test_gifs/
 ```
 
 **📊 Workflow Recommendations:**
 ```bash
 # 1. Find best engines for your content
-python -m giflab run --matrix --gifs 10
+poetry run python -m giflab run --matrix --gifs 10
 
 # 2. Use production pipeline for large-scale processing
-python -m giflab run data/raw --workers 8 --resume
+poetry run python -m giflab run data/raw --workers 8 --resume
 ```
 
 ---
 
-## 📊 Understanding Your Results
+## 📊 Understanding Your Dataset
+
+Every compression run produces a training example. The input features are the visual characteristics of the original GIF (extracted during the `run` step), and the targets are the compression outcomes: file size, quality scores, and render time. Together these form the dataset used to train prediction models.
 
 ### CSV Output Format
 
-Each row in your results CSV represents one compressed variant of one GIF:
+Each row in your results CSV represents one training example -- a single compression configuration applied to a single GIF:
 
 | Column | Description | Example |
 |--------|-------------|---------|
@@ -421,53 +425,55 @@ Each row in your results CSV represents one compressed variant of one GIF:
 | **gifski** | Maximum quality | ⚡ Slow | ⭐⭐⭐⭐ Best | When quality is paramount, small files needed |
 
 **Quick recommendations:**
-- **Production work**: Use `python -m giflab run` (gifsicle + Animately, proven reliability)
-- **Engine comparison**: Use `python -m giflab run --matrix` (tests all 5 engines)
+- **Production work**: Use `poetry run python -m giflab run` (gifsicle + Animately, proven reliability)
+- **Engine comparison**: Use `poetry run python -m giflab run --matrix` (tests all 5 engines)
 - **Photo-like GIFs**: Experimental pipeline will test gifski and Animately automatically
 - **Best quality**: Experimental pipeline includes gifski (highest quality compression)
 - **Large datasets**: Production pipeline optimized for scale and stability
 
-### Finding the Best Settings
+### Exploring Your Dataset
 
-**For best overall efficiency (recommended):**
+These SQL queries help you inspect the training data stored in SQLite. Each row is one training example linking visual features (inputs) to compression outcomes (targets).
+
+**Top-performing training examples (highest efficiency):**
 ```sql
-SELECT * FROM results 
-ORDER BY efficiency DESC 
+SELECT * FROM compression_runs
+ORDER BY efficiency DESC
 LIMIT 10
 ```
 
-**For best efficiency per GIF:**
+**Best outcome per GIF (useful for labelling):**
 ```sql
-SELECT * FROM results 
-WHERE efficiency = (SELECT MAX(efficiency) FROM results WHERE gif_sha = 'your_gif_sha')
+SELECT * FROM compression_runs
+WHERE efficiency = (SELECT MAX(efficiency) FROM compression_runs WHERE gif_sha = cr.gif_sha)
 ```
 
-**For maximum compression:**
+**Smallest output per GIF:**
 ```sql
-SELECT * FROM results 
-WHERE kilobytes = (SELECT MIN(kilobytes) FROM results WHERE gif_sha = 'your_gif_sha')
+SELECT * FROM compression_runs
+WHERE kilobytes = (SELECT MIN(kilobytes) FROM compression_runs WHERE gif_sha = cr.gif_sha)
 ```
 
-**For best quality/size balance (manual approach):**
+**High-quality examples (SSIM > 0.9, sorted by size):**
 ```sql
-SELECT * FROM results 
-WHERE ssim > 0.9 
-ORDER BY kilobytes ASC 
+SELECT * FROM compression_runs
+WHERE ssim > 0.9
+ORDER BY kilobytes ASC
 LIMIT 10
 ```
 
-**For fastest processing:**
+**Fastest engine runs:**
 ```sql
-SELECT * FROM results 
+SELECT * FROM compression_runs
 WHERE engine = 'gifsicle'
-ORDER BY render_ms ASC 
+ORDER BY render_ms ASC
 LIMIT 10
 ```
 
-**Compare engines for your content:**
+**Per-engine summary statistics:**
 ```sql
 SELECT engine, AVG(ssim) as avg_quality, AVG(kilobytes) as avg_size, AVG(render_ms) as avg_time
-FROM results 
+FROM compression_runs
 GROUP BY engine
 ORDER BY avg_quality DESC
 ```
@@ -539,7 +545,7 @@ tail -f logs/giflab_*.log
 
 **Run in dry-run mode:**
 ```bash
-python -m giflab run data/raw data/ --dry-run
+poetry run python -m giflab run data/raw data/ --dry-run
 ```
 
 **Test with a few GIFs first:**
@@ -547,7 +553,7 @@ python -m giflab run data/raw data/ --dry-run
 # Create a test directory with just a few GIFs
 mkdir data/test
 cp data/raw/sample*.gif data/test/
-python -m giflab run data/test data/ --workers 2
+poetry run python -m giflab run data/test data/ --workers 2
 ```
 
 ---

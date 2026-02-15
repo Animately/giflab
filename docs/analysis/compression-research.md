@@ -8,6 +8,8 @@
 
 This document consolidates findings from extensive analysis of GIF compression techniques, covering color reduction strategies, engine comparisons, and quality optimization approaches.
 
+These findings directly inform GifLab's prediction dataset design. Understanding which compression parameters create meaningful variation in quality metrics, which content characteristics most affect compression outcomes, and how parameter interactions behave across content types is essential for constructing parameter sweeps that produce informative training data for compression curve prediction models.
+
 ### 1.1 Research Scope
 
 - **Color Reduction**: Palette optimization strategies (256 → 64 colors)
