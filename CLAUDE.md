@@ -251,3 +251,10 @@ Agent teams are enabled for this project. When using them, follow these guidelin
 ---
 
 *This configuration ensures reliable, reproducible development workflows for both humans and AI assistants.*
+
+## Active Technologies
+- Python 3.11 (per `pyproject.toml`) + No new dependencies. Reuses existing internals: `tool_wrappers.AnimatelyLossyCompressor` + 4 sibling compressors, `metrics.calculate_comprehensive_metrics`, `external_engines.common.run_command`, `error_handling.GifLabError` hierarchy. (003-public-api-refactor)
+- N/A (filesystem read/write only; no DB) (003-public-api-refactor)
+
+## Recent Changes
+- 003-public-api-refactor: Added Python 3.11 (per `pyproject.toml`) + No new dependencies. Reuses existing internals: `tool_wrappers.AnimatelyLossyCompressor` + 4 sibling compressors, `metrics.calculate_comprehensive_metrics`, `external_engines.common.run_command`, `error_handling.GifLabError` hierarchy.
