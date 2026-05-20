@@ -1833,6 +1833,7 @@ def calculate_comprehensive_metrics_from_frames(
     config: MetricsConfig | None = None,
     frame_reduction_context: bool = False,
     file_metadata: dict[str, Any] | None = None,
+    force_all_metrics: bool = False,
 ) -> dict[str, float | str]:
     """Calculate comprehensive quality metrics between original and compressed frames.
 
@@ -1945,7 +1946,9 @@ def calculate_comprehensive_metrics_from_frames(
             os.environ.get("GIFLAB_ENABLE_CONDITIONAL_METRICS", "true").lower()
             == "true"
         )
-        force_all_metrics = (
+        # Function parameter takes precedence; fall back to env var for the
+        # legacy override path used by the dataset pipeline.
+        force_all_metrics = force_all_metrics or (
             os.environ.get("GIFLAB_FORCE_ALL_METRICS", "false").lower() == "true"
         )
 
@@ -3073,6 +3076,7 @@ def calculate_comprehensive_metrics(
     compressed_path: Path,
     config: MetricsConfig | None = None,
     frame_reduction_context: bool = False,
+    force_all_metrics: bool = False,
 ) -> dict[str, float | str]:
     """Calculate comprehensive quality metrics between original and compressed GIFs.
 
@@ -3136,6 +3140,7 @@ def calculate_comprehensive_metrics(
             config=config,
             frame_reduction_context=frame_reduction_context,
             file_metadata=file_metadata,
+            force_all_metrics=force_all_metrics,
         )
 
         return result
