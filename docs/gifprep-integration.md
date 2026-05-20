@@ -1,7 +1,8 @@
 # gifprep integration — public API refactor
 
-**Status**: Proposal, awaiting its own spec in this repo
+**Status**: Implemented as of v0.3.0 — see [public-api.md](./public-api.md) for the live contract. This document is preserved as the historical proposal.
 **Last updated**: 2026-04-11
+**Implemented**: 2026-05-19
 **Owner**: Lachy (leads both giflab and gifprep)
 **Scope**: A small refactor pass on giflab to expose a stable public API (`compress`, `measure`) that gifprep can depend on as a library.
 
