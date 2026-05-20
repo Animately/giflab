@@ -219,6 +219,8 @@ class TestCalculateDeepPerceptualQualityMetrics:
 
     def test_with_custom_config(self, test_frames):
         """Test with custom configuration parameters."""
+        from giflab.deep_perceptual_metrics import LPIPS_AVAILABLE
+
         original_frames, compressed_frames = test_frames
 
         config = {
@@ -233,7 +235,12 @@ class TestCalculateDeepPerceptualQualityMetrics:
         )
 
         assert isinstance(result, dict)
-        assert result["deep_perceptual_device"] == "cpu"
+        # When LPIPS is installed and computes successfully, the configured
+        # device ("cpu") is reported. When LPIPS is unavailable, the function
+        # gracefully reports "fallback". Both are valid outcomes for this
+        # config-honoring test.
+        expected_devices = {"cpu", "fallback"} if not LPIPS_AVAILABLE else {"cpu"}
+        assert result["deep_perceptual_device"] in expected_devices
 
     def test_with_disabled_deep_perceptual(self, test_frames):
         """Test when deep perceptual is disabled in config."""

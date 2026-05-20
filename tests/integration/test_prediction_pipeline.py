@@ -5,6 +5,7 @@ works correctly and that predicted outcomes align with actual compression.
 """
 
 import subprocess
+import sys
 import tempfile
 from datetime import UTC
 from pathlib import Path
@@ -362,10 +363,15 @@ class TestEndToEndCLI:
         gif_path = tmp_path / "test.gif"
         create_synthetic_gif(gif_path, pattern="gradient")
 
+        # Use the same Python interpreter that's running the test rather than
+        # `poetry run` — the latter resolves against whichever poetry env is
+        # currently active (which may not match the env that imported giflab
+        # for the test process). Using `sys.executable -m giflab` guarantees
+        # the subprocess uses the same interpreter that loaded the module.
         result = subprocess.run(
             [
-                "poetry",
-                "run",
+                sys.executable,
+                "-m",
                 "giflab",
                 "predict",
                 "extract-features",
@@ -377,4 +383,7 @@ class TestEndToEndCLI:
             timeout=60,
         )
 
-        assert result.returncode == 0
+        assert result.returncode == 0, (
+            f"CLI failed (rc={result.returncode}):\n"
+            f"stdout={result.stdout}\nstderr={result.stderr}"
+        )

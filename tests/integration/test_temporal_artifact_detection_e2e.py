@@ -352,12 +352,15 @@ class TestTemporalArtifactDetectionE2E:
 class TestTemporalArtifactDetectionFallbacks:
     """Test fallback behavior when temporal detection dependencies are missing."""
 
-    @patch("giflab.temporal_artifacts.lpips")
-    def test_lpips_unavailable_fallback(self, mock_lpips, tmp_path):
+    @patch(
+        "giflab.temporal_artifacts.LPIPSModelCache.get_model",
+        return_value=None,
+    )
+    def test_lpips_unavailable_fallback(self, _mock_get_model, tmp_path):
         """Test temporal detection falls back gracefully when LPIPS is unavailable."""
-        # Mock LPIPS as unavailable
-        mock_lpips.LPIPS.side_effect = ImportError("LPIPS not available")
-
+        # Force LPIPS model loading to return None (simulating LPIPS unavailable).
+        # Patching the cache helper exercises the same code path regardless of
+        # whether the `lpips` package is importable in the test environment.
         input_gif = create_smooth_animation_gif()
         output_gif = tmp_path / "fallback_test_output.gif"
         output_gif.write_bytes(input_gif.read_bytes())
