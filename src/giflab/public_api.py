@@ -77,6 +77,21 @@ SUPPORTED_METRICS: tuple[str, ...] = (
 
 MetricIdentifier = Literal["ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist"]
 
+# Public metric identifier → internal result-dict key. Six metrics flow
+# through metrics._aggregate_metric() and end up keyed by their bare name;
+# LPIPS is the exception — its computation surfaces lpips_quality_{mean,p95,
+# max} and we expose the mean as the public scalar. Module-level so we don't
+# rebuild it on every measure() call.
+_PUBLIC_TO_INTERNAL_METRIC_KEY: dict[str, str] = {
+    "ssim": "ssim",
+    "ms_ssim": "ms_ssim",
+    "psnr": "psnr",
+    "lpips": "lpips_quality_mean",
+    "gmsd": "gmsd",
+    "fsim": "fsim",
+    "chist": "chist",
+}
+
 
 # ---------------------------------------------------------------------------
 # Engine dispatch
@@ -288,33 +303,25 @@ def measure(
             context={"metrics": sorted(requested)},
         ) from exc
 
-    # Public metric identifier → internal result-dict key. Six metrics flow
-    # through _aggregate_metric() and end up keyed by their bare name; LPIPS
-    # is the exception — its computation surfaces lpips_quality_{mean,p95,max}
-    # and we expose the mean as the public scalar.
-    public_to_internal = {
-        "ssim": "ssim",
-        "ms_ssim": "ms_ssim",
-        "psnr": "psnr",
-        "lpips": "lpips_quality_mean",
-        "gmsd": "gmsd",
-        "fsim": "fsim",
-        "chist": "chist",
-    }
-
     def _project(name: str) -> float | None:
         if name not in requested:
             return None
-        value = full.get(public_to_internal[name])
+        value = full.get(_PUBLIC_TO_INTERNAL_METRIC_KEY[name])
         if value is None:
             # Requested metric resolved to None — internal key drift or a
             # silently failed metric. Surface loudly rather than return a
-            # field the caller can't distinguish from "not requested".
+            # field the caller can't distinguish from "not requested". The
+            # internal key name is preserved in context for whoever debugs
+            # giflab; we don't leak it into the user-facing message.
             raise GifLabError(
                 f"measure() requested metric {name!r} but the internal "
-                f"computation did not produce a value (key "
-                f"{public_to_internal[name]!r} missing from result dict)",
-                context={"metric": name, "metrics": sorted(requested)},
+                f"computation did not produce a value. This indicates a "
+                f"giflab bug; please file an issue.",
+                context={
+                    "metric": name,
+                    "metrics": sorted(requested),
+                    "internal_key": _PUBLIC_TO_INTERNAL_METRIC_KEY[name],
+                },
             )
         scalar = float(value)
         # PSNR is normalized to [0, 1] internally (frame_psnr / PSNR_MAX_DB).

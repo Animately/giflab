@@ -29,13 +29,17 @@ def _fake_full_result() -> dict[str, float]:
 
     Expected projection through ``measure()``:
       - ssim/ms_ssim/gmsd/fsim/chist pass through unchanged
-      - psnr is denormalized: 0.6 * PSNR_MAX_DB(50.0) = 30.0 dB
+      - psnr is denormalized: 0.5 * PSNR_MAX_DB(50.0) = 25.0 dB
       - lpips reads lpips_quality_mean = 0.08
     """
     return {
         "ssim": 0.91,
         "ms_ssim": 0.92,
-        "psnr": 0.6,  # normalized internally; public surface denormalizes to dB
+        # PSNR is normalized internally; public surface denormalizes to dB.
+        # 0.5 is chosen because it is exactly representable in IEEE 754, so
+        # 0.5 * 50.0 == 25.0 holds under any float implementation — no
+        # rounding-accident dependency in the test assertion.
+        "psnr": 0.5,
         "lpips_quality_mean": 0.08,  # internal key — not bare "lpips"
         "gmsd": 0.05,
         "fsim": 0.93,
@@ -47,7 +51,7 @@ def _fake_full_result() -> dict[str, float]:
 _EXPECTED_PUBLIC = {
     "ssim": 0.91,
     "ms_ssim": 0.92,
-    "psnr": 30.0,  # 0.6 * PSNR_MAX_DB (50.0)
+    "psnr": 25.0,  # 0.5 * PSNR_MAX_DB (50.0) — exact in IEEE 754
     "lpips": 0.08,
     "gmsd": 0.05,
     "fsim": 0.93,
@@ -95,7 +99,9 @@ def test_measure_multi_metric_subset(two_gifs: tuple[Path, Path]) -> None:
 
     assert result.ssim == _EXPECTED_PUBLIC["ssim"]
     assert result.ms_ssim == _EXPECTED_PUBLIC["ms_ssim"]
-    assert result.psnr == _EXPECTED_PUBLIC["psnr"]  # in dB, not normalized
+    assert result.psnr == pytest.approx(
+        _EXPECTED_PUBLIC["psnr"]
+    )  # in dB, not normalized
     assert result.lpips is None
     assert result.gmsd is None
     assert result.fsim is None
@@ -112,9 +118,12 @@ def test_measure_all_metrics(two_gifs: tuple[Path, Path]) -> None:
         result = measure(ref, cand, metrics=list(SUPPORTED_METRICS))
 
     for metric, expected in _EXPECTED_PUBLIC.items():
-        assert (
-            getattr(result, metric) == expected
-        ), f"public field {metric!r} expected {expected}, got {getattr(result, metric)}"
+        actual = getattr(result, metric)
+        # pytest.approx handles the PSNR denormalization (caller × 50.0)
+        # and is a no-op for already-exact values.
+        assert actual == pytest.approx(
+            expected
+        ), f"public field {metric!r} expected {expected}, got {actual}"
 
 
 def test_measure_unknown_metric_raises_before_computation(
@@ -151,7 +160,7 @@ def test_measure_duplicate_metric_names_tolerated(two_gifs: tuple[Path, Path]) -
         result = measure(ref, cand, metrics=["ssim", "ssim", "psnr"])
 
     assert result.ssim == _EXPECTED_PUBLIC["ssim"]
-    assert result.psnr == _EXPECTED_PUBLIC["psnr"]
+    assert result.psnr == pytest.approx(_EXPECTED_PUBLIC["psnr"])
     assert result.ms_ssim is None
 
 
@@ -277,6 +286,6 @@ def test_measure_psnr_returned_in_decibels(two_gifs: tuple[Path, Path]) -> None:
     ):
         result = measure(ref, cand, metrics=["psnr"])
 
-    assert result.psnr == 35.0  # 0.7 * 50.0
+    assert result.psnr == pytest.approx(35.0)  # 0.7 * 50.0
     # And a real consumer's sanity check — PSNR in dB is usually > 1.
     assert result.psnr > 1.0

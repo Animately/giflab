@@ -1,13 +1,17 @@
 """End-to-end tests for ``giflab.measure`` using real metric computation.
 
 These tests run actual SSIM/MS-SSIM/PSNR/CHIST calculations against a real
-reference + candidate pair. LPIPS is excluded — model download is too
-brittle for CI. LPIPS coverage stays in functional (mocked).
+reference + candidate pair. The LPIPS test patches the torch-loading layer
+specifically (``calculate_deep_perceptual_quality_metrics``) so the real
+giflab metrics pipeline still runs end-to-end — only the model forward
+pass is mocked. This exercises the public→internal key mapping for
+``lpips_quality_mean`` without requiring a torch model download in CI.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from PIL import Image, ImageDraw
@@ -88,3 +92,95 @@ def test_measure_ms_ssim(reference_and_candidate: tuple[Path, Path]) -> None:
 
     assert result.ms_ssim is not None
     assert result.ssim is None
+
+
+# Fake return from the deep-perceptual layer. Mirrors the real shape: the
+# branch at src/giflab/metrics.py:1750-1756 calls
+# calculate_deep_perceptual_quality_metrics() and merges its return dict
+# verbatim into the result, so any key the real function produces becomes
+# a top-level result key. The 3 lpips_quality_* keys below are what the
+# real function returns; we add the same shape here.
+_FAKE_DEEP_PERCEPTUAL_RESULT = {
+    "lpips_quality_mean": 0.073,
+    "lpips_quality_p95": 0.18,
+    "lpips_quality_max": 0.22,
+}
+
+
+def test_measure_lpips_e2e_real_pipeline_mocked_model(
+    reference_and_candidate: tuple[Path, Path],
+) -> None:
+    """Real comprehensive-metrics path with LPIPS; only the model is mocked.
+
+    Regression guard for bug_001 (the original silent-None for LPIPS).
+    Exercises:
+      - the real ``calculate_comprehensive_metrics`` code path
+      - the real merge of ``deep_perceptual_metrics`` into the result dict
+        at ``src/giflab/metrics.py:2925-2930``
+      - the real ``measure()`` projection through
+        ``_PUBLIC_TO_INTERNAL_METRIC_KEY["lpips"] == "lpips_quality_mean"``
+
+    Without the torch model load (which is flaky in CI).
+    """
+    ref, cand = reference_and_candidate
+    with patch(
+        "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics",
+        return_value=_FAKE_DEEP_PERCEPTUAL_RESULT,
+    ) as mock_deep:
+        result = measure(ref, cand, metrics=["lpips"])
+
+    # The metrics layer must have invoked the deep-perceptual computation.
+    mock_deep.assert_called_once()
+    # And the projection must have pulled the mean through to the public field.
+    assert result.lpips == pytest.approx(0.073)
+    # No other public metric should be populated.
+    for other in ("ssim", "ms_ssim", "psnr", "gmsd", "fsim", "chist"):
+        assert getattr(result, other) is None
+
+
+def test_measure_propagates_lpips_gate_to_deep_perceptual_config(
+    reference_and_candidate: tuple[Path, Path],
+) -> None:
+    """FR-009 end-to-end: ENABLE_DEEP_PERCEPTUAL must reach the model layer.
+
+    Regression guard for the combo of two settings that both have to be right
+    for cost-avoidance: ``force_all_metrics=True`` (bypasses the conditional
+    optimizer) AND ``ENABLE_DEEP_PERCEPTUAL=False`` (becomes
+    ``disable_deep_perceptual=True`` in the deep_config dict at
+    ``src/giflab/metrics.py:2630-2632``, which forces the LPIPS validator
+    into fallback mode — no torch model load).
+
+    Note: in the current sequential-metrics path, the deep_perceptual
+    function is called unconditionally (gated only by composite-quality
+    heuristics), so we can't assert ``assert_not_called()``. Instead we
+    assert the disable flag arrives correctly in the config dict.
+    """
+    ref, cand = reference_and_candidate
+
+    # Case A: LPIPS not requested — disable flag must be True.
+    with patch(
+        "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics",
+        return_value=_FAKE_DEEP_PERCEPTUAL_RESULT,
+    ) as mock_deep:
+        measure(ref, cand, metrics=["ssim"])
+
+    assert mock_deep.called
+    # Config dict is the 3rd positional or `config` kwarg
+    args, kwargs = mock_deep.call_args
+    deep_config = args[2] if len(args) > 2 else kwargs.get("config", {})
+    assert (
+        deep_config.get("disable_deep_perceptual") is True
+    ), f"LPIPS not requested → disable flag must be True; got config={deep_config}"
+
+    # Case B: LPIPS requested — disable flag must be False.
+    with patch(
+        "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics",
+        return_value=_FAKE_DEEP_PERCEPTUAL_RESULT,
+    ) as mock_deep:
+        measure(ref, cand, metrics=["lpips"])
+
+    args, kwargs = mock_deep.call_args
+    deep_config = args[2] if len(args) > 2 else kwargs.get("config", {})
+    assert (
+        deep_config.get("disable_deep_perceptual") is False
+    ), f"LPIPS requested → disable flag must be False; got config={deep_config}"
