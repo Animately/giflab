@@ -136,6 +136,15 @@ Both result types are `@dataclass(frozen=True)`. Hash-equal results compare equa
 
 Seven optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`, `lpips`, `gmsd`, `fsim`, `chist`. Each field is populated iff that metric was requested in the call; otherwise `None`.
 
+**Units and ranges**:
+
+| Field | Range | Notes |
+|---|---|---|
+| `ssim`, `ms_ssim`, `fsim`, `chist` | `[0.0, 1.0]` | Higher is better. |
+| `gmsd` | `[0.0, 1.0]` | Lower is better. |
+| `psnr` | `[0.0, 50.0]` dB | Higher is better. Values are reported in decibels; `50.0` is the cap (the internal `PSNR_MAX_DB` setting) and represents "effectively identical" candidates. |
+| `lpips` | `[0.0, 1.0]` | Lower is better. Perceptual distance per the LPIPS model; this is the mean across frames. |
+
 ---
 
 ## Supported sets

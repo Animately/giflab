@@ -239,8 +239,9 @@ def measure(
         UnknownMetricError: an element of ``metrics`` is not in
             :data:`SUPPORTED_METRICS`. Raised before any computation.
         FileNotFoundError: either path does not exist.
-        GifLabError: a requested metric's computation failed; the offending
-            metric name is on ``error.context["metric"]``.
+        GifLabError: a requested metric's computation failed. The requested
+            metric set is on ``error.context["metrics"]``. If a single metric
+            was identified as the failure, ``error.context["metric"]`` is set.
     """
     if not metrics:
         raise ValueError("measure() requires at least one metric in `metrics`")
@@ -287,13 +288,41 @@ def measure(
             context={"metrics": sorted(requested)},
         ) from exc
 
+    # Public metric identifier → internal result-dict key. Six metrics flow
+    # through _aggregate_metric() and end up keyed by their bare name; LPIPS
+    # is the exception — its computation surfaces lpips_quality_{mean,p95,max}
+    # and we expose the mean as the public scalar.
+    public_to_internal = {
+        "ssim": "ssim",
+        "ms_ssim": "ms_ssim",
+        "psnr": "psnr",
+        "lpips": "lpips_quality_mean",
+        "gmsd": "gmsd",
+        "fsim": "fsim",
+        "chist": "chist",
+    }
+
     def _project(name: str) -> float | None:
         if name not in requested:
             return None
-        value = full.get(name)
+        value = full.get(public_to_internal[name])
         if value is None:
-            return None
-        return float(value)
+            # Requested metric resolved to None — internal key drift or a
+            # silently failed metric. Surface loudly rather than return a
+            # field the caller can't distinguish from "not requested".
+            raise GifLabError(
+                f"measure() requested metric {name!r} but the internal "
+                f"computation did not produce a value (key "
+                f"{public_to_internal[name]!r} missing from result dict)",
+                context={"metric": name, "metrics": sorted(requested)},
+            )
+        scalar = float(value)
+        # PSNR is normalized to [0, 1] internally (frame_psnr / PSNR_MAX_DB).
+        # Denormalize back to dB for the public surface — dB is the industry
+        # convention and what consumers expect when reading `result.psnr`.
+        if name == "psnr":
+            scalar *= float(config.PSNR_MAX_DB)
+        return scalar
 
     return MeasureResult(
         ssim=_project("ssim"),

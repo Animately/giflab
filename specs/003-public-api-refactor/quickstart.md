@@ -42,7 +42,7 @@ result = compress(
     input_path=Path("samples/source.gif"),
     output_path=Path("out/compressed.gif"),
     engine="gifsicle",
-    params={"colors": 64},
+    params={"lossy_level": 40},
 )
 
 print(f"Wrote {result.output_bytes} bytes in {result.render_ms} ms")

@@ -107,7 +107,7 @@ def measure(
 | `UnknownMetricError` | Any element of `metrics` not in `SUPPORTED_METRICS`. Raised **before** any computation. |
 | `ValueError` | `metrics` is empty. |
 | `FileNotFoundError` | Either path does not exist. |
-| Subclass of `GifLabError` | Computation failure for any requested metric (per the all-or-nothing semantics from spec.md Edge Cases). The exception names the failing metric in `context["metric"]`. |
+| Subclass of `GifLabError` | Computation failure for any requested metric (per the all-or-nothing semantics from spec.md Edge Cases). The requested metric set is on `context["metrics"]`; when a single metric can be attributed as the failure, `context["metric"]` is also set. |
 
 **Cost**: Requesting only cheap metrics (`ssim`, `psnr`, `chist`) is fast. Requesting `lpips` triggers a PyTorch model load on first call within a process and dominates cost. Subsequent calls within the same process reuse the cached model.
 

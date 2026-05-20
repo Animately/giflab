@@ -67,6 +67,11 @@ def test_measure_ssim_and_psnr(reference_and_candidate: tuple[Path, Path]) -> No
     assert result.ssim is not None
     assert result.psnr is not None
     assert result.ms_ssim is None
+    # PSNR is reported in dB. Real-world values are well above 1.0 (a 5dB
+    # PSNR would already be a destroyed image). Guards against silent
+    # regressions to the old normalized-[0,1] behaviour.
+    assert result.psnr > 1.0
+    assert result.psnr <= 50.0  # PSNR_MAX_DB cap
 
 
 def test_measure_chist(reference_and_candidate: tuple[Path, Path]) -> None:

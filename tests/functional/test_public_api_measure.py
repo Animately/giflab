@@ -23,17 +23,36 @@ from giflab import (
 def _fake_full_result() -> dict[str, float]:
     """A pretend ``calculate_comprehensive_metrics`` result dict.
 
-    All 7 public metrics present with distinguishable values.
+    Mirrors the real internal-key shape so projection bugs (LPIPS keyed as
+    ``lpips_quality_mean`` not ``lpips``, PSNR stored normalized to [0,1]
+    not in dB) cannot be hidden by mock convenience.
+
+    Expected projection through ``measure()``:
+      - ssim/ms_ssim/gmsd/fsim/chist pass through unchanged
+      - psnr is denormalized: 0.6 * PSNR_MAX_DB(50.0) = 30.0 dB
+      - lpips reads lpips_quality_mean = 0.08
     """
     return {
         "ssim": 0.91,
         "ms_ssim": 0.92,
-        "psnr": 30.5,
-        "lpips": 0.08,
+        "psnr": 0.6,  # normalized internally; public surface denormalizes to dB
+        "lpips_quality_mean": 0.08,  # internal key — not bare "lpips"
         "gmsd": 0.05,
         "fsim": 0.93,
         "chist": 0.97,
     }
+
+
+# Expected public-API scalars after projection of _fake_full_result().
+_EXPECTED_PUBLIC = {
+    "ssim": 0.91,
+    "ms_ssim": 0.92,
+    "psnr": 30.0,  # 0.6 * PSNR_MAX_DB (50.0)
+    "lpips": 0.08,
+    "gmsd": 0.05,
+    "fsim": 0.93,
+    "chist": 0.97,
+}
 
 
 @pytest.fixture
@@ -74,9 +93,9 @@ def test_measure_multi_metric_subset(two_gifs: tuple[Path, Path]) -> None:
     ):
         result = measure(ref, cand, metrics=["ssim", "ms_ssim", "psnr"])
 
-    assert result.ssim == 0.91
-    assert result.ms_ssim == 0.92
-    assert result.psnr == 30.5
+    assert result.ssim == _EXPECTED_PUBLIC["ssim"]
+    assert result.ms_ssim == _EXPECTED_PUBLIC["ms_ssim"]
+    assert result.psnr == _EXPECTED_PUBLIC["psnr"]  # in dB, not normalized
     assert result.lpips is None
     assert result.gmsd is None
     assert result.fsim is None
@@ -92,8 +111,10 @@ def test_measure_all_metrics(two_gifs: tuple[Path, Path]) -> None:
     ):
         result = measure(ref, cand, metrics=list(SUPPORTED_METRICS))
 
-    for metric, expected in _fake_full_result().items():
-        assert getattr(result, metric) == expected
+    for metric, expected in _EXPECTED_PUBLIC.items():
+        assert (
+            getattr(result, metric) == expected
+        ), f"public field {metric!r} expected {expected}, got {getattr(result, metric)}"
 
 
 def test_measure_unknown_metric_raises_before_computation(
@@ -129,8 +150,8 @@ def test_measure_duplicate_metric_names_tolerated(two_gifs: tuple[Path, Path]) -
     ):
         result = measure(ref, cand, metrics=["ssim", "ssim", "psnr"])
 
-    assert result.ssim == 0.91
-    assert result.psnr == 30.5
+    assert result.ssim == _EXPECTED_PUBLIC["ssim"]
+    assert result.psnr == _EXPECTED_PUBLIC["psnr"]
     assert result.ms_ssim is None
 
 
@@ -194,3 +215,68 @@ def test_measure_enables_lpips_when_requested(two_gifs: tuple[Path, Path]) -> No
     config = kwargs.get("config")
     assert config is not None
     assert config.ENABLE_DEEP_PERCEPTUAL is True
+
+
+def test_measure_lpips_reads_quality_mean_key(two_gifs: tuple[Path, Path]) -> None:
+    """Regression: LPIPS must read the internal ``lpips_quality_mean`` key.
+
+    The bare ``lpips`` key is never set by ``calculate_comprehensive_metrics``
+    — the deep-perceptual branch surfaces ``lpips_quality_{mean,p95,max}``.
+    Without the public→internal mapping, ``measure(metrics=["lpips"])`` would
+    silently return ``MeasureResult(lpips=None, ...)``.
+    """
+    ref, cand = two_gifs
+    # Internal-shape result that has NO bare "lpips" key — only the real ones.
+    internal_result = {
+        "ssim": 0.91,
+        "lpips_quality_mean": 0.073,
+        "lpips_quality_p95": 0.18,
+        "lpips_quality_max": 0.22,
+    }
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=internal_result,
+    ):
+        result = measure(ref, cand, metrics=["lpips"])
+
+    assert result.lpips == 0.073
+
+
+def test_measure_raises_when_internal_key_missing(two_gifs: tuple[Path, Path]) -> None:
+    """If a requested metric resolves to None after projection, raise.
+
+    Surfaces silent key-drift (e.g. internal metrics layer renames a key)
+    rather than returning a None field the caller can't distinguish from
+    "not requested".
+    """
+    ref, cand = two_gifs
+    # Result dict missing the gmsd key entirely.
+    incomplete = {"ssim": 0.91}
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=incomplete,
+    ):
+        with pytest.raises(Exception) as exc_info:
+            measure(ref, cand, metrics=["gmsd"])
+
+    assert "gmsd" in str(exc_info.value)
+
+
+def test_measure_psnr_returned_in_decibels(two_gifs: tuple[Path, Path]) -> None:
+    """Regression: PSNR must be returned in dB, not normalized [0,1].
+
+    Internally PSNR is divided by PSNR_MAX_DB (default 50.0). The public
+    surface promises dB units (industry convention), so the projection
+    multiplies it back.
+    """
+    ref, cand = two_gifs
+    # Internal normalized value 0.7 → 35.0 dB on the public surface.
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value={"psnr": 0.7},
+    ):
+        result = measure(ref, cand, metrics=["psnr"])
+
+    assert result.psnr == 35.0  # 0.7 * 50.0
+    # And a real consumer's sanity check — PSNR in dB is usually > 1.
+    assert result.psnr > 1.0
