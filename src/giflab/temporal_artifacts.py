@@ -489,23 +489,19 @@ class TemporalArtifactDetector:
             "lpips_frame_count": len(frames),
         }
 
-    def _calculate_mse_temporal_fallback(
-        self, frames: list[np.ndarray]
-    ) -> TemporalMetrics:
-        """Enhanced MSE-based temporal calculation when LPIPS is unavailable.
+    def _compute_mse_pair_scores(self, frames: list[np.ndarray]) -> list[float]:
+        """Compute perceptually-weighted MSE scores between consecutive frame pairs.
 
-        Uses perceptually-weighted MSE that better approximates LPIPS behavior
-        by emphasizing luminance differences and edge regions.
+        Returns normalized scores roughly in the LPIPS [0, 1] range so they can
+        substitute for LPIPS scores when LPIPS is unavailable.
         """
-        mse_scores = []
+        mse_scores: list[float] = []
 
         for i in range(len(frames) - 1):
             frame1 = frames[i].astype(np.float32) / 255.0
             frame2 = frames[i + 1].astype(np.float32) / 255.0
 
-            # Convert to LAB color space for perceptually uniform differences
             try:
-                # Convert RGB to LAB for perceptual weighting
                 lab1 = (
                     cv2.cvtColor(
                         (frame1 * 255).astype(np.uint8), cv2.COLOR_RGB2LAB
@@ -519,7 +515,6 @@ class TemporalArtifactDetector:
                     / 255.0
                 )
 
-                # Weight luminance (L) channel more heavily (matches perceptual importance)
                 l_diff = (lab1[:, :, 0] - lab2[:, :, 0]) ** 2
                 a_diff = (lab1[:, :, 1] - lab2[:, :, 1]) ** 2
                 b_diff = (lab1[:, :, 2] - lab2[:, :, 2]) ** 2
@@ -527,7 +522,6 @@ class TemporalArtifactDetector:
                 # Perceptual weighting: L=70%, a=15%, b=15%
                 perceptual_mse = 0.7 * l_diff + 0.15 * a_diff + 0.15 * b_diff
 
-                # Add edge-sensitive weighting
                 gray1 = (
                     cv2.cvtColor(
                         (frame1 * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY
@@ -549,13 +543,19 @@ class TemporalArtifactDetector:
 
             except (cv2.error, ValueError, TypeError) as e:
                 logger.debug(f"LAB conversion failed, using RGB MSE: {e}")
-                # Fallback to RGB MSE if LAB conversion fails
                 mse = float(np.mean((frame1 - frame2) ** 2))
 
-            # Normalize to approximate LPIPS range [0, 1] with better scaling
-            # LPIPS typically ranges 0-0.8 for natural images, so adjust scaling
-            normalized_mse = min(mse * 8.0, 1.0)  # More aggressive scaling than before
+            # Normalize to approximate LPIPS range [0, 1]
+            normalized_mse = min(mse * 8.0, 1.0)
             mse_scores.append(normalized_mse)
+
+        return mse_scores
+
+    def _calculate_mse_temporal_fallback(
+        self, frames: list[np.ndarray]
+    ) -> TemporalMetrics:
+        """Enhanced MSE-based temporal calculation when LPIPS is unavailable."""
+        mse_scores = self._compute_mse_pair_scores(frames)
 
         if not mse_scores:
             return {
@@ -593,13 +593,18 @@ class TemporalArtifactDetector:
 
         # Get individual scores for flicker analysis
         # We need the raw scores, so we'll get them from our batch processor
-        lpips_scores = []
+        lpips_scores: list[float] = []
         if len(frames) >= 2:
             try:
                 lpips_scores = self._process_lpips_batch(frames, batch_size)
             except (RuntimeError, AttributeError, TypeError, ValueError) as e:
                 logger.error(f"Error getting LPIPS scores for flicker analysis: {e}")
-                # Use empty scores, will result in zero flicker metrics
+
+            # Fall back to MSE-based per-pair scores when LPIPS is unavailable so
+            # flicker excess still reflects per-frame perceptual differences
+            # rather than collapsing to zero.
+            if not lpips_scores:
+                lpips_scores = self._compute_mse_pair_scores(frames)
 
         # Analyze flicker patterns
         flicker_excess = 0.0

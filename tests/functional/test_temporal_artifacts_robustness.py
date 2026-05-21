@@ -767,10 +767,13 @@ class TestTemporalArtifactErrorHandling:
 
     def test_lpips_model_loading_failure(self):
         """Test handling of LPIPS model loading failures."""
-        with patch("giflab.temporal_artifacts.lpips.LPIPS") as mock_lpips:
-            # Mock LPIPS to raise exception during loading
-            mock_lpips.side_effect = RuntimeError("CUDA out of memory")
-
+        # Patch the cache helper that production actually calls so the test
+        # exercises the failure path regardless of whether the `lpips` package
+        # is importable in this environment.
+        with patch(
+            "giflab.temporal_artifacts.LPIPSModelCache.get_model",
+            side_effect=RuntimeError("CUDA out of memory"),
+        ):
             detector = TemporalArtifactDetector()
             frames = [np.zeros((32, 32, 3), dtype=np.uint8) for _ in range(3)]
 
