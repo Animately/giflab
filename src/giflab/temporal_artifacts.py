@@ -870,6 +870,27 @@ class TemporalArtifactDetector:
         }
 
 
+def zero_temporal_metrics(frame_count: int) -> dict[str, float]:
+    """Canonical zero-valued temporal metrics dict.
+
+    Single source of truth for the shape callers see when temporal artifact
+    computation is skipped (flag disabled, empty frame list, ImportError on
+    the module, or any other fallback path). All callers that need a fallback
+    must use this — drifting shapes broke downstream consumers historically.
+    """
+    return {
+        "flicker_excess": 0.0,
+        "flicker_frame_ratio": 0.0,
+        "flat_flicker_ratio": 0.0,
+        "flat_region_count": 0.0,
+        "temporal_pumping_score": 0.0,
+        "quality_oscillation_frequency": 0.0,
+        "lpips_t_mean": 0.0,
+        "lpips_t_p95": 0.0,
+        "frame_count": float(frame_count),
+    }
+
+
 def calculate_enhanced_temporal_metrics(
     original_frames: list[np.ndarray],
     compressed_frames: list[np.ndarray],
@@ -906,13 +927,7 @@ def calculate_enhanced_temporal_metrics(
     # Ensure frames are aligned
     min_frame_count = min(len(original_frames), len(compressed_frames))
     if min_frame_count == 0:
-        return {
-            "flicker_excess": 0.0,
-            "flat_flicker_ratio": 0.0,
-            "temporal_pumping_score": 0.0,
-            "lpips_t_mean": 0.0,
-            "lpips_t_p95": 0.0,
-        }
+        return zero_temporal_metrics(min_frame_count)
 
     original_frames = original_frames[:min_frame_count]
     compressed_frames = compressed_frames[:min_frame_count]

@@ -2511,19 +2511,9 @@ def calculate_comprehensive_metrics_from_frames(
         # Enhanced temporal artifact metrics. Gated on ENABLE_TEMPORAL_ARTIFACTS
         # so callers that don't need temporal computation (e.g. the public
         # measure() API with only cheap metrics) skip the LPIPS model load.
-        def _zero_temporal_metrics() -> dict[str, float]:
-            return {
-                "flicker_excess": 0.0,
-                "flicker_frame_ratio": 0.0,
-                "flat_flicker_ratio": 0.0,
-                "flat_region_count": 0,
-                "temporal_pumping_score": 0.0,
-                "quality_oscillation_frequency": 0.0,
-                "lpips_t_mean": 0.0,
-                "lpips_t_p95": 0.0,
-                "frame_count": len(compressed_frames_resized),
-            }
+        from .temporal_artifacts import zero_temporal_metrics
 
+        _temporal_fallback = zero_temporal_metrics(len(compressed_frames_resized))
         enhanced_temporal_metrics: dict[str, float] = {}
         if config.ENABLE_TEMPORAL_ARTIFACTS:
             try:
@@ -2536,12 +2526,12 @@ def calculate_comprehensive_metrics_from_frames(
                 logger.warning(
                     f"Enhanced temporal artifacts module not available: {e}"
                 )
-                enhanced_temporal_metrics = _zero_temporal_metrics()
+                enhanced_temporal_metrics = dict(_temporal_fallback)
             except Exception as e:
                 logger.error(f"Enhanced temporal artifacts calculation failed: {e}")
-                enhanced_temporal_metrics = _zero_temporal_metrics()
+                enhanced_temporal_metrics = dict(_temporal_fallback)
         else:
-            enhanced_temporal_metrics = _zero_temporal_metrics()
+            enhanced_temporal_metrics = dict(_temporal_fallback)
 
         # Calculate enhanced gradient and color artifact metrics (Task 1.3 & 1.4)
         gradient_color_metrics = {}
