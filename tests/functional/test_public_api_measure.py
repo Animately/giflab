@@ -226,6 +226,50 @@ def test_measure_enables_lpips_when_requested(two_gifs: tuple[Path, Path]) -> No
     assert config.ENABLE_DEEP_PERCEPTUAL is True
 
 
+def test_measure_disables_temporal_artifacts_for_cheap_metrics(
+    two_gifs: tuple[Path, Path],
+) -> None:
+    """FR-009: cheap metrics must not load LPIPS via the temporal_artifacts path.
+
+    temporal_artifacts.calculate_enhanced_temporal_metrics internally loads
+    LPIPS (for lpips_t_*), so its config gate must be False when no requested
+    metric needs it. v0.3.0 surface contains no temporal metrics, so this
+    should hold for every individual SUPPORTED_METRIC and any combination.
+    """
+    ref, cand = two_gifs
+
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=_fake_full_result(),
+    ) as mock_calc:
+        measure(ref, cand, metrics=["ssim"])
+
+    _, kwargs = mock_calc.call_args
+    config = kwargs.get("config")
+    assert config is not None
+    assert config.ENABLE_TEMPORAL_ARTIFACTS is False
+
+
+@pytest.mark.parametrize("metric", list(SUPPORTED_METRICS))
+def test_measure_disables_temporal_artifacts_for_every_public_metric(
+    two_gifs: tuple[Path, Path], metric: str
+) -> None:
+    """No v0.3.0 public metric should trigger the temporal_artifacts pipeline."""
+    ref, cand = two_gifs
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=_fake_full_result(),
+    ) as mock_calc:
+        measure(ref, cand, metrics=[metric])
+
+    _, kwargs = mock_calc.call_args
+    config = kwargs.get("config")
+    assert config is not None
+    assert config.ENABLE_TEMPORAL_ARTIFACTS is False, (
+        f"Requesting {metric!r} unexpectedly enabled temporal_artifacts"
+    )
+
+
 def test_measure_lpips_reads_quality_mean_key(two_gifs: tuple[Path, Path]) -> None:
     """Regression: LPIPS must read the internal ``lpips_quality_mean`` key.
 

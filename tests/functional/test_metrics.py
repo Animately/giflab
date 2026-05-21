@@ -786,3 +786,97 @@ class TestProcessMetricsIntegration:
         assert processed["composite_quality"] == 0.0
         # And efficiency should also be 0.0 (geometric mean with 0 quality)
         assert processed["efficiency"] == 0.0
+
+
+class TestTemporalArtifactsGate:
+    """Tests for the ENABLE_TEMPORAL_ARTIFACTS gate in the sequential path.
+
+    The sequential path (force_all_metrics=True, which is what the public
+    measure() API uses) used to unconditionally call
+    calculate_enhanced_temporal_metrics — and that function loads LPIPS. The
+    gate added for FR-009 must short-circuit when the flag is False.
+    """
+
+    def _frames(self):
+        # Deterministic 24x24 RGB, 3 frames — large enough that downstream
+        # metrics (SSIM/MS-SSIM/etc) don't choke on degenerate inputs, small
+        # enough to keep the test fast.
+        rng = np.random.default_rng(42)
+        a = [
+            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
+        ]
+        b = [
+            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
+        ]
+        return a, b
+
+    def _isolated_config(self, *, temporal: bool) -> MetricsConfig:
+        # Disable other heavy/binary-dependent branches so the test only
+        # measures whether the temporal gate fires. SSIMULACRA2 needs an
+        # external binary that isn't guaranteed in CI; DEEP_PERCEPTUAL would
+        # itself load LPIPS and pollute the call count we're asserting on.
+        config = MetricsConfig()
+        config.ENABLE_TEMPORAL_ARTIFACTS = temporal
+        config.ENABLE_DEEP_PERCEPTUAL = False
+        config.ENABLE_SSIMULACRA2 = False
+        return config
+
+    def test_gate_disabled_skips_temporal_artifacts(self, monkeypatch):
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001 — match real signature loosely
+            calls.append(1)
+            return {}
+
+        monkeypatch.setattr(
+            "giflab.temporal_artifacts.calculate_enhanced_temporal_metrics",
+            _spy,
+        )
+
+        a, b = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._isolated_config(temporal=False), force_all_metrics=True
+        )
+
+        assert calls == [], (
+            "ENABLE_TEMPORAL_ARTIFACTS=False did not short-circuit the call"
+        )
+        # The result must still expose zeroed temporal keys so downstream
+        # consumers reading `result["flicker_excess"]` don't KeyError.
+        assert result.get("flicker_excess") == 0.0
+        assert result.get("lpips_t_mean") == 0.0
+
+    def test_gate_enabled_calls_temporal_artifacts(self, monkeypatch):
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001
+            calls.append(1)
+            return {
+                "flicker_excess": 0.01,
+                "flicker_frame_ratio": 0.0,
+                "flat_flicker_ratio": 0.0,
+                "flat_region_count": 0,
+                "temporal_pumping_score": 0.0,
+                "quality_oscillation_frequency": 0.0,
+                "lpips_t_mean": 0.0,
+                "lpips_t_p95": 0.0,
+                "frame_count": 3,
+            }
+
+        monkeypatch.setattr(
+            "giflab.temporal_artifacts.calculate_enhanced_temporal_metrics",
+            _spy,
+        )
+
+        a, b = self._frames()
+        calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._isolated_config(temporal=True), force_all_metrics=True
+        )
+
+        assert calls == [1], (
+            "ENABLE_TEMPORAL_ARTIFACTS=True did not invoke the temporal pipeline"
+        )

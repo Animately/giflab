@@ -92,6 +92,13 @@ _PUBLIC_TO_INTERNAL_METRIC_KEY: dict[str, str] = {
     "chist": "chist",
 }
 
+# Public metrics that require the temporal_artifacts pipeline (which loads
+# LPIPS internally for lpips_t_* computation). Empty in v0.3.0 — none of the
+# seven SUPPORTED_METRICS need it. When a future version exposes a temporal
+# metric (e.g. "temporal_consistency"), list it here so measure() flips
+# ENABLE_TEMPORAL_ARTIFACTS on automatically.
+_TEMPORAL_NEEDING_METRICS: frozenset[str] = frozenset()
+
 
 # ---------------------------------------------------------------------------
 # Engine dispatch
@@ -285,9 +292,12 @@ def measure(
     # model). The other six (ssim, ms_ssim, psnr, gmsd, fsim, chist) are
     # computed in a shared pass over frames. Gate LPIPS specifically; the
     # cheap metrics are always populated by the underlying call and we project
-    # only what the caller requested.
+    # only what the caller requested. The temporal_artifacts pipeline also
+    # loads LPIPS (for lpips_t_*), so gate it too — no v0.3.0 public metric
+    # needs it (see _TEMPORAL_NEEDING_METRICS).
     config = MetricsConfig()
     config.ENABLE_DEEP_PERCEPTUAL = "lpips" in requested
+    config.ENABLE_TEMPORAL_ARTIFACTS = bool(_TEMPORAL_NEEDING_METRICS & requested)
 
     try:
         full = calculate_comprehensive_metrics(

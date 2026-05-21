@@ -1767,7 +1767,7 @@ def calculate_selected_metrics(
             logger.warning(f"SSIMULACRA2 calculation failed: {e}")
             results["ssimulacra2_mean"] = 50.0
 
-    if selected_metrics.get("temporal_artifacts", False):
+    if selected_metrics.get("temporal_artifacts", False) and config.ENABLE_TEMPORAL_ARTIFACTS:
         try:
             from .temporal_artifacts import calculate_enhanced_temporal_metrics
 
@@ -2506,40 +2506,40 @@ def calculate_comprehensive_metrics_from_frames(
         )
         disposal_artifacts_delta = abs(disposal_artifacts_post - disposal_artifacts_pre)
 
-        # Calculate enhanced temporal artifact metrics (Task 1.2)
-        enhanced_temporal_metrics = {}
-        try:
-            from .temporal_artifacts import calculate_enhanced_temporal_metrics
+        # Enhanced temporal artifact metrics. Gated on ENABLE_TEMPORAL_ARTIFACTS
+        # so callers that don't need temporal computation (e.g. the public
+        # measure() API with only cheap metrics) skip the LPIPS model load.
+        def _zero_temporal_metrics() -> dict[str, float]:
+            return {
+                "flicker_excess": 0.0,
+                "flicker_frame_ratio": 0.0,
+                "flat_flicker_ratio": 0.0,
+                "flat_region_count": 0,
+                "temporal_pumping_score": 0.0,
+                "quality_oscillation_frequency": 0.0,
+                "lpips_t_mean": 0.0,
+                "lpips_t_p95": 0.0,
+                "frame_count": len(compressed_frames_resized),
+            }
 
-            enhanced_temporal_metrics = calculate_enhanced_temporal_metrics(
-                original_frames_resized, compressed_frames_resized, device=None
-            )
-        except ImportError as e:
-            logger.warning(f"Enhanced temporal artifacts module not available: {e}")
-            enhanced_temporal_metrics = {
-                "flicker_excess": 0.0,
-                "flicker_frame_ratio": 0.0,
-                "flat_flicker_ratio": 0.0,
-                "flat_region_count": 0,
-                "temporal_pumping_score": 0.0,
-                "quality_oscillation_frequency": 0.0,
-                "lpips_t_mean": 0.0,
-                "lpips_t_p95": 0.0,
-                "frame_count": len(compressed_frames_resized),
-            }
-        except Exception as e:
-            logger.error(f"Enhanced temporal artifacts calculation failed: {e}")
-            enhanced_temporal_metrics = {
-                "flicker_excess": 0.0,
-                "flicker_frame_ratio": 0.0,
-                "flat_flicker_ratio": 0.0,
-                "flat_region_count": 0,
-                "temporal_pumping_score": 0.0,
-                "quality_oscillation_frequency": 0.0,
-                "lpips_t_mean": 0.0,
-                "lpips_t_p95": 0.0,
-                "frame_count": len(compressed_frames_resized),
-            }
+        enhanced_temporal_metrics: dict[str, float] = {}
+        if config.ENABLE_TEMPORAL_ARTIFACTS:
+            try:
+                from .temporal_artifacts import calculate_enhanced_temporal_metrics
+
+                enhanced_temporal_metrics = calculate_enhanced_temporal_metrics(
+                    original_frames_resized, compressed_frames_resized, device=None
+                )
+            except ImportError as e:
+                logger.warning(
+                    f"Enhanced temporal artifacts module not available: {e}"
+                )
+                enhanced_temporal_metrics = _zero_temporal_metrics()
+            except Exception as e:
+                logger.error(f"Enhanced temporal artifacts calculation failed: {e}")
+                enhanced_temporal_metrics = _zero_temporal_metrics()
+        else:
+            enhanced_temporal_metrics = _zero_temporal_metrics()
 
         # Calculate enhanced gradient and color artifact metrics (Task 1.3 & 1.4)
         gradient_color_metrics = {}

@@ -10,6 +10,7 @@ from giflab.config import (
     DEFAULT_PATH_CONFIG,
     CompressionConfig,
     EngineConfig,
+    MetricsConfig,
     PathConfig,
 )
 
@@ -194,3 +195,21 @@ def test_default_configurations():
     assert DEFAULT_ENGINE_CONFIG.FFMPEG_PATH == "ffmpeg"
     assert DEFAULT_ENGINE_CONFIG.FFPROBE_PATH == "ffprobe"
     assert DEFAULT_ENGINE_CONFIG.GIFSKI_PATH == "gifski"
+
+
+class TestMetricsConfig:
+    """Tests for MetricsConfig defaults."""
+
+    def test_temporal_artifacts_enabled_by_default(self):
+        """Dataset pipeline default must keep temporal_artifacts on.
+
+        The public measure() API disables this per-call when no requested
+        metric needs it (FR-009). The default-True invariant is what protects
+        existing dataset-generation runs from silently dropping temporal
+        metrics after the gate was introduced.
+        """
+        assert MetricsConfig().ENABLE_TEMPORAL_ARTIFACTS is True
+
+    def test_deep_perceptual_enabled_by_default(self):
+        """Sibling invariant — same reasoning for the existing LPIPS gate."""
+        assert MetricsConfig().ENABLE_DEEP_PERCEPTUAL is True
