@@ -942,3 +942,49 @@ class TestDeepPerceptualGate:
         assert result.get("lpips_quality_mean") == 0.5
         assert result.get("lpips_quality_p95") == 0.5
         assert result.get("lpips_quality_max") == 0.5
+
+
+class TestSsimulacra2Gate:
+    """Parity guard for the ENABLE_SSIMULACRA2 gate across both code paths.
+
+    The sequential path was already gated correctly. The conditional path
+    (calculate_selected_metrics, used when force_all_metrics=False) checked
+    only selected_metrics["ssimulacra2"] — meaning a caller who populated
+    selected_metrics manually without honouring config.ENABLE_SSIMULACRA2
+    could still trigger an external binary call. This test pins down the
+    fix that brought it into parity with deep_perceptual / temporal_artifacts.
+    """
+
+    def _frames(self):
+        rng = np.random.default_rng(11)
+        return (
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+        )
+
+    def test_conditional_path_skips_when_flag_disabled(self, monkeypatch):
+        """selected_metrics['ssimulacra2']=True must NOT call ssimulacra2 when flag off."""
+        from giflab.metrics import calculate_selected_metrics
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001
+            calls.append(1)
+            return {"ssimulacra2_mean": 80.0}
+
+        monkeypatch.setattr(
+            "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics",
+            _spy,
+        )
+
+        config = MetricsConfig()
+        config.ENABLE_SSIMULACRA2 = False
+
+        a, b = self._frames()
+        # Force the conditional path to ask for ssimulacra2; the gate must veto.
+        selected = {"ssimulacra2": True}
+        calculate_selected_metrics(a, b, selected, config=config)
+
+        assert calls == [], (
+            "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
+        )
