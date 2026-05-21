@@ -1736,7 +1736,9 @@ def calculate_selected_metrics(
     # Calculate expensive deep metrics conditionally
     results: dict[str, Any] = {}
 
-    if selected_metrics.get("lpips", False):
+    if selected_metrics.get("lpips", False) and getattr(
+        config, "ENABLE_DEEP_PERCEPTUAL", True
+    ):
         try:
             from .deep_perceptual_metrics import (
                 calculate_deep_perceptual_quality_metrics,
@@ -2607,9 +2609,14 @@ def calculate_comprehensive_metrics_from_frames(
             "deep_perceptual_device": "fallback",
         }
 
-        # Check if deep perceptual metrics should be calculated
-        # We'll calculate conditional logic after we have the initial composite quality
-        should_calculate_deep_perceptual = True  # Initially calculate for all
+        # Check if deep perceptual metrics should be calculated. Honour the
+        # ENABLE_DEEP_PERCEPTUAL flag at the call site so callers opting out
+        # (e.g. the public measure() API with no `lpips` in requested) get the
+        # zero-valued fallback without the misleading "No LPIPS scores
+        # obtained" warning that fires inside the disabled-LPIPS code path.
+        should_calculate_deep_perceptual = getattr(
+            config, "ENABLE_DEEP_PERCEPTUAL", True
+        )
 
         if should_calculate_deep_perceptual:
             try:

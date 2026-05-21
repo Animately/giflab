@@ -880,3 +880,65 @@ class TestTemporalArtifactsGate:
         assert calls == [1], (
             "ENABLE_TEMPORAL_ARTIFACTS=True did not invoke the temporal pipeline"
         )
+
+
+class TestDeepPerceptualGate:
+    """Tests for the ENABLE_DEEP_PERCEPTUAL gate in the sequential path.
+
+    Before this gate was honoured at the call site, calculate_deep_perceptual_quality_metrics
+    was invoked unconditionally and then short-circuited via a flag inside the
+    deep_config dict — but its no-op path still logged a misleading
+    WARNING 'No LPIPS scores obtained, using fallback values'. The fix moves
+    the check up so the function is never called when disabled.
+    """
+
+    def _frames(self):
+        rng = np.random.default_rng(7)
+        return (
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)],
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)],
+        )
+
+    def _quiet_config(self) -> MetricsConfig:
+        config = MetricsConfig()
+        config.ENABLE_DEEP_PERCEPTUAL = False
+        config.ENABLE_TEMPORAL_ARTIFACTS = False
+        config.ENABLE_SSIMULACRA2 = False
+        return config
+
+    def test_disabled_does_not_warn_about_missing_lpips_scores(self, caplog):
+        """Opting out of deep_perceptual must not emit the failure-shaped warning."""
+        import logging
+
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        a, b = self._frames()
+        with caplog.at_level(logging.WARNING, logger="giflab.deep_perceptual_metrics"):
+            calculate_comprehensive_metrics_from_frames(
+                a, b, config=self._quiet_config(), force_all_metrics=True
+            )
+
+        offending = [
+            r for r in caplog.records
+            if r.name == "giflab.deep_perceptual_metrics"
+            and r.levelno >= logging.WARNING
+            and "No LPIPS scores obtained" in r.getMessage()
+        ]
+        assert offending == [], (
+            "ENABLE_DEEP_PERCEPTUAL=False still triggered the misleading warning: "
+            f"{[r.getMessage() for r in offending]}"
+        )
+
+    def test_disabled_returns_fallback_lpips_values(self):
+        """Disabled path must still surface the expected fallback keys."""
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        a, b = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._quiet_config(), force_all_metrics=True
+        )
+
+        # The fallback dict defined inline at the call site uses 0.5 sentinels.
+        assert result.get("lpips_quality_mean") == 0.5
+        assert result.get("lpips_quality_p95") == 0.5
+        assert result.get("lpips_quality_max") == 0.5
