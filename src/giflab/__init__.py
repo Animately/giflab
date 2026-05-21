@@ -2,7 +2,7 @@
 
 from typing import Any
 
-__version__: str = "0.1.0"
+__version__: str = "0.3.1"
 __author__: str = "GifLab Team"
 __email__: str = "team@giflab.example"
 

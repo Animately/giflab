@@ -171,19 +171,22 @@ test-workspace/debug/*/
 !test-workspace/temp/.gitkeep
 !test-workspace/README.md
 
-# Root directory testing pollution (should not exist, but just in case)
-debug_*
-final_*
-verification_*
-comprehensive_*
-deep_*
-gpu_*
-clean_test_*
+# Root directory testing pollution (should not exist, but just in case).
+# Anchored to repo root with a leading `/` — without it, e.g. `deep_*`
+# silently swallowed src/giflab/deep_perceptual_metrics.py, breaking the
+# v0.3.0 release for external consumers (see fix in v0.3.1).
+/debug_*
+/final_*
+/verification_*
+/comprehensive_*
+/deep_*
+/gpu_*
+/clean_test_*
 *_test.gif
 *test*.gif
-debug_*.png
-step*.gif
-pipeline_*.gif
+/debug_*.png
+/step*.gif
+/pipeline_*.gif
 *png_export*
 *png_frames*
 *png_sequence*
