@@ -8,6 +8,8 @@ import torch
 from giflab.temporal_artifacts import (
     TemporalArtifactDetector,
     calculate_enhanced_temporal_metrics,
+    cleanup_global_temporal_detector,
+    get_temporal_detector,
 )
 
 
@@ -620,3 +622,56 @@ class TestEnhancedTemporalMetrics:
         # Most temporal metrics should be 0 or very low for single frame
         assert metrics["flicker_excess"] <= 0.01
         assert metrics["temporal_pumping_score"] <= 0.01
+
+
+class TestGlobalDetectorReuse:
+    """The main entry point must share one detector across calls.
+
+    Previously calculate_enhanced_temporal_metrics constructed a fresh
+    TemporalArtifactDetector on every call. Even though LPIPSModelCache
+    correctly caches the underlying model, the per-call detector caused the
+    misleading 'LPIPS model initialized successfully' log on every measure()
+    call. Reusing the module-level singleton (mirroring
+    deep_perceptual_metrics._global_validator) fixes that.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_singleton(self):
+        # Isolate from any earlier-test detector state, both before and after.
+        cleanup_global_temporal_detector()
+        yield
+        cleanup_global_temporal_detector()
+
+    def test_calculate_enhanced_temporal_metrics_reuses_singleton(self):
+        """Two back-to-back calls must reuse the same detector instance."""
+        frames_a = [np.ones((24, 24, 3), dtype=np.uint8) * 100 for _ in range(2)]
+        frames_b = [np.ones((24, 24, 3), dtype=np.uint8) * 110 for _ in range(2)]
+
+        captured: list[TemporalArtifactDetector] = []
+
+        original = get_temporal_detector
+
+        def _capturing(*args, **kwargs):
+            instance = original(*args, **kwargs)
+            captured.append(instance)
+            return instance
+
+        with patch("giflab.temporal_artifacts.get_temporal_detector", _capturing):
+            calculate_enhanced_temporal_metrics(frames_a, frames_b, device="cpu")
+            calculate_enhanced_temporal_metrics(frames_a, frames_b, device="cpu")
+
+        assert len(captured) == 2
+        assert captured[0] is captured[1], (
+            "Singleton detector was not reused across calls"
+        )
+
+    def test_cleanup_global_temporal_detector_releases_instance(self):
+        # Force creation
+        first = get_temporal_detector(device="cpu")
+        assert first is not None
+
+        cleanup_global_temporal_detector()
+
+        # After cleanup, the next call must produce a fresh detector.
+        second = get_temporal_detector(device="cpu")
+        assert second is not first

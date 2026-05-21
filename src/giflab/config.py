@@ -110,6 +110,12 @@ class MetricsConfig:
     LPIPS_DOWNSCALE_SIZE: int = 512
     LPIPS_MAX_FRAMES: int = 100
 
+    # Temporal artifact metrics (flicker, pumping, lpips_t_*). Loads LPIPS via
+    # temporal_artifacts.calculate_enhanced_temporal_metrics. Default True
+    # preserves dataset-pipeline behaviour; the public measure() API sets this
+    # False when no requested metric needs temporal computation (FR-009).
+    ENABLE_TEMPORAL_ARTIFACTS: bool = True
+
     # SSIMULACRA2 configuration
     ENABLE_SSIMULACRA2: bool = True
     SSIMULACRA2_PATH: str = "/opt/homebrew/bin/ssimulacra2"
