@@ -24,21 +24,21 @@ from typing import Literal, Optional, Protocol, Union
 
 import numpy as np
 
-# Import memory monitoring from temporal artifacts
-from .temporal_artifacts import MemoryMonitor
-
-# Import model caching to prevent memory leaks
-from .model_cache import LPIPSModelCache, cleanup_model_cache
-
 # Import resized frame caching for optimization
 from .caching.resized_frame_cache import resize_frame_cached
 
 # Import lazy loading system
 from .lazy_imports import (
-    lazy_import,
-    is_torch_available,
     is_lpips_available,
+    is_torch_available,
+    lazy_import,
 )
+
+# Import model caching to prevent memory leaks
+from .model_cache import LPIPSModelCache, cleanup_model_cache
+
+# Import memory monitoring from temporal artifacts
+from .temporal_artifacts import MemoryMonitor
 
 # Lazy load heavy dependencies
 torch = lazy_import("torch")
