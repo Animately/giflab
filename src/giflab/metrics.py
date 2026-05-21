@@ -1757,7 +1757,9 @@ def calculate_selected_metrics(
             logger.warning(f"LPIPS calculation failed: {e}")
             results["lpips_quality_mean"] = 0.5
 
-    if selected_metrics.get("ssimulacra2", False):
+    if selected_metrics.get("ssimulacra2", False) and getattr(
+        config, "ENABLE_SSIMULACRA2", True
+    ):
         try:
             from .ssimulacra2_metrics import calculate_ssimulacra2_quality_metrics
 
