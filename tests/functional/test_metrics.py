@@ -786,3 +786,205 @@ class TestProcessMetricsIntegration:
         assert processed["composite_quality"] == 0.0
         # And efficiency should also be 0.0 (geometric mean with 0 quality)
         assert processed["efficiency"] == 0.0
+
+
+class TestTemporalArtifactsGate:
+    """Tests for the ENABLE_TEMPORAL_ARTIFACTS gate in the sequential path.
+
+    The sequential path (force_all_metrics=True, which is what the public
+    measure() API uses) used to unconditionally call
+    calculate_enhanced_temporal_metrics — and that function loads LPIPS. The
+    gate added for FR-009 must short-circuit when the flag is False.
+    """
+
+    def _frames(self):
+        # Deterministic 24x24 RGB, 3 frames — large enough that downstream
+        # metrics (SSIM/MS-SSIM/etc) don't choke on degenerate inputs, small
+        # enough to keep the test fast.
+        rng = np.random.default_rng(42)
+        a = [
+            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
+        ]
+        b = [
+            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
+        ]
+        return a, b
+
+    def _isolated_config(self, *, temporal: bool) -> MetricsConfig:
+        # Disable other heavy/binary-dependent branches so the test only
+        # measures whether the temporal gate fires. SSIMULACRA2 needs an
+        # external binary that isn't guaranteed in CI; DEEP_PERCEPTUAL would
+        # itself load LPIPS and pollute the call count we're asserting on.
+        config = MetricsConfig()
+        config.ENABLE_TEMPORAL_ARTIFACTS = temporal
+        config.ENABLE_DEEP_PERCEPTUAL = False
+        config.ENABLE_SSIMULACRA2 = False
+        return config
+
+    def test_gate_disabled_skips_temporal_artifacts(self, monkeypatch):
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001 — match real signature loosely
+            calls.append(1)
+            return {}
+
+        monkeypatch.setattr(
+            "giflab.temporal_artifacts.calculate_enhanced_temporal_metrics",
+            _spy,
+        )
+
+        a, b = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._isolated_config(temporal=False), force_all_metrics=True
+        )
+
+        assert calls == [], (
+            "ENABLE_TEMPORAL_ARTIFACTS=False did not short-circuit the call"
+        )
+        # The result must still expose zeroed temporal keys so downstream
+        # consumers reading `result["flicker_excess"]` don't KeyError.
+        assert result.get("flicker_excess") == 0.0
+        assert result.get("lpips_t_mean") == 0.0
+
+    def test_gate_enabled_calls_temporal_artifacts(self, monkeypatch):
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001
+            calls.append(1)
+            return {
+                "flicker_excess": 0.01,
+                "flicker_frame_ratio": 0.0,
+                "flat_flicker_ratio": 0.0,
+                "flat_region_count": 0,
+                "temporal_pumping_score": 0.0,
+                "quality_oscillation_frequency": 0.0,
+                "lpips_t_mean": 0.0,
+                "lpips_t_p95": 0.0,
+                "frame_count": 3,
+            }
+
+        monkeypatch.setattr(
+            "giflab.temporal_artifacts.calculate_enhanced_temporal_metrics",
+            _spy,
+        )
+
+        a, b = self._frames()
+        calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._isolated_config(temporal=True), force_all_metrics=True
+        )
+
+        assert calls == [1], (
+            "ENABLE_TEMPORAL_ARTIFACTS=True did not invoke the temporal pipeline"
+        )
+
+
+class TestDeepPerceptualGate:
+    """Tests for the ENABLE_DEEP_PERCEPTUAL gate in the sequential path.
+
+    Before this gate was honoured at the call site, calculate_deep_perceptual_quality_metrics
+    was invoked unconditionally and then short-circuited via a flag inside the
+    deep_config dict — but its no-op path still logged a misleading
+    WARNING 'No LPIPS scores obtained, using fallback values'. The fix moves
+    the check up so the function is never called when disabled.
+    """
+
+    def _frames(self):
+        rng = np.random.default_rng(7)
+        return (
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)],
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)],
+        )
+
+    def _quiet_config(self) -> MetricsConfig:
+        config = MetricsConfig()
+        config.ENABLE_DEEP_PERCEPTUAL = False
+        config.ENABLE_TEMPORAL_ARTIFACTS = False
+        config.ENABLE_SSIMULACRA2 = False
+        return config
+
+    def test_disabled_does_not_warn_about_missing_lpips_scores(self, caplog):
+        """Opting out of deep_perceptual must not emit the failure-shaped warning."""
+        import logging
+
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        a, b = self._frames()
+        with caplog.at_level(logging.WARNING, logger="giflab.deep_perceptual_metrics"):
+            calculate_comprehensive_metrics_from_frames(
+                a, b, config=self._quiet_config(), force_all_metrics=True
+            )
+
+        offending = [
+            r for r in caplog.records
+            if r.name == "giflab.deep_perceptual_metrics"
+            and r.levelno >= logging.WARNING
+            and "No LPIPS scores obtained" in r.getMessage()
+        ]
+        assert offending == [], (
+            "ENABLE_DEEP_PERCEPTUAL=False still triggered the misleading warning: "
+            f"{[r.getMessage() for r in offending]}"
+        )
+
+    def test_disabled_returns_fallback_lpips_values(self):
+        """Disabled path must still surface the expected fallback keys."""
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        a, b = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._quiet_config(), force_all_metrics=True
+        )
+
+        # The fallback dict defined inline at the call site uses 0.5 sentinels.
+        assert result.get("lpips_quality_mean") == 0.5
+        assert result.get("lpips_quality_p95") == 0.5
+        assert result.get("lpips_quality_max") == 0.5
+
+
+class TestSsimulacra2Gate:
+    """Parity guard for the ENABLE_SSIMULACRA2 gate across both code paths.
+
+    The sequential path was already gated correctly. The conditional path
+    (calculate_selected_metrics, used when force_all_metrics=False) checked
+    only selected_metrics["ssimulacra2"] — meaning a caller who populated
+    selected_metrics manually without honouring config.ENABLE_SSIMULACRA2
+    could still trigger an external binary call. This test pins down the
+    fix that brought it into parity with deep_perceptual / temporal_artifacts.
+    """
+
+    def _frames(self):
+        rng = np.random.default_rng(11)
+        return (
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+        )
+
+    def test_conditional_path_skips_when_flag_disabled(self, monkeypatch):
+        """selected_metrics['ssimulacra2']=True must NOT call ssimulacra2 when flag off."""
+        from giflab.metrics import calculate_selected_metrics
+
+        calls: list[int] = []
+
+        def _spy(*args, **kwargs):  # noqa: ANN001
+            calls.append(1)
+            return {"ssimulacra2_mean": 80.0}
+
+        monkeypatch.setattr(
+            "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics",
+            _spy,
+        )
+
+        config = MetricsConfig()
+        config.ENABLE_SSIMULACRA2 = False
+
+        a, b = self._frames()
+        # Force the conditional path to ask for ssimulacra2; the gate must veto.
+        selected = {"ssimulacra2": True}
+        calculate_selected_metrics(a, b, selected, config=config)
+
+        assert calls == [], (
+            "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
+        )

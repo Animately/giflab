@@ -145,40 +145,34 @@ def test_measure_propagates_lpips_gate_to_deep_perceptual_config(
 
     Regression guard for the combo of two settings that both have to be right
     for cost-avoidance: ``force_all_metrics=True`` (bypasses the conditional
-    optimizer) AND ``ENABLE_DEEP_PERCEPTUAL=False`` (becomes
-    ``disable_deep_perceptual=True`` in the deep_config dict at
-    ``src/giflab/metrics.py:2630-2632``, which forces the LPIPS validator
-    into fallback mode — no torch model load).
+    optimizer) AND ``ENABLE_DEEP_PERCEPTUAL=False``.
 
-    Note: in the current sequential-metrics path, the deep_perceptual
-    function is called unconditionally (gated only by composite-quality
-    heuristics), so we can't assert ``assert_not_called()``. Instead we
-    assert the disable flag arrives correctly in the config dict.
+    Behaviour since v0.3.2 (FR-009 fix): ``ENABLE_DEEP_PERCEPTUAL=False`` short
+    -circuits at the call site in ``calculate_comprehensive_metrics_from_frames``,
+    so ``calculate_deep_perceptual_quality_metrics`` is not invoked at all —
+    stronger than the previous "called with ``disable_deep_perceptual=True``".
+    The LPIPS path stays cost-free.
     """
     ref, cand = reference_and_candidate
 
-    # Case A: LPIPS not requested — disable flag must be True.
+    # Case A: LPIPS not requested — function must not be called at all.
     with patch(
         "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics",
         return_value=_FAKE_DEEP_PERCEPTUAL_RESULT,
     ) as mock_deep:
         measure(ref, cand, metrics=["ssim"])
 
-    assert mock_deep.called
-    # Config dict is the 3rd positional or `config` kwarg
-    args, kwargs = mock_deep.call_args
-    deep_config = args[2] if len(args) > 2 else kwargs.get("config", {})
-    assert (
-        deep_config.get("disable_deep_perceptual") is True
-    ), f"LPIPS not requested → disable flag must be True; got config={deep_config}"
+    mock_deep.assert_not_called()
 
-    # Case B: LPIPS requested — disable flag must be False.
+    # Case B: LPIPS requested — function must be called, and the disable flag
+    # in the config dict must be False (LPIPS is allowed to run).
     with patch(
         "giflab.deep_perceptual_metrics.calculate_deep_perceptual_quality_metrics",
         return_value=_FAKE_DEEP_PERCEPTUAL_RESULT,
     ) as mock_deep:
         measure(ref, cand, metrics=["lpips"])
 
+    mock_deep.assert_called_once()
     args, kwargs = mock_deep.call_args
     deep_config = args[2] if len(args) > 2 else kwargs.get("config", {})
     assert (
