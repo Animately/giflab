@@ -2,6 +2,49 @@
 
 All notable changes to giflab are documented here. Versioning follows semver within the 0.x major; see [docs/public-api.md](./docs/public-api.md) for the versioning policy that applies to the public API surface.
 
+## v0.3.2 — 2026-05-22
+
+### Fixed: Public API FR-009 perceptual-cost contract
+
+`measure(metrics=["ssim"])` (or any subset of the six "cheap" metrics) no longer triggers a PyTorch / LPIPS model load via the temporal-artifacts pipeline. This restores the FR-009 promise in [docs/public-api.md](./docs/public-api.md) that requesting only cheap metrics is fast.
+
+**Headline impact**: ~3.3× per-cell speedup measured against gifprep's benchmark harness (67.1s for 9 cells vs the previous ~24.7s/cell baseline), restoring it to gifprep's SC-001 <10 min budget on the full corpus.
+
+**Changes**:
+
+- New `MetricsConfig.ENABLE_TEMPORAL_ARTIFACTS: bool = True` flag (default preserves dataset-pipeline behaviour). `measure()` derives the flag from a new `_TEMPORAL_NEEDING_METRICS` constant (empty in this release) so callers requesting only metrics that don't need temporal computation opt out automatically.
+- `calculate_enhanced_temporal_metrics` now reuses the existing `get_temporal_detector` singleton (mirrors `deep_perceptual_metrics._global_validator`). Eliminates the misleading per-call `LPIPS model initialized successfully` log even when `LPIPSModelCache` was already caching the model.
+- `deep_perceptual_metrics` is now gated at the call site so the `No LPIPS scores obtained` WARN no longer fires spuriously when `ENABLE_DEEP_PERCEPTUAL=False`.
+- `temporal_artifacts.zero_temporal_metrics(frame_count)` centralises the zero-valued temporal metrics dict that previously had two different shapes across call sites.
+- Conditional-path parity: `ssimulacra2` is now gated by `ENABLE_SSIMULACRA2` in the conditional path too, matching the lpips + temporal gates.
+
+### Not changed
+
+- CLI, dataset generation pipeline, matrix benchmark, SQLite schema, feature extraction, engine parameter grids, internal tool interfaces, quality metrics implementations.
+
+## v0.3.1 — 2026-05-21
+
+### Fixed: deep_perceptual_metrics.py was silently gitignored
+
+`src/giflab/deep_perceptual_metrics.py` existed on disk but was excluded from the v0.3.0 release because the unanchored gitignore rule `deep_*` at `.gitignore:179` matched it. Every external consumer pinned at `@v0.3.0` received hardcoded `lpips_quality_mean = 0.5` as a fallback for any content, regardless of actual perceptual difference. Cross-corpus LPIPS variance is restored — values now range 0.0026..0.0664 on the 5-GIF local corpus (vs flat 0.5 in v0.3.0).
+
+**Changes**:
+
+- Anchored the unanchored gitignore rules (`deep_*`, `debug_*`, `final_*`, `verification_*`, `comprehensive_*`, `gpu_*`, `clean_test_*`, `debug_*.png`, `step*.gif`, `pipeline_*.gif`) to repository root with a leading `/` so source files cannot be accidentally caught.
+- Added `src/giflab/deep_perceptual_metrics.py` (704 lines) to git tracking.
+- Added `scripts/debug_pipeline.py` (329 lines) to git tracking.
+- Added `tests/smoke/test_package_completeness.py` as a recurrence guard.
+- Synced stale `__version__` in `src/giflab/__init__.py` (was lagging at 0.1.0).
+
+### Fixed: pre-existing CI test failures
+
+Five unrelated test failures that had been present on `main` for an extended period:
+
+- `detect_flicker_excess` — incorrect expected value.
+- LPIPS patch targets — module-path drift.
+- `test_with_custom_config` — config schema sync.
+- `test_extract_features_cli` — CLI invocation pattern.
+
 ## v0.3.0 — 2026-05-19
 
 ### Added: Public API for external consumers
