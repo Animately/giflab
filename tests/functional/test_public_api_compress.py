@@ -12,7 +12,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from giflab import (
     SUPPORTED_ENGINES,
     CompressResult,
@@ -161,6 +160,40 @@ def test_compress_result_is_frozen(tmp_path: Path, tiny_gif: Path) -> None:
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         result.output_bytes = 999  # type: ignore[misc]
+
+
+def test_compress_passes_timeout_s_param_through_to_wrapper(
+    tmp_path: Path, tiny_gif: Path
+) -> None:
+    """``params['timeout_s']`` is forwarded verbatim to the wrapper's apply().
+
+    Locks the public-API contract added by the audit-fix for
+    ``[[giflab-animately-10s-timeout-configurable]]``: a consumer can pass
+    ``compress(..., params={"lossy_level": 40, "timeout_s": 60})`` and the
+    wrapper sees ``timeout_s`` in its params dict (which it then forwards to
+    the underlying compress_with_* helper).
+    """
+    out_path = tmp_path / "with_timeout.gif"
+    wrapper_cls, wrapper_instance = _mock_wrapper_class()
+    wrapper_instance.apply.side_effect = lambda *a, **kw: (
+        _write_dummy_output(out_path, 100),
+        {"render_ms": 1, "engine": "animately", "command": "x", "kilobytes": 1},
+    )[1]
+
+    with patch("giflab.public_api.AnimatelyLossyCompressor", wrapper_cls):
+        result = compress(
+            tiny_gif,
+            out_path,
+            engine="animately",
+            params={"lossy_level": 40, "timeout_s": 60},
+        )
+
+    # Wrapper received the timeout in its params kwarg.
+    _, kwargs = wrapper_instance.apply.call_args
+    assert kwargs["params"]["timeout_s"] == 60
+    assert kwargs["params"]["lossy_level"] == 40
+    # And the timeout is preserved on the result for round-tripping.
+    assert result.params["timeout_s"] == 60
 
 
 def test_compress_params_mutation_does_not_leak(tmp_path: Path, tiny_gif: Path) -> None:

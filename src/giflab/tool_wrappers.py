@@ -184,12 +184,16 @@ class GifsicleLossyCompressor(LossyCompressionTool):
         level = int(params["lossy_level"])
         # Map normalized 0-100 → gifsicle native 0-300
         native_lossy = level * 3
+        timeout_s = params.get("timeout_s")
+        if timeout_s is not None:
+            timeout_s = int(timeout_s)
         result = compress_with_gifsicle(
             input_path,
             output_path,
             lossy_level=native_lossy,
             frame_keep_ratio=1.0,
             color_keep_count=None,
+            timeout_s=timeout_s,
         )
 
         # Add validation
@@ -391,12 +395,16 @@ class AnimatelyLossyCompressor(LossyCompressionTool):
         if params is None or "lossy_level" not in params:
             raise ValueError("params must include 'lossy_level' for lossy compression")
         level = int(params["lossy_level"])
+        timeout_s = params.get("timeout_s")
+        if timeout_s is not None:
+            timeout_s = int(timeout_s)
         result = compress_with_animately(
             input_path,
             output_path,
             lossy_level=level,
             frame_keep_ratio=1.0,
             color_keep_count=None,
+            timeout_s=timeout_s,
         )
 
         # Add validation
@@ -458,12 +466,17 @@ class AnimatelyAdvancedLossyCompressor(LossyCompressionTool):
         if png_sequence_dir is not None:
             png_sequence_dir = Path(png_sequence_dir)
 
+        timeout_s = params.get("timeout_s")
+        if timeout_s is not None:
+            timeout_s = int(timeout_s)
+
         return compress_with_animately_advanced_lossy(
             input_path,
             output_path,
             lossy_level=lossy_level,
             color_keep_count=color_keep_count,
             png_sequence_dir=png_sequence_dir,
+            timeout_s=timeout_s,
         )
 
     def combines_with(self, other: ExternalTool) -> bool:
@@ -510,10 +523,14 @@ class AnimatelyHardLossyCompressor(LossyCompressionTool):
             raise ValueError("params must include 'lossy_level' for lossy compression")
 
         level = int(params["lossy_level"])
+        timeout_s = params.get("timeout_s")
+        if timeout_s is not None:
+            timeout_s = int(timeout_s)
         result = compress_with_animately_hard(
             input_path,
             output_path,
             lossy_level=level,
+            timeout_s=timeout_s,
         )
 
         return validate_wrapper_apply_result(

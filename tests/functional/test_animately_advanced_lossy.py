@@ -95,6 +95,7 @@ class TestAnimatelyAdvancedLossyCompressor:
             lossy_level=60,
             color_keep_count=None,
             png_sequence_dir=None,
+            timeout_s=None,
         )
         assert result["engine"] == "animately-advanced"
 
