@@ -53,14 +53,16 @@ class TestValidatePathSecurity:
         assert result == test_path
 
     def test_validate_path_security_dangerous_chars(self):
-        """Test validation with dangerous characters."""
+        """Control chars (newline / carriage return) must still be rejected.
+
+        Shell metacharacters such as ``;``, ``&``, ``|``, ``$``, and backticks
+        are *no longer* on the blacklist: giflab pipes paths through
+        ``subprocess.run(cmd_list, shell=False)`` everywhere, so the args are
+        passed straight to ``execve`` and never re-parsed by a shell. The only
+        characters that remain unambiguously dangerous in a path string are
+        control characters that can corrupt logs / break downstream tooling.
+        """
         dangerous_paths = [
-            "/path/with;semicolon",
-            "/path/with&ampersand",
-            "/path/with|pipe",
-            "/path/with`backtick",
-            "/path/with$dollar",
-            "/path/with$(command)",
             "/path/with\nnewline",
             "/path/with\rcarriage",
         ]
@@ -70,6 +72,54 @@ class TestValidatePathSecurity:
                 ValidationError, match="potentially dangerous characters"
             ):
                 validate_path_security(dangerous_path)
+
+    def test_validate_path_security_null_byte(self):
+        """Null bytes are rejected separately (they truncate C strings)."""
+        with pytest.raises(ValidationError, match="null bytes"):
+            validate_path_security("/path/with\x00null")
+
+    def test_validate_path_security_accepts_cosmetic_chars(self, tmp_path):
+        """Legitimate filenames with cosmetic punctuation must pass.
+
+        Real-world GIFs (e.g. downloaded from HubSpot / generic CDN URLs)
+        regularly contain parens, spaces, %-encoded sequences, ampersands,
+        equals signs and query-string punctuation in the *filename*. None of
+        these characters can hurt anything once we stop running paths through
+        a shell — see the module docstring on ``validate_path_security``.
+        """
+        cosmetic_filenames = [
+            # Parens — Apple-style "file (1).gif" duplicates
+            "file (1).gif",
+            "Untitled-1-2 (copy).gif",
+            # Spaces
+            "my file with spaces.gif",
+            # %-encoded sequences (re-encoded URLs)
+            "name%20with%20spaces.gif",
+            "image%2Ffoo.gif",
+            # Shell-meta-chars that aren't actually dangerous off-shell
+            "Untitled-1-2.gif_upscale=true&width=1600&name=foo.gif",
+            "thing;other.gif",
+            "thing|pipe.gif",
+            "thing$dollar.gif",
+            "thing`backtick.gif",
+            "thing$(command).gif",
+            # URL query-style punctuation
+            "name=value&other=thing.gif",
+            "file?query=1.gif",
+            "file+plus.gif",
+            "file@host.gif",
+            "file#fragment.gif",
+            "file~tilde.gif",
+            # The exact path from audit/sweep.csv that triggered the failure
+            "https___hs-8497520.f.hubspotemail.net_hub_8497520_hubfs_"
+            "Untitled-1-2.gif_upscale=true&width=1600&upscale=true&"
+            "name=Untitled-1-2.gif",
+        ]
+
+        for name in cosmetic_filenames:
+            full = tmp_path / name
+            result = validate_path_security(full)
+            assert result == full, f"Should accept cosmetic filename: {name!r}"
 
     def test_validate_path_security_traversal(self):
         """Test validation with path traversal attempts."""
