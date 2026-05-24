@@ -655,6 +655,86 @@ class TestAdditionalMetrics:
             ), f"{name}: similar ({similar_score:.3f}) should be <= different ({different_score:.3f})"
 
 
+class TestChistDocumentedInvariances:
+    """Lock in the documented invariances of ``chist`` (colour-histogram correlation).
+
+    These properties are consequences of the metric's definition (per-channel
+    32-bin Pearson correlation of marginal histograms) and are documented in
+    the ``chist`` docstring. They are intentional, not bugs — but they mean
+    chist is a colour-fidelity signal, not a holistic quality signal. These
+    tests guard against accidental refactors that would change the metric's
+    semantic contract (e.g. swapping to a joint-channel histogram or to a
+    distance metric that no longer has these invariances).
+
+    Surfaced from the 2026-05-22 metrics audit
+    (``docs/metrics-audit/2026-05-22/report.md``); see
+    ``audit-fix/chist-monotonicity-investigation``.
+    """
+
+    def test_spatial_invariance_pixel_scramble(self):
+        """Scrambling pixel positions while preserving the pixel set yields chist == 1.0.
+
+        chist sees only marginal pixel-value distributions, so any
+        permutation of pixels (which preserves the multiset of pixel
+        values per channel) is invisible to the metric.
+        """
+        rng = np.random.default_rng(42)
+        img = rng.integers(0, 256, (96, 96, 3), dtype=np.uint8)
+        scrambled = img.copy().reshape(-1, 3)
+        rng.shuffle(scrambled)  # permute pixels in place
+        scrambled = scrambled.reshape(img.shape)
+
+        score = chist(img, scrambled)
+        assert score == pytest.approx(1.0, abs=1e-6), (
+            f"Spatial scramble should be invisible to chist; got {score:.6f}. "
+            "If this changed, the per-channel marginal-histogram contract was broken."
+        )
+
+    def test_bin_coarseness_palette_quantize_gradient(self):
+        """Heavy palette quantization of a smooth gradient still scores ~1.0.
+
+        With 32 bins (≈8 levels each), a palette-quantized gradient maps
+        to the same bins as the original. The histogram cannot distinguish
+        the loss of intermediate intensities.
+        """
+        xs = np.linspace(0, 255, 256).astype(np.uint8)
+        grad = np.tile(xs, (256, 1))
+        grad_rgb = np.stack([grad, grad, grad], axis=-1)
+        pil_grad = Image.fromarray(grad_rgb, mode="RGB")
+        # Quantize to 8 colours — visually severe, but bin-aligned
+        quantized = np.asarray(pil_grad.quantize(colors=8).convert("RGB"))
+
+        score = chist(grad_rgb, quantized)
+        assert score >= 0.99, (
+            f"32-bin histograms should be insensitive to palette quantization "
+            f"of a smooth gradient; got chist={score:.6f}. If this dropped, "
+            "either `bins` changed or the underlying histogram metric changed."
+        )
+
+    def test_rebound_at_extreme_blur(self):
+        """chist is non-monotonic across blur strength on random content.
+
+        Extreme blur collapses pixel values toward the channel mean, which
+        already dominates the original's histogram bins → bin overlap rises
+        again at the tail. This is intentional behaviour of the metric.
+        """
+        import cv2
+
+        rng = np.random.default_rng(42)
+        img = rng.integers(0, 256, (96, 96, 3), dtype=np.uint8)
+        blur_mid = cv2.GaussianBlur(img, (5, 5), 1.0)
+        blur_extreme = cv2.GaussianBlur(img, (101, 101), 50.0)
+
+        score_mid = chist(img, blur_mid)
+        score_extreme = chist(img, blur_extreme)
+        # The rebound is the point: extreme blur should NOT score worse than mild blur
+        assert score_extreme >= score_mid - 1e-3, (
+            f"Expected chist rebound at extreme blur (mid={score_mid:.4f}, "
+            f"extreme={score_extreme:.4f}). If extreme is meaningfully worse "
+            "than mid, the documented rebound invariant has changed."
+        )
+
+
 # =============================================================================
 # Enhanced Metrics
 # =============================================================================
