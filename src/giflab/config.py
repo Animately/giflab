@@ -129,6 +129,16 @@ class MetricsConfig:
     EDGE_CANNY_THRESHOLD1: int = 50
     EDGE_CANNY_THRESHOLD2: int = 150
 
+    # RGB background used to composite transparent palette/RGBA pixels during
+    # frame extraction. Must be stable across original/compressed pairs —
+    # PIL's default behaviour (resolving transparent indices via the GIF's
+    # background palette colour) is unstable across re-encoding because
+    # compressors rearrange the palette. White is the conventional choice
+    # for email/marketing GIFs (the dominant case in our corpus). See
+    # `src/giflab/metrics.py:extract_gif_frames` and the
+    # audit-fix/extract-gif-frames-alpha-compositing-bug regression test.
+    ALPHA_BACKGROUND: tuple[int, int, int] = (255, 255, 255)
+
     def __post_init__(self) -> None:
         # Validate legacy weights sum to 1.0 with proper floating point tolerance
         legacy_total = (
