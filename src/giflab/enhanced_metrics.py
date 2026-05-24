@@ -5,6 +5,7 @@ quality metrics instead of the traditional 4-metric approach. It also includes
 the user-requested efficiency metric calculation.
 """
 
+import math
 from typing import Any
 
 import numpy as np
@@ -189,11 +190,20 @@ def calculate_composite_quality(
         total_weight += config.ENHANCED_LPIPS_WEIGHT
 
     if "ssimulacra2_mean" in metrics:
-        # SSIMULACRA2 scores are already normalized (0-1, higher = better quality)
+        # SSIMULACRA2 scores are already normalized (0-1, higher = better quality).
+        # NaN means the metric couldn't be computed (binary missing, frame-export
+        # failure, etc.) — skip the contribution rather than clipping it into
+        # range, which used to turn the legacy 50.0 raw-scale sentinel into 1.0
+        # and inflate composite_quality.
         ssimulacra2_score = metrics["ssimulacra2_mean"]
-        normalized_ssimulacra2 = max(0.0, min(1.0, ssimulacra2_score))
-        composite_quality += config.ENHANCED_SSIMULACRA2_WEIGHT * normalized_ssimulacra2
-        total_weight += config.ENHANCED_SSIMULACRA2_WEIGHT
+        if ssimulacra2_score is not None and not (
+            isinstance(ssimulacra2_score, float) and math.isnan(ssimulacra2_score)
+        ):
+            normalized_ssimulacra2 = max(0.0, min(1.0, ssimulacra2_score))
+            composite_quality += (
+                config.ENHANCED_SSIMULACRA2_WEIGHT * normalized_ssimulacra2
+            )
+            total_weight += config.ENHANCED_SSIMULACRA2_WEIGHT
 
     # GIF-specific quality metrics (10% total)
     if "banding_score_mean" in metrics:

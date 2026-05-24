@@ -259,7 +259,13 @@ class TestSsimulacra2Validator:
         assert result["ssimulacra2_triggered"] == 0.0
 
     def test_calculate_ssimulacra2_metrics_frame_mismatch(self):
-        """Test metrics calculation with mismatched frame counts."""
+        """Test metrics calculation with mismatched frame counts.
+
+        Frame-count mismatch is a routine condition (animately's lossy stage
+        legitimately drops frames). The validator must align via MSE and
+        produce a real measurement, not raise. See `TestSsimulacra2NaNOnEdgeCases`
+        for the audit-fix regression details.
+        """
         validator = Ssimulacra2Validator()
         config = MetricsConfig()
 
@@ -271,8 +277,11 @@ class TestSsimulacra2Validator:
             np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8) for _ in range(5)
         ]
 
-        with pytest.raises(ValueError, match="Frame count mismatch"):
-            validator.calculate_ssimulacra2_metrics(orig_frames, comp_frames, config)
+        # Should NOT raise; produces a result on whatever the alignment yields.
+        result = validator.calculate_ssimulacra2_metrics(
+            orig_frames, comp_frames, config
+        )
+        assert "ssimulacra2_mean" in result
 
     @patch.object(Ssimulacra2Validator, "is_available")
     @patch.object(Ssimulacra2Validator, "_export_frame_to_png")
@@ -341,11 +350,119 @@ class TestSsimulacra2Validator:
                 orig_frames, comp_frames, config
             )
 
-        # Should have processed 3 frames but only 2 successful scores + 1 fallback (0.5)
-        expected_scores = [0.75, 0.5, 0.70]  # Success, fallback, success
-        assert result["ssimulacra2_mean"] == np.mean(expected_scores)
+        # Failed frame contributes NaN (not 0.5 midpoint sentinel); aggregation
+        # uses nanmean so the surviving frames carry the score honestly.
+        expected_mean = float(np.nanmean([0.75, float("nan"), 0.70]))
+        assert result["ssimulacra2_mean"] == pytest.approx(expected_mean)
         assert result["ssimulacra2_frame_count"] == 3.0
         assert result["ssimulacra2_triggered"] == 1.0
+
+
+class TestSsimulacra2NaNOnEdgeCases:
+    """Regression tests for audit-fix: edge cases must return NaN, never a
+    raw-scale `50.0` or normalised-midpoint `0.5` sentinel.
+
+    Surfaced from `docs/metrics-audit/2026-05-22/report.md` — Malthouse
+    `season-launch-header.gif` returned ssimulacra2_mean=50.0 at z=+10.99 because
+    animately's lossy stage dropped frames (8 -> 3), the unaligned frame-count
+    mismatch raised ValueError, and the outer handler in metrics.py substituted
+    `50.0` — a value on the raw 0-100 scale, but the metric otherwise lives in
+    normalised [0, 1] space. NaN is the correct "no data" signal.
+    """
+
+    def test_frame_count_mismatch_aligns_rather_than_crashes(self):
+        """When frame counts differ (animately drops frames during lossy),
+        the validator must align them and produce a real measurement, not
+        raise ValueError.
+
+        This is the direct repro of the Malthouse season-launch-header bug.
+        """
+        validator = Ssimulacra2Validator()
+        config = MetricsConfig()
+
+        # 8 original frames vs 3 compressed (the actual Malthouse shape)
+        rng = np.random.default_rng(42)
+        orig_frames = [
+            rng.integers(0, 255, (64, 64, 3), dtype=np.uint8) for _ in range(8)
+        ]
+        comp_frames = [
+            rng.integers(0, 255, (64, 64, 3), dtype=np.uint8) for _ in range(3)
+        ]
+
+        result = validator.calculate_ssimulacra2_metrics(
+            orig_frames, comp_frames, config
+        )
+
+        # Must produce a result, not crash.
+        assert "ssimulacra2_mean" in result
+        # The mean must be in the normalised [0, 1] range OR NaN — never the
+        # impossible raw-scale 50.0.
+        m = result["ssimulacra2_mean"]
+        assert m != 50.0, (
+            "ssimulacra2_mean=50.0 is the impossible raw-scale sentinel — "
+            "must be in [0, 1] or NaN"
+        )
+        assert np.isnan(m) or 0.0 <= m <= 1.0
+
+    @patch.object(Ssimulacra2Validator, "is_available")
+    def test_unavailable_binary_returns_nan_not_raw_scale_sentinel(
+        self, mock_is_available
+    ):
+        """When the SSIMULACRA2 binary is unavailable the score keys must
+        be NaN, not the raw-scale `50.0` sentinel that has been corrupting
+        corpus statistics.
+        """
+        mock_is_available.return_value = False
+
+        validator = Ssimulacra2Validator()
+        config = MetricsConfig()
+        frames = [
+            np.random.default_rng(0).integers(0, 255, (32, 32, 3), dtype=np.uint8)
+            for _ in range(3)
+        ]
+
+        result = validator.calculate_ssimulacra2_metrics(frames, frames, config)
+
+        assert np.isnan(result["ssimulacra2_mean"])
+        assert np.isnan(result["ssimulacra2_p95"])
+        assert np.isnan(result["ssimulacra2_min"])
+        # Triggered flag stays 0 — that's the correct "did we compute" signal.
+        assert result["ssimulacra2_triggered"] == 0.0
+
+    @patch.object(Ssimulacra2Validator, "is_available")
+    @patch.object(Ssimulacra2Validator, "_export_frame_to_png")
+    @patch.object(Ssimulacra2Validator, "_run_ssimulacra2_on_pair")
+    def test_per_frame_failure_uses_nan_not_normalised_midpoint(
+        self, mock_run_ssim, mock_export, mock_is_available
+    ):
+        """A single failed frame must produce NaN for that frame, not the
+        `0.5` normalised-midpoint sentinel which silently biases the mean.
+
+        Mean should be calculated with `np.nanmean` over the surviving frames.
+        """
+        mock_is_available.return_value = True
+        # Three frames: success, raise, success. Raw scores -> normalised values.
+        mock_run_ssim.side_effect = [
+            75.0,
+            Exception("subprocess died"),
+            70.0,
+        ]
+
+        validator = Ssimulacra2Validator()
+        config = MetricsConfig()
+        rng = np.random.default_rng(7)
+        frames = [
+            rng.integers(0, 255, (32, 32, 3), dtype=np.uint8) for _ in range(3)
+        ]
+
+        with patch.object(validator, "normalize_score", side_effect=[0.75, 0.70]):
+            result = validator.calculate_ssimulacra2_metrics(frames, frames, config)
+
+        # nanmean of [0.75, NaN, 0.70] == 0.725, NOT mean of [0.75, 0.5, 0.70].
+        expected = float(np.nanmean([0.75, 0.70]))
+        assert result["ssimulacra2_mean"] == pytest.approx(expected)
+        # Frame count still 3 (we attempted all three).
+        assert result["ssimulacra2_frame_count"] == 3.0
 
 
 class TestSsimulacra2ValidatorExtended:
@@ -941,16 +1058,17 @@ class TestSsimulacra2Integration:
             with patch.object(validator, "_run_ssimulacra2_on_pair", mock_run_ssim):
                 result = validator.calculate_ssimulacra2_metrics(frames, frames, config)
 
-            # Should have processed all frames but with fallback scores for failures
+            # Should have processed all frames; failed frames contribute NaN.
             assert result["ssimulacra2_frame_count"] == 5.0
             assert result["ssimulacra2_triggered"] == 1.0
 
-            # Mean should include fallback scores (0.5) for failed frames
             # normalize_score is called only for successful frames (1, 3, 4),
             # consuming side_effect values [0.8, 0.5, 0.6].
-            # Failed frames (0, 2) get hardcoded 0.5.
-            # Expected scores: [0.5, 0.8, 0.5, 0.5, 0.6]
-            expected_mean = np.mean([0.5, 0.8, 0.5, 0.5, 0.6])
+            # Failed frames (0, 2) contribute NaN, ignored by nanmean.
+            # Expected mean over surviving frames: nanmean([NaN, 0.8, NaN, 0.5, 0.6]).
+            expected_mean = float(
+                np.nanmean([float("nan"), 0.8, float("nan"), 0.5, 0.6])
+            )
             assert abs(result["ssimulacra2_mean"] - expected_mean) < 0.01
 
 
@@ -990,8 +1108,9 @@ class TestSsimulacra2RobustnessAndSafety:
 
         frames = [np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)]
 
-        # Test cleanup when export fails - the exception is caught internally
-        # and a fallback score (0.5) is used, so no exception propagates
+        # Test cleanup when export fails — the failed frame contributes NaN,
+        # and with every frame failing the aggregate falls back to NaN result
+        # (triggered=1 because we attempted) so no exception propagates.
         with patch.object(validator, "is_available", return_value=True), patch(
             "tempfile.TemporaryDirectory"
         ) as mock_tempdir:
@@ -1009,9 +1128,10 @@ class TestSsimulacra2RobustnessAndSafety:
             ):
                 result = validator.calculate_ssimulacra2_metrics(frames, frames, config)
 
-                # Should use fallback score for the failed frame
-                assert result["ssimulacra2_mean"] == 0.5
+                # Every frame failed -> NaN score, triggered=1 (we tried).
+                assert np.isnan(result["ssimulacra2_mean"])
                 assert result["ssimulacra2_frame_count"] == 1.0
+                assert result["ssimulacra2_triggered"] == 1.0
 
                 # Temporary directory cleanup should still be called
                 mock_tempdir_instance.__exit__.assert_called_once()

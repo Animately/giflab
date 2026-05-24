@@ -636,7 +636,10 @@ def calculate_optimized_comprehensive_metrics(
         "text_ui_edge_density": 0.0,
         "text_ui_component_count": 0,
         # Add minimal SSIMULACRA2 metrics
-        "ssimulacra2_mean": 50.0,
+        # NaN = "not computed" on the normalised [0, 1] output scale.
+        # The legacy 50.0 sentinel was on the raw 0-100 scale and corrupted
+        # downstream aggregations.
+        "ssimulacra2_mean": float("nan"),
         "ssimulacra2_triggered": 0.0,
     }
 

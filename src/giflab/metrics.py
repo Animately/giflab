@@ -2129,7 +2129,9 @@ def calculate_selected_metrics(
             results.update(ssim2_metrics)
         except Exception as e:
             logger.warning(f"SSIMULACRA2 calculation failed: {e}")
-            results["ssimulacra2_mean"] = 50.0
+            # NaN, not 50.0 — that value is on the raw 0-100 scale, but
+            # downstream consumers read this key as normalised [0, 1].
+            results["ssimulacra2_mean"] = float("nan")
 
     if selected_metrics.get("temporal_artifacts", False) and config.ENABLE_TEMPORAL_ARTIFACTS:
         try:
@@ -2519,9 +2521,9 @@ def calculate_comprehensive_metrics_from_frames(
                     # Calculate SSIMULACRA2 metrics (always needed for Phase 3 tests)
                     # Default fallback metrics
                     default_ssimulacra2_metrics: dict[str, float | str] = {
-                        "ssimulacra2_mean": 50.0,
-                        "ssimulacra2_p95": 50.0,
-                        "ssimulacra2_min": 50.0,
+                        "ssimulacra2_mean": float("nan"),
+                        "ssimulacra2_p95": float("nan"),
+                        "ssimulacra2_min": float("nan"),
                         "ssimulacra2_frame_count": 0.0,
                         "ssimulacra2_triggered": 0.0,
                     }
@@ -3068,9 +3070,9 @@ def calculate_comprehensive_metrics_from_frames(
                         "SSIMULACRA2 metrics skipped based on conditional logic"
                     )
                     ssimulacra2_metrics = {
-                        "ssimulacra2_mean": 50.0,
-                        "ssimulacra2_p95": 50.0,
-                        "ssimulacra2_min": 50.0,
+                        "ssimulacra2_mean": float("nan"),
+                        "ssimulacra2_p95": float("nan"),
+                        "ssimulacra2_min": float("nan"),
                         "ssimulacra2_frame_count": 0.0,
                         "ssimulacra2_triggered": 0.0,
                     }
@@ -3080,9 +3082,9 @@ def calculate_comprehensive_metrics_from_frames(
                     f"SSIMULACRA2 metrics module not available: {e}. Using fallback values."
                 )
                 ssimulacra2_metrics = {
-                    "ssimulacra2_mean": 50.0,
-                    "ssimulacra2_p95": 50.0,
-                    "ssimulacra2_min": 50.0,
+                    "ssimulacra2_mean": float("nan"),
+                    "ssimulacra2_p95": float("nan"),
+                    "ssimulacra2_min": float("nan"),
                     "ssimulacra2_frame_count": 0.0,
                     "ssimulacra2_triggered": 0.0,
                 }
@@ -3092,9 +3094,9 @@ def calculate_comprehensive_metrics_from_frames(
                     f"SSIMULACRA2 metrics function not found: {e}. Module may be incomplete."
                 )
                 ssimulacra2_metrics = {
-                    "ssimulacra2_mean": 50.0,
-                    "ssimulacra2_p95": 50.0,
-                    "ssimulacra2_min": 50.0,
+                    "ssimulacra2_mean": float("nan"),
+                    "ssimulacra2_p95": float("nan"),
+                    "ssimulacra2_min": float("nan"),
                     "ssimulacra2_frame_count": 0.0,
                     "ssimulacra2_triggered": 0.0,
                 }
@@ -3104,9 +3106,9 @@ def calculate_comprehensive_metrics_from_frames(
                     f"Error calculating SSIMULACRA2 metrics: {e}. Using fallback values."
                 )
                 ssimulacra2_metrics = {
-                    "ssimulacra2_mean": 50.0,
-                    "ssimulacra2_p95": 50.0,
-                    "ssimulacra2_min": 50.0,
+                    "ssimulacra2_mean": float("nan"),
+                    "ssimulacra2_p95": float("nan"),
+                    "ssimulacra2_min": float("nan"),
                     "ssimulacra2_frame_count": 0.0,
                     "ssimulacra2_triggered": 0.0,
                 }
@@ -3116,18 +3118,18 @@ def calculate_comprehensive_metrics_from_frames(
                     f"Unexpected error in SSIMULACRA2 metrics calculation: {e}. Using fallback values."
                 )
                 ssimulacra2_metrics = {
-                    "ssimulacra2_mean": 50.0,
-                    "ssimulacra2_p95": 50.0,
-                    "ssimulacra2_min": 50.0,
+                    "ssimulacra2_mean": float("nan"),
+                    "ssimulacra2_p95": float("nan"),
+                    "ssimulacra2_min": float("nan"),
                     "ssimulacra2_frame_count": 0.0,
                     "ssimulacra2_triggered": 0.0,
                 }
         else:
             logger.debug("SSIMULACRA2 metrics calculation disabled")
             ssimulacra2_metrics = {
-                "ssimulacra2_mean": 50.0,
-                "ssimulacra2_p95": 50.0,
-                "ssimulacra2_min": 50.0,
+                "ssimulacra2_mean": float("nan"),
+                "ssimulacra2_p95": float("nan"),
+                "ssimulacra2_min": float("nan"),
                 "ssimulacra2_frame_count": 0.0,
                 "ssimulacra2_triggered": 0.0,
             }
