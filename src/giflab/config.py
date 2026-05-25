@@ -104,6 +104,20 @@ class MetricsConfig:
     # Enable enhanced composite quality calculation
     USE_ENHANCED_COMPOSITE_QUALITY: bool = True
 
+    # Treat the temporal-quality contribution to composite_quality as the
+    # pre-vs-post DELTA rather than the post-only value. The legacy bare
+    # ``temporal_consistency`` key is set to the post-compression value of
+    # a metric computed only on the compressed stream (see
+    # docs/metrics-audit/2026-05-22/report.md and
+    # docs/metrics-audit/2026-05-22/report.md §Single-stream metrics).
+    # That means a perfectly static black output scored a full temporal
+    # contribution regardless of the original. When True (the audit-fix
+    # default), composite_quality reads
+    # ``temporal_consistency_delta = |post - pre|`` and contributes
+    # ``ENHANCED_TEMPORAL_WEIGHT * (1.0 - clamp(delta, 0, 1))`` — a true
+    # pair signal. Set to False to restore the legacy post-only behaviour.
+    USE_TEMPORAL_DELTA_FOR_COMPOSITE: bool = True
+
     # Deep perceptual metrics configuration
     ENABLE_DEEP_PERCEPTUAL: bool = True
     DEEP_PERCEPTUAL_DEVICE: str = "auto"
