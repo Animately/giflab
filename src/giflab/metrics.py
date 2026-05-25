@@ -1297,6 +1297,103 @@ def calculate_compression_ratio(
 # ---------------- New helper and metric functions (Stage-1) ---------------- #
 
 
+# --- Flat-content fallback constants ---------------------------------------- #
+# These govern the "content-aware honest fallback" used by structure-based
+# metrics (fsim, gmsd, edge_similarity, sharpness_similarity) when one or both
+# input frames are flat (a single colour).
+#
+# Without this fallback every structure-based metric silently reports
+# "perfect similarity" on flat content because every derivative is zero and
+# the metric's stability constant makes the zero/zero ratio resolve to 1.0
+# (or 0.0 for distortion-style metrics like gmsd). See audit:
+# docs/metrics-audit/2026-05-22/report.md and task note
+# giflab-fsim-flat-content-returns-1 for the decision rationale.
+#
+# - FLAT_STD_THRESHOLD: per-channel std (in uint8 units) below which a frame
+#   counts as flat. ``1.0`` corresponds to "less than one DN of variation",
+#   below the noise floor of any real-world image.
+# - FLAT_MEAN_TOL: per-channel mean delta below which two flat frames count
+#   as the same colour. ``1.0`` allows for lossless round-trip rounding
+#   through PIL/cv2 (e.g. RGB->YUV->RGB can introduce sub-DN drift).
+FLAT_STD_THRESHOLD = 1.0
+FLAT_MEAN_TOL = 1.0
+
+
+def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> bool:
+    """Return True if every channel of ``frame`` has std below ``threshold``.
+
+    Used by structure-based metrics to detect inputs they cannot meaningfully
+    analyse (no edges, no gradients, no phase congruency).
+    """
+    arr = frame.astype(np.float32)
+    if arr.ndim == 2:
+        return float(np.std(arr)) < threshold
+    # Per-channel std for RGB; treat as flat only if every channel is flat.
+    return bool(np.all(np.std(arr.reshape(-1, arr.shape[-1]), axis=0) < threshold))
+
+
+def _flat_mean_distance(frame1: np.ndarray, frame2: np.ndarray) -> float:
+    """L2 distance between per-channel mean colours of two frames (uint8 units).
+
+    Used to decide whether two flat frames represent the same colour (identity
+    fallback) or different colours (worst-case fallback).
+    """
+    m1 = np.mean(
+        frame1.astype(np.float32).reshape(
+            -1, frame1.shape[-1] if frame1.ndim == 3 else 1
+        ),
+        axis=0,
+    )
+    m2 = np.mean(
+        frame2.astype(np.float32).reshape(
+            -1, frame2.shape[-1] if frame2.ndim == 3 else 1
+        ),
+        axis=0,
+    )
+    return float(np.linalg.norm(m1 - m2))
+
+
+def _flat_content_fallback(
+    frame1: np.ndarray,
+    frame2: np.ndarray,
+    *,
+    identity_value: float,
+    worst_value: float,
+    mean_tol: float = FLAT_MEAN_TOL,
+) -> float | None:
+    """Return an honest fallback value for structure-based metrics on flat content.
+
+    Returns:
+        - ``identity_value`` if both frames are flat and their mean colours
+          match (within ``mean_tol`` per channel in L2). This preserves the
+          legitimate "flat-vs-itself is identical" case.
+        - ``worst_value`` if both frames are flat but their mean colours
+          differ, OR if exactly one frame is flat (unambiguous mismatch:
+          structure on one side, none on the other).
+        - ``None`` if neither frame is flat — caller should fall through to
+          the existing structure-based computation.
+
+    The check is deliberately conservative (only triggers when at least one
+    side genuinely has no structure to analyse) so it does not affect any
+    real-world content.
+    """
+    flat1 = _is_flat_frame(frame1)
+    flat2 = _is_flat_frame(frame2)
+    if not flat1 and not flat2:
+        return None
+    if flat1 and flat2:
+        per_channel_tol = mean_tol * np.sqrt(
+            frame1.shape[-1] if frame1.ndim == 3 else 1
+        )
+        return (
+            identity_value
+            if _flat_mean_distance(frame1, frame2) <= per_channel_tol
+            else worst_value
+        )
+    # Exactly one side flat -> unambiguous mismatch.
+    return worst_value
+
+
 def _resize_if_needed(
     frame1: np.ndarray, frame2: np.ndarray, use_cache: bool = True
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1357,8 +1454,18 @@ def fsim(frame1: np.ndarray, frame2: np.ndarray) -> float:
     gradient-magnitude and phase-congruency similarity maps, which empirically
     yields higher scores for identical images and lower scores for dissimilar
     ones.
+
+    Flat-content fallback: gradient + phase-congruency both go to zero on
+    solid-colour frames, so the stability constants would make the metric
+    silently report 1.0 regardless of pixel colour. ``_flat_content_fallback``
+    short-circuits with honest values in that regime — see audit
+    ``docs/metrics-audit/2026-05-22/report.md``.
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
+
+    fallback = _flat_content_fallback(f1, f2, identity_value=1.0, worst_value=0.0)
+    if fallback is not None:
+        return fallback
 
     # Grayscale conversion.
     if f1.ndim == 3:
@@ -1394,8 +1501,21 @@ def fsim(frame1: np.ndarray, frame2: np.ndarray) -> float:
 
 
 def gmsd(frame1: np.ndarray, frame2: np.ndarray) -> float:
-    """Gradient Magnitude Similarity Deviation (lower is better)."""
+    """Gradient Magnitude Similarity Deviation (lower is better).
+
+    Flat-content fallback: gradient magnitudes are zero on solid-colour
+    frames, so the stability constant would silently yield 0.0 (no
+    distortion) for any flat pair regardless of colour. We instead return
+    ``0.5`` as a deterministic worst-case marker for flat-vs-different-flat
+    and flat-vs-non-flat pairs — this is in the same band as the natural
+    range of gmsd on heavily distorted real content (typically 0.1–0.4).
+    See audit ``docs/metrics-audit/2026-05-22/report.md``.
+    """
     f1, f2 = _resize_if_needed(frame1, frame2)
+
+    fallback = _flat_content_fallback(f1, f2, identity_value=0.0, worst_value=0.5)
+    if fallback is not None:
+        return fallback
 
     if f1.ndim == 3:
         gray1 = cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY)
@@ -1444,6 +1564,12 @@ def edge_similarity(
 ) -> float:
     """Edge-Map Jaccard similarity (0-1, higher is better).
 
+    Flat-content fallback: Canny finds no edges on solid-colour frames, so
+    the ``union == 0`` branch would silently return 1.0 (perfect) for any
+    flat pair, including white-vs-black. ``_flat_content_fallback`` returns
+    honest values: 1.0 for matching flats, 0.0 otherwise. See audit
+    ``docs/metrics-audit/2026-05-22/report.md``.
+
     Args:
         frame1: First frame (RGB or grayscale)
         frame2: Second frame (RGB or grayscale)
@@ -1451,6 +1577,10 @@ def edge_similarity(
         threshold2: Upper Canny threshold
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
+
+    fallback = _flat_content_fallback(f1, f2, identity_value=1.0, worst_value=0.0)
+    if fallback is not None:
+        return fallback
 
     if f1.ndim == 3:
         gray1 = cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY)
@@ -1464,7 +1594,11 @@ def edge_similarity(
     intersection = np.logical_and(edges1 > 0, edges2 > 0).sum()
     union = np.logical_or(edges1 > 0, edges2 > 0).sum()
     if union == 0:
-        return 1.0  # no edges at all
+        # Defensive: this branch is now only reachable when both frames are
+        # non-flat (per the fallback above) but neither has any Canny edges
+        # at the configured thresholds — e.g. very soft images. Returning
+        # 1.0 here is consistent with "no edges to disagree about".
+        return 1.0
     return float(intersection / union)
 
 
@@ -1498,8 +1632,20 @@ def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
 
 
 def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
-    """Sharpness similarity based on Laplacian variance ratio (0-1, higher is better)."""
+    """Sharpness similarity based on Laplacian variance ratio (0-1, higher is better).
+
+    Flat-content fallback: the previous ``var1 == 0 and var2 == 0 -> 1.0``
+    branch silently treated white-vs-black as "identical sharpness".
+    ``_flat_content_fallback`` now distinguishes matching-colour flats
+    (identity, 1.0) from differing-colour flats (worst, 0.0) and from
+    asymmetric flat/non-flat pairs (worst, 0.0). See audit
+    ``docs/metrics-audit/2026-05-22/report.md``.
+    """
     f1, f2 = _resize_if_needed(frame1, frame2)
+
+    fallback = _flat_content_fallback(f1, f2, identity_value=1.0, worst_value=0.0)
+    if fallback is not None:
+        return fallback
 
     if f1.ndim == 3:
         gray1 = cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY)
@@ -1510,7 +1656,9 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
     var1 = float(np.var(cv2.Laplacian(gray1, cv2.CV_64F)))
     var2 = float(np.var(cv2.Laplacian(gray2, cv2.CV_64F)))
 
-    # Both completely flat ⇒ identical sharpness.
+    # Defensive: with the flat-content fallback above, at most one of the
+    # variances can be ~0 here (the other side is non-flat). Preserve the
+    # original zero-handling for numerical edge cases.
     if var1 == 0 and var2 == 0:
         return 1.0
     if max(var1, var2) == 0:
