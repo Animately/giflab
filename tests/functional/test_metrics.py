@@ -506,6 +506,73 @@ class TestExtendedComprehensiveMetrics:
         assert empty_result["empty_max"] == 0.0
 
 
+class TestSsimClampBehaviour:
+    """Regression tests documenting the SSIM clamp's behaviour.
+
+    Investigated under the 2026-05-22 metrics audit follow-up
+    ([[giflab-ssim-smooth-gradient-bump]]): the audit flagged ssim_min ticking
+    UP at the strongest animately --lossy levels on smooth_gradient. These
+    tests lock in the conclusion that the [0, 1] clamp in
+    calculate_comprehensive_metrics_from_frames is a defensive guard, NOT the
+    source of that bump-up — the bump-up is animately-side saturation.
+    """
+
+    def _gradient_pair(self):
+        # Two 64x64 RGB gradient frames; comp differs slightly. Realistic SSIM
+        # range for these is well inside [0, 1], so the clamp must be a no-op.
+        x = np.tile(np.linspace(0, 255, 64, dtype=np.float32), (64, 1))
+        orig = np.stack([x, x, x], axis=-1).astype(np.uint8)
+        comp = np.clip(orig.astype(np.float32) + 5.0, 0, 255).astype(np.uint8)
+        return [orig], [comp]
+
+    def test_clamp_is_noop_for_typical_ssim_values(self):
+        """SSIM on slightly-perturbed gradients is well inside [0, 1] — the
+        clamp must not change the reported value.
+        """
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        orig_frames, comp_frames = self._gradient_pair()
+        config = MetricsConfig()
+        if hasattr(config, "USE_PARALLEL"):
+            config.USE_PARALLEL = False
+        if hasattr(config, "ENABLE_PARALLEL_METRICS"):
+            config.ENABLE_PARALLEL_METRICS = False
+
+        m = calculate_comprehensive_metrics_from_frames(
+            orig_frames, comp_frames, config=config
+        )
+        ssim_val = m.get("ssim_mean", m.get("ssim"))
+        assert ssim_val is not None
+        # On a tiny perturbation of a gradient, SSIM should be high but
+        # strictly less than 1 — meaning the clamp's upper bound was not
+        # actively reached.
+        assert 0.5 < ssim_val < 1.0, (
+            f"SSIM {ssim_val} hit a clamp boundary unexpectedly; the audit "
+            f"smooth_gradient bump-up was NOT caused by clamping and this "
+            f"test is the guard for that conclusion."
+        )
+
+    def test_identical_frames_score_at_clamp_upper_bound(self):
+        """Sanity check: identical frames score SSIM == 1.0 (clamp permits
+        the upper bound, doesn't truncate it).
+        """
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        x = np.tile(np.linspace(0, 255, 64, dtype=np.float32), (64, 1))
+        frame = np.stack([x, x, x], axis=-1).astype(np.uint8)
+        config = MetricsConfig()
+        if hasattr(config, "USE_PARALLEL"):
+            config.USE_PARALLEL = False
+        if hasattr(config, "ENABLE_PARALLEL_METRICS"):
+            config.ENABLE_PARALLEL_METRICS = False
+
+        m = calculate_comprehensive_metrics_from_frames(
+            [frame], [frame.copy()], config=config
+        )
+        ssim_val = m.get("ssim_mean", m.get("ssim"))
+        assert ssim_val == pytest.approx(1.0, abs=1e-6)
+
+
 class TestEdgeCases:
     """Tests for edge cases and error conditions."""
 

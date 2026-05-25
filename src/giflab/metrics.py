@@ -465,6 +465,14 @@ def calculate_safe_psnr(
 
     Returns:
         PSNR value, with 100.0 dB returned for perfect matches
+
+    Note:
+        Investigated in the 2026-05-22 metrics audit as a possible source of
+        the smooth_gradient "bump-up" at strong animately lossy levels. Ruled
+        out: the only clamp is the MSE==0 perfect-match cap at 100 dB, which
+        does not activate for lossy compression. The bump-up is an
+        animately-side saturation artefact — see comment on the SSIM clamp
+        site in this file and scripts/audit/sanity.py:LOSSY_LEVELS.
     """
     try:
         # Check for perfect match first to avoid divide by zero
@@ -572,6 +580,17 @@ def calculate_ms_ssim(
 
     Returns:
         MS-SSIM value between 0.0 and 1.0
+
+    Note:
+        Investigated in the 2026-05-22 metrics audit as a possible source of
+        the smooth_gradient "bump-up" at strong animately lossy levels. Ruled
+        out: this function has no clamping or NaN-replacement that could mask
+        a monotonic ordering. The bump-up is an animately-side saturation
+        artefact (its --lossy parameter caps around level ~125 on
+        low-complexity gradient content, producing distinct but bounded
+        outputs whose local-window similarity differs by ~0.005). See
+        comment on the SSIM clamp site in this file and
+        scripts/audit/sanity.py:LOSSY_LEVELS.
     """
     if frame1.shape != frame2.shape:
         frame2 = resize_frame_cached(
@@ -1692,6 +1711,18 @@ def calculate_selected_metrics(
                     orig_gray = orig_frame
                     comp_gray = comp_frame
                 frame_ssim = ssim(orig_gray, comp_gray, data_range=255.0)
+                # NOTE: defensive clamp to [0, 1] guards against numerical edge
+                # cases only. skimage SSIM returns values in [-1, 1]; a slightly
+                # negative result on totally dissimilar frames maps to 0 here.
+                # This clamp is NOT the cause of the smooth_gradient lossy
+                # "bump-up" investigated in docs/metrics-audit/2026-05-22 — raw
+                # per-frame SSIM also bumps. The root cause is animately's
+                # --lossy parameter saturating around level ~125 on
+                # low-complexity gradient content: the audit grid samples
+                # [20, 60, 100, 160], and the last two levels straddle the
+                # saturation knee, producing two distinct outputs whose
+                # local-window SSIM happens to differ by ~0.005. See sanity.py
+                # LOSSY_LEVELS comment.
                 metric_values["ssim"].append(max(0.0, min(1.0, frame_ssim)))
             except Exception as e:
                 logger.warning(f"SSIM calculation failed: {e}")
@@ -2396,6 +2427,10 @@ def calculate_comprehensive_metrics_from_frames(
                         comp_gray = comp_frame
 
                     frame_ssim = ssim(orig_gray, comp_gray, data_range=255.0)
+                    # See defensive-clamp NOTE at the primary SSIM site (search
+                    # "smooth_gradient lossy" in this file). Clamp is a guard
+                    # for the [-1, 1] edge case, not the source of the audit's
+                    # smooth_gradient SSIM bump-up.
                     metric_values["ssim"].append(max(0.0, min(1.0, frame_ssim)))
                 except Exception as e:
                     logger.warning(f"SSIM calculation failed for frame: {e}")
