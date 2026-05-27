@@ -25,6 +25,66 @@ class TestQualityThresholdValidator:
         assert "min_composite_quality" in validator.catastrophic_thresholds
         assert validator.catastrophic_thresholds["min_composite_quality"] == 0.1
 
+    # --- Naming-correctness tests (FR: single-stream labelling honesty) ---
+
+    def test_threshold_key_named_compressed_not_bare(self):
+        """The floor threshold must be labelled 'min_compressed_temporal_consistency'.
+
+        The underlying metric (temporal_consistency) is computed only on the
+        compressed stream (it is temporal_consistency_post), NOT an
+        original-vs-compressed pair.  Using a bare 'min_temporal_consistency'
+        key implies a pair-comparison that does not exist — see CLAUDE.md
+        'Pair-wise over single-stream — and labelled honestly'.
+        """
+        validator = QualityThresholdValidator()
+        assert "min_compressed_temporal_consistency" in validator.catastrophic_thresholds
+        assert validator.catastrophic_thresholds["min_compressed_temporal_consistency"] == 0.1
+
+    def test_old_bare_threshold_key_absent(self):
+        """The old bare key 'min_temporal_consistency' must not appear.
+
+        Retaining both keys would let callers read the bare name and believe
+        they hold a pair-signal, silently defeating the rename.
+        """
+        validator = QualityThresholdValidator()
+        assert "min_temporal_consistency" not in validator.catastrophic_thresholds
+
+    def test_check_metric_outliers_uses_renamed_threshold(self):
+        """_check_metric_outliers must look up min_compressed_temporal_consistency.
+
+        Regression: if the method still reads the old bare key it will raise
+        KeyError (key absent) or silently use a wrong default.
+        """
+        validator = QualityThresholdValidator()
+        metrics = {
+            "ssim_mean": 0.8,
+            "mse_mean": 500.0,
+            "psnr_mean": 30.0,
+            "temporal_consistency": 0.15,  # Above 0.1 floor
+        }
+        # Must not raise; threshold must be found via the renamed key.
+        checks = validator._check_metric_outliers(metrics)
+        assert "temporal" in checks
+        assert checks["temporal"]["threshold"] == 0.1
+        assert checks["temporal"]["acceptable"] is True
+
+    def test_check_metric_outliers_below_renamed_threshold(self):
+        """Compressed-stream instability below floor must be flagged as unacceptable."""
+        validator = QualityThresholdValidator()
+        metrics = {
+            "temporal_consistency": 0.05,  # Below 0.1 floor
+        }
+        checks = validator._check_metric_outliers(metrics)
+        assert checks["temporal"]["acceptable"] is False
+
+    def test_check_metric_outliers_frame_reduction_uses_renamed_threshold(self):
+        """Frame-reduction path must also source its lenient threshold without error."""
+        validator = QualityThresholdValidator()
+        metrics = {"temporal_consistency": 0.07}  # Above 0.05, below 0.10
+        checks = validator._check_metric_outliers(metrics, frame_reduction_context=True)
+        # 0.07 >= 0.05 → acceptable under the lenient frame-reduction path
+        assert checks["temporal"]["acceptable"] is True
+
     def test_quality_validator_custom_config(self):
         """Test quality validator with custom metrics config."""
         custom_config = Mock()
