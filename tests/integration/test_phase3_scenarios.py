@@ -860,11 +860,15 @@ class TestCombinedScenarios:
         # Should detect text content and degradation
         assert text_result["has_text_ui_content"] is True
 
-        # OCR confidence delta can vary - just verify it's a reasonable number
+        # Verify the OCR delta metric is computed when regions are analyzed.
+        # No magnitude/direction assertion: delta = comp_conf - orig_conf and
+        # _extract_text_confidence clamps to [0.0, 1.0], so delta is bounded in [-1.0, 1.0]
+        # by construction (any abs() bound up to 1.0 is a no-op). Tesseract on synthetic
+        # text fixtures is noisy in both directions — the prior "reasonable number" check
+        # provided zero protection because the structural clamp already enforces it.
         if text_result["ocr_regions_analyzed"] > 0:
-            assert (
-                abs(text_result["ocr_conf_delta_mean"]) <= 1.0
-            )  # Should be in a reasonable range
+            assert "ocr_conf_delta_mean" in text_result
+            assert isinstance(text_result["ocr_conf_delta_mean"], float)
 
     def test_comprehensive_pipeline_realistic_content(self, fixture_generator):
         """Test comprehensive pipeline with realistic mixed content."""
