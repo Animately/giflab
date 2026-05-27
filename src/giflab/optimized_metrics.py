@@ -11,6 +11,75 @@ Performance optimizations implemented:
 3. Early termination strategies for expensive metrics
 4. Streamlined control flow with reduced conditional branching
 5. Optimized OpenCV and NumPy operations
+
+===========================================================================
+SCHEMA DIVERGENCE FROM MAIN PATH — READ BEFORE CONSUMING THIS MODULE
+===========================================================================
+
+``calculate_optimized_comprehensive_metrics`` (Phase 6 optimized path) emits
+a **different key schema** from the main paths
+``calculate_comprehensive_metrics`` and
+``calculate_comprehensive_metrics_from_frames`` in ``giflab.metrics``.
+
+Keys ABSENT from the Phase 6 output
+-------------------------------------
+The following keys are emitted by the main paths but are intentionally
+**absent** from the Phase 6 result dict:
+
+* ``temporal_consistency_compressed`` — main path: temporal consistency of
+  compressed frames only (post-compression stream).
+* ``temporal_consistency_original`` — main path: temporal consistency of
+  original frames only (pre-compression stream).
+* ``disposal_artifacts_compressed`` and ``disposal_artifacts_original`` —
+  main path: disposal artifact score on compressed vs original stream.
+* ``<temporal_key>_compressed`` aliases (``flicker_excess_compressed``,
+  ``flicker_frame_ratio_compressed``, etc.) — main path: enhanced temporal
+  metrics measured on the compressed stream only, aliased with ``_compressed``
+  suffix to document the single-stream limitation.
+
+Why they are absent
+-------------------
+Phase 6 measures temporal consistency on the **compressed stream only**
+(see ``FastTemporalConsistency.calculate_optimized``).  It cannot separate
+original-stream from compressed-stream values because the algorithm does not
+run the same calculation on the original stream.
+
+Per the "Same key shape across paths" rule in ``CLAUDE.md``::
+
+    If the optimized path can't compute ``_pre``/``_post`` separately,
+    document that prominently rather than silently aliasing — silent
+    equivalence lies to the consumer about what was actually measured.
+
+Emitting ``temporal_consistency_compressed = temporal_consistency_original =
+temporal_consistency`` would fabricate a measurement that never happened.
+Consumers reading two keys named ``_compressed`` and ``_original`` reasonably
+expect them to describe different streams.
+
+Keys PRESENT that differ in semantics
+--------------------------------------
+``temporal_consistency_pre`` and ``temporal_consistency_post`` are both set
+to the same value as ``temporal_consistency`` (compressed-stream score)
+because Phase 6 cannot separate the two.  This is a legacy shape retained
+for structural compatibility; the comment in the code marks the limitation.
+
+Consumer guidance
+-----------------
+If your code reads ``temporal_consistency_compressed``,
+``temporal_consistency_original``, or any ``_compressed``/``_original`` alias
+from the result dict, **disable Phase 6** by not setting
+``GIFLAB_ENABLE_PHASE6_OPTIMIZATION=true``.  The main path in
+``giflab.metrics`` always computes these correctly.
+
+The metadata flag ``_optimization_applied: True`` in the result dict can be
+used as a programmatic sentinel to detect Phase 6 output and skip
+alias-dependent logic.
+
+Regression test
+---------------
+``tests/functional/test_phase6_schema_contract.py`` locks this contract.
+It asserts which keys are present and which are absent.  If a future change
+adds silent equivalence aliases, those tests will fail intentionally.
+===========================================================================
 """
 
 import logging
@@ -506,11 +575,26 @@ def calculate_optimized_comprehensive_metrics(
             result[f"{metric_name}_max"] = 0.0
             result[metric_name] = 0.0
 
-    # Add temporal consistency
+    # Add temporal consistency.
+    #
+    # SCHEMA LIMITATION: Phase 6 measures temporal consistency on the
+    # compressed stream only (FastTemporalConsistency.calculate_optimized
+    # receives compressed_resized, not a pair).  Therefore:
+    #
+    #   - temporal_consistency_compressed   NOT emitted (would fabricate)
+    #   - temporal_consistency_original     NOT emitted (would fabricate)
+    #
+    # _pre and _post are both set to the same compressed-stream score for
+    # structural shape compatibility only; they do NOT represent independent
+    # stream measurements.  See the module docstring "SCHEMA DIVERGENCE"
+    # section and CLAUDE.md "Same key shape across paths" rule.
+    #
+    # To get the _compressed/_original distinction, disable Phase 6 and
+    # use calculate_comprehensive_metrics_from_frames in giflab.metrics.
     result["temporal_consistency"] = float(temporal_consistency)
     result["temporal_consistency_pre"] = float(
         temporal_consistency
-    )  # Simplified for optimization
+    )  # Same as _post — compressed stream only; see above.
     result["temporal_consistency_post"] = float(temporal_consistency)
     result["temporal_consistency_delta"] = 0.0
 
