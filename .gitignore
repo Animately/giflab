@@ -210,3 +210,16 @@ elimination_results
 
 # Benchmark results and performance analysis data
 benchmark_results/
+
+# Audit infrastructure — keep scripts/audit/, audit/sanity.json, audit/pilot.csv,
+# audit/manifest.json, audit/pilot_decisions.json, and audit/README.md tracked.
+# Exclude regeneratable / large artefacts. Both rules are anchored to the repo
+# root with a leading slash for consistency (prevents accidental matches in any
+# nested audit/ directory that might appear in tests/ or fixtures).
+# NB: gitignore does NOT support inline trailing comments — keep comments on
+# their own line. ".../foo.gif  # comment" treats the entire string as a literal
+# pattern and silently fails to match.
+# Generated GIF corpus — regenerate with scripts/audit/build_sample.py
+/audit/synthetic/
+# Derived sweep output — regenerate after each fix wave
+/audit/sweep.csv
