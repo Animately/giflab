@@ -28,6 +28,22 @@ poetry run python -c "from giflab.metrics import calculate_metrics"
 3. **Version Consistency**: Poetry locks dependency versions for reproducible builds
 4. **Project Structure**: `src/giflab/` package structure requires Poetry's path handling
 
+## 🎯 **Metric accuracy is load-bearing — read this before touching any metric**
+
+The metrics in `src/giflab/metrics.py`, `src/giflab/enhanced_metrics.py`, `src/giflab/temporal_artifacts.py`, and `src/giflab/gradient_color_artifacts.py` are the foundation everything else builds on — `gifprep`, the prediction-features pipeline (`src/giflab/prediction/`), the audit harness (`scripts/audit/`), `composite_quality`, and any downstream selection or ranking. **A small error in a metric becomes a systematic error in everything downstream.** Lossy compression scores, audit verdicts, ML training data, gifprep's quality decisions — all inherit metric mistakes.
+
+When implementing or modifying a metric, **prefer the more accurate approach over the pragmatic shortcut, even if it means more code**. The 2026-05-22 metrics audit surfaced multiple bugs of the same shape: a fix correctly addressed the named failure mode but introduced a new failure mode adjacent to it (cliff-edge thresholds, sentinel-instead-of-NaN, single-stream-mislabeled-as-pair). The pattern to avoid:
+
+- **Continuous over discrete.** Avoid hard thresholds that produce cliff-edges (`if x > T: worst else: best`). Any threshold has a discontinuity that downstream consumers cannot smooth over. Use smooth degradation instead — e.g. `score = max(0.0, 1.0 - distance / scale)`. If you find yourself picking a threshold value, ask whether the same code could be a smooth function with no threshold.
+- **NaN over fabricated values.** When a metric genuinely can't be computed (mismatched frame counts, missing binary, subprocess crashes, undefined-on-input), return `float("nan")` and aggregate with `np.nanmean` / `np.nanpercentile` / `np.nanmin`. Never substitute sentinels like `0.5`, `1.0`, `-1.0`, or `50.0` — they silently corrupt every aggregate and propagate as fake data through `composite_quality`, validators, and CSV exports. Downstream NaN-handling guards must use NaN-aware comparisons (`any([nan, nan])` is `True` in Python — that catches most people out).
+- **Pair-wise over single-stream — and labelled honestly.** If a key is named like a pair-comparison (`temporal_consistency`, `texture_similarity`, `disposal_artifacts`), it must measure original-vs-compressed. If it actually only measures the compressed stream, name it `_compressed` and document the limitation. Never let a single-stream value be weighted into `composite_quality` as if it were a pair signal — a perfectly-static-black compressed output will silently win.
+- **Honest error paths end-to-end.** When a metric fails, propagate the failure all the way through. Validator guards that read possibly-NaN values must use NaN-aware comparisons. CSV serialisation must round-trip NaN. Composite formulas must redistribute weight when an input is missing, not silently default it to zero or one.
+- **Same key shape across paths.** `calculate_comprehensive_metrics`, `_from_frames`, the Phase 6 optimized path, and any future fast path must emit the same key schema for the same conceptual content. If the optimized path can't compute `_pre`/`_post` separately, document that prominently rather than silently aliasing — silent equivalence lies to the consumer about what was actually measured.
+
+**"Within reason"** means: don't burn weeks on academic perfection for a metric used in one diagnostic-only place. But for anything that feeds `composite_quality`, the audit pipeline, ML feature extraction, or selection/ranking — the accuracy choice always wins. Extra 30 lines now saves "why is our composite_quality lower than it should be" investigations later, and worse: it saves us from publishing benchmarks built on quietly wrong numbers.
+
+If a PR has a "pragmatic" version and a "more accurate" version, document both in the PR body and pick the more accurate one. Only fall back to pragmatic if the accuracy choice has a real cost (e.g. >2× runtime regression). Performance and accuracy usually don't trade off — the cleaner implementation is often faster too.
+
 ## Common Command Patterns
 
 ### Testing
@@ -208,11 +224,24 @@ These tests are **correctly skipped** during normal test runs:
 ## For AI Assistants: Key Reminders
 
 1. **ALWAYS** use `poetry run` for Python execution
-2. **NEVER** use bare `python`, `pip`, or `pytest` commands  
+2. **NEVER** use bare `python`, `pip`, or `pytest` commands
 3. **ANIMATELY**: Always use `--input file.gif --output out.gif` (never positional args)
 4. **CHECK** that you're prefixing commands with `poetry run`
 5. **TEST** commands with `poetry run` if unsure
 6. **REMEMBER** this is a Poetry project - dependencies require the virtual environment
+7. **METRICS**: Read the "Metric accuracy is load-bearing" section above before touching `metrics.py`, `enhanced_metrics.py`, `temporal_artifacts.py`, or `gradient_color_artifacts.py`. Continuous over discrete, NaN over sentinels, pair-wise honestly labelled. The accuracy choice wins unless it costs >2× runtime.
+
+## ⚠️ Known gotchas
+
+**`gh pr edit --body ...` can silently exit 1.** GitHub's "Projects (classic) deprecated" GraphQL error causes `gh pr edit` to exit non-zero even when the body would otherwise update fine. Agents that don't check the exit code think the edit succeeded — but the body never lands. Observed in the [[giflab-rollout-2026-05-26]] rollout during PR #22's round-2 follow-up.
+
+**Workaround**: use the REST API directly:
+
+```
+gh api -X PATCH repos/Animately/giflab/pulls/<N> -f body="<body content>"
+```
+
+The REST endpoint doesn't touch projects-classic and exits 0 on success. Verify the change landed via `gh pr view <N> --json body`.
 
 ## Agent Teams
 
