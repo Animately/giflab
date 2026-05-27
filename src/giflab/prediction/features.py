@@ -462,23 +462,57 @@ def _calculate_dominant_color_ratio(pixels: np.ndarray) -> float:
 
 
 def _calculate_transparency_ratio(gif_path: Path) -> float:
-    """Calculate ratio of transparent pixels in the GIF."""
+    """Calculate ratio of transparent pixels averaged across all frames of the GIF.
+
+    Transparency is determined by the alpha channel after ``convert('RGBA')``,
+    which reads the GIF's declared transparency index to set alpha=0. This is
+    stable across palette reordering (unlike naive ``convert('RGB')`` which
+    resolves the colour under the transparent index — the PR #8 / audit-fix
+    concern). The alpha value is the same regardless of what colour occupies
+    the transparent palette slot.
+
+    Bug-fix audit (2026-05-27):
+    - Previously only sampled frame 0, which is unrepresentative for animated
+      GIFs where transparency coverage varies per frame. Now averages across
+      ALL frames using ``img.n_frames`` so that a single unusual frame cannot
+      dominate.
+    - Previously returned ``0.0`` on any exception, violating the CLAUDE.md
+      'NaN over fabricated values' rule. Now returns ``float('nan')`` so that
+      callers can detect measurement failure and downstream aggregations
+      (``composite_quality``, ML feature tables) handle it correctly via
+      ``np.nanmean`` / NaN-aware guards.
+
+    Args:
+        gif_path: Path to the GIF file to analyse.
+
+    Returns:
+        Mean transparent-pixel ratio in [0.0, 1.0] across all frames, or
+        ``float('nan')`` if the file cannot be read or has no frames.
+    """
     try:
         with Image.open(gif_path) as img:
             if img.mode != "RGBA" and "transparency" not in img.info:
                 return 0.0
 
-            # Check first frame
-            img_rgba = img.convert("RGBA")
-            alpha = np.array(img_rgba)[:, :, 3]
-            transparent_pixels = np.sum(alpha < 128)
-            total_pixels = alpha.size
+            n_frames = getattr(img, "n_frames", 1)
+            frame_ratios: list[float] = []
 
-            return float(transparent_pixels / total_pixels)
+            for frame_idx in range(n_frames):
+                img.seek(frame_idx)
+                img_rgba = img.convert("RGBA")
+                alpha = np.array(img_rgba)[:, :, 3]
+                transparent_pixels = np.sum(alpha < 128)
+                total_pixels = alpha.size
+                frame_ratios.append(float(transparent_pixels / total_pixels))
+
+            if not frame_ratios:
+                return float("nan")
+
+            return float(np.mean(frame_ratios))
 
     except Exception as e:
         logger.debug(f"Could not calculate transparency for {gif_path}: {e}")
-        return 0.0
+        return float("nan")
 
 
 def compute_gif_sha(gif_path: Path) -> str:
