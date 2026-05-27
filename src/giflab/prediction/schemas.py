@@ -184,11 +184,25 @@ class GifFeaturesV1(BaseModel):
     )
 
     # Transparency
-    transparency_ratio: float = Field(
-        default=0.0,
+    #
+    # ``None`` is the schema-compatible 'unmeasurable' sentinel for
+    # transparency_ratio. The previous design returned ``float('nan')`` on
+    # error, but Pydantic V2 evaluates NaN against ``le=1.0`` and raises
+    # ValidationError — so any unreadable / corrupt GIF would hard-crash
+    # ``extract_gif_features()`` (PR #19 reviewer-confirmed blocker).
+    #
+    # ``None`` is round-tripped to NULL in SQLite (``gif_features``
+    # storage column is nullable per the same fix) and coerced to ``np.nan``
+    # inside ``CurvePredictionModel._features_to_matrix`` where bounds
+    # validation no longer applies and sklearn can choose how to handle it.
+    transparency_ratio: float | None = Field(
+        default=None,
         ge=0.0,
         le=1.0,
-        description="Ratio of transparent pixels",
+        description=(
+            "Ratio of transparent pixels averaged across all frames. "
+            "None when the GIF could not be decoded for transparency analysis."
+        ),
     )
 
     @field_validator("gif_sha")
