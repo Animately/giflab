@@ -10,6 +10,11 @@ context — animately's --lossy parameter saturates around level ~125 on
 low-complexity content, so consecutive lossy grid points past the knee
 produce byte-identical compressed outputs (or near-identical ones) whose
 metric values trivially "bump up" by floating-point noise.
+
+See ~/repos/obsidian/Work/Tasks/giflab-audit-monotonicity-tolerance-content-aware.md
+for context on the range-derived tolerance fix — the old fixed tol=1e-4 was
+too tight for metrics with wider observed ranges, flagging noise-floor flips
+as SUSPICIOUS even when they were well within the metric's resolution.
 """
 
 from __future__ import annotations
@@ -44,8 +49,10 @@ class TestMonotonicityCheck:
         assert sanity._monotonicity_check([0.0, 1.0, 5.0, 10.0], "lower_better") == []
 
     def test_lower_better_inversion(self) -> None:
-        # 5.0 -> 4.9 is an inversion (got smaller when larger expected).
-        invs = sanity._monotonicity_check([0.0, 1.0, 5.0, 4.9], "lower_better")
+        # 5.0 -> 3.0 is a clear inversion (40% of range — well above the 5%
+        # noise floor). With range-derived tol = max(1e-4, 5.0*0.05) = 0.25,
+        # the drop of 2.0 is flagged as a real inversion.
+        invs = sanity._monotonicity_check([0.0, 1.0, 5.0, 3.0], "lower_better")
         assert len(invs) == 1
 
     def test_flat_direction_returns_empty(self) -> None:
@@ -58,6 +65,68 @@ class TestMonotonicityCheck:
             [0.9, 0.85, 0.85 + 5e-5, 0.84], "higher_better"
         )
         assert invs == []
+
+    def test_range_derived_tol_absorbs_noise_floor_flip(self) -> None:
+        """A flip well within 5% of the observed range should not be flagged.
+
+        Scenario: a metric with observed range 0.1 (values 0.8–0.9) has a
+        small bump of +0.004 at the last level — this is a noise-floor flip
+        (4% of the range) that the old fixed tol=1e-4 incorrectly flagged as
+        SUSPICIOUS. The range-derived tol (max(1e-4, 0.1 * 0.05) = 0.005)
+        should absorb it.
+
+        This is the motivating case from
+        ~/repos/obsidian/Work/Tasks/giflab-audit-monotonicity-tolerance-content-aware.md
+        and the chist investigation (PR #11): metrics saturated near their
+        ceiling have an effective resolution set by their observed range, not
+        by a universal fixed epsilon.
+        """
+        # Observed range: 0.9 - 0.8 = 0.1
+        # Flip size at index 2→3: 0.804 - 0.800 = 0.004
+        # Old tol=1e-4: 0.004 > 1e-4 → would be flagged
+        # New tol=max(1e-4, 0.1 * 0.05)=0.005: 0.004 < 0.005 → absorbed
+        invs = sanity._monotonicity_check(
+            [0.9, 0.85, 0.800, 0.804], "higher_better"
+        )
+        assert invs == [], (
+            f"Expected no inversions for a noise-floor flip (0.004) within "
+            f"5% of the observed range (0.1), but got: {invs}"
+        )
+
+    def test_range_derived_tol_still_flags_real_inversions(self) -> None:
+        """A large inversion (>5% of range) must still be flagged.
+
+        Sanity check: the range-derived tolerance does not suppress real
+        monotonicity violations, only noise-floor flips.
+        """
+        # Observed range: 0.9 - 0.6 = 0.3
+        # Flip size: 0.75 - 0.6 = 0.15 (50% of range — clearly real)
+        invs = sanity._monotonicity_check(
+            [0.9, 0.75, 0.6, 0.75], "higher_better"
+        )
+        assert len(invs) == 1, (
+            "Expected exactly one inversion for a large flip (50% of range); "
+            f"got {invs}"
+        )
+
+    def test_range_derived_tol_lower_better(self) -> None:
+        """Range-derived tolerance works symmetrically for lower_better metrics."""
+        # Observed range: 10.0 - 8.0 = 2.0
+        # Flip size at index 2→3: 8.2 - 8.3 = -0.1 (went down when should go up)
+        # Old tol=1e-4: 0.1 > 1e-4 → flagged
+        # New tol=max(1e-4, 2.0*0.05)=0.1: 0.1 <= 0.1 → absorbed (boundary case)
+        # Use 0.09 to be safely inside:
+        # values: [8.0, 8.8, 9.0, 8.91] — flip from 9.0 to 8.91 = -0.09
+        # range: 9.0 - 8.0 = 1.0; tol = max(1e-4, 1.0*0.05)=0.05
+        # flip 0.09 > 0.05 → still flagged. Use smaller flip:
+        # values: [8.0, 8.8, 9.0, 8.96] — flip = -0.04, tol=0.05 → absorbed
+        invs = sanity._monotonicity_check(
+            [8.0, 8.8, 9.0, 8.96], "lower_better"
+        )
+        assert invs == [], (
+            f"Expected no inversions for lower_better noise flip (0.04) "
+            f"within 5% of observed range (1.0), but got: {invs}"
+        )
 
 
 class TestCoalesceByteIdenticalLevels:
