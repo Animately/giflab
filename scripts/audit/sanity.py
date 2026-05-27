@@ -423,6 +423,12 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
         if not skip_lossy:
             kind = "lossy"
             per_metric_levels = defaultdict(list)
+            # Track paths in the same order as per_metric_levels so we can
+            # coalesce consecutive byte-identical outputs (animately's --lossy
+            # saturates around level ~125 on low-complexity content, producing
+            # literally identical bytes which would otherwise generate spurious
+            # monotonicity inversions from floating-point noise).
+            degraded_paths: list[Path] = []
             for level in LOSSY_LEVELS:
                 degraded_path = workdir / f"{base_name}_lossy_{level}.gif"
                 try:
@@ -435,8 +441,22 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                 m = run_metrics(base_path, degraded_path, gl=gl)
                 for k, v in m.items():
                     per_metric_levels[k].append(v)
+                degraded_paths.append(degraded_path)
             if per_metric_levels:
-                monotonicity[(kind, base_name)] = dict(per_metric_levels)
+                # Drop consecutive byte-identical outputs before storing for
+                # monotonicity check — see _coalesce_byte_identical_levels.
+                _, coalesced_metrics = _coalesce_byte_identical_levels(
+                    degraded_paths, dict(per_metric_levels)
+                )
+                dropped = len(degraded_paths) - len(
+                    next(iter(coalesced_metrics.values()), [])
+                )
+                if dropped > 0:
+                    print(
+                        f"[sanity]     coalesced {dropped} byte-identical lossy level(s) on {base_name}",
+                        flush=True,
+                    )
+                monotonicity[(kind, base_name)] = coalesced_metrics
 
     # ---- Verdict per metric ----
     print("[sanity] Computing verdicts...", flush=True)
