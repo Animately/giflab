@@ -48,9 +48,18 @@ TEMPORAL_FIXTURES = [
     "static_with_noise.gif",
 ]
 
+#: Sanity-audit regression-guard fixtures.
+#: These guard specific bug classes discovered in the audit (e.g. PR #8
+#: alpha-compositing).  Each has a corresponding entry in
+#: ``sanity.FIXTURE_MONOTONICITY_BASES`` and a direct test class in
+#: ``tests/smoke/test_audit_sanity_helpers.py``.
+AUDIT_FIXTURES = [
+    "transparency_bearing_monotonicity.gif",
+]
+
 #: Complete set — union of all sub-generators
 ALL_EXPECTED_FIXTURES: list[str] = (
-    ENGINE_FIXTURES + VALIDATION_FIXTURES + TEMPORAL_FIXTURES
+    ENGINE_FIXTURES + VALIDATION_FIXTURES + TEMPORAL_FIXTURES + AUDIT_FIXTURES
 )
 
 

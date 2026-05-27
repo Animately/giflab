@@ -582,6 +582,125 @@ def create_static_with_noise_gif(output_dir: Path) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# Sanity-audit transparency fixture
+# ---------------------------------------------------------------------------
+
+
+def create_transparency_bearing_monotonicity_gif(output_dir: Path) -> Path:
+    """4-frame, 64×64 palette GIF with a transparency index for sanity monotonicity tests.
+
+    Guards against the alpha-compositing regression class surfaced in PR #8:
+    ``extract_gif_frames`` previously called ``Image.convert('RGB')`` directly,
+    which resolved transparent pixels via the GIF's declared background palette
+    colour.  That colour is **unstable across re-encoding** — compressors
+    rearrange the palette during recompression, so the original and compressed
+    copies of the same visible content have transparent regions filled with
+    *different* RGB values.  Every pair-comparison metric then treats the
+    difference as real content disagreement and collapses.
+
+    This fixture is a transparency-bearing GIF (palette mode P with a
+    ``transparency`` metadata key that designates one palette index as
+    transparent) so that:
+
+    - Adding it to ``MONOTONICITY_BASES`` in ``scripts/audit/sanity.py`` means
+      the sanity harness runs noise/blur/quantize degradation sequences through
+      the full metrics pipeline on transparency-bearing content.  If the
+      compositing fix is ever reverted, the unstable transparent-region
+      rendering will pollute metric values with palette-dependent noise, causing
+      spurious inversions that the monotonicity check will flag as SUSPICIOUS.
+
+    - The smoke test ``TestTransparencyBearingGifFixture`` (in
+      ``tests/smoke/test_audit_sanity_helpers.py``) directly demonstrates the
+      regression: the fixture decodes to very different RGB values depending
+      on whether the buggy ``convert('RGB')`` path or the correct RGBA-composite
+      path is used.
+
+    Content: four hue-shifted colour gradient frames (sufficient variation for
+    noise/blur/quantize degradation sequences to be ordered) with a fixed
+    transparent oval in the bottom-right corner.
+
+    Palette construction:
+
+    - Quantise each frame's RGB content to 255 colours (palette indices 0–254).
+    - Reserve palette index 255 as the ``transparency`` sentinel; set it to
+      white (255, 255, 255) — this is what the correct RGBA-composite path
+      produces for fully transparent pixels.
+    - Set every pixel inside the oval to index 255.
+    - Save with ``transparency=255`` so the GIF header marks index 255 as
+      the transparent palette entry.
+
+    With the **buggy** ``img.convert('RGB')`` path, PIL resolves palette index
+    255 to the colour in the file's palette table.  Because that entry is white
+    ``(255, 255, 255)`` in this fixture, re-encoding (which rearranges the
+    palette) will map a *different* non-white colour to those pixels, causing
+    the visible-content mismatch that corrupts pair-comparison metrics.
+
+    Determinism: all random state is seeded; output is byte-identical across
+    runs on the same Python / Pillow version.
+    """
+    # Fixed transparent palette index — palette slots 0..254 are content colours;
+    # slot 255 is reserved as the transparency sentinel.
+    _TRANSPARENT_INDEX = 255
+
+    # Four hue-shifted colour gradients: enough variation for degradation
+    # sequences (noise/blur/quantize) to produce an ordered metric response.
+    hues = [(220, 80, 60), (60, 200, 80), (60, 80, 220), (200, 180, 60)]
+
+    # Build the transparency mask once — same oval for every frame so the
+    # mask is deterministic and independent of frame content.
+    transparent_mask = np.zeros((64, 64), dtype=bool)
+    cx, cy, rx, ry = 50, 50, 12, 10  # oval centre (col, row), semi-axes
+    for row in range(64):
+        for col in range(64):
+            if ((col - cx) / rx) ** 2 + ((row - cy) / ry) ** 2 <= 1.0:
+                transparent_mask[row, col] = True
+
+    p_frames: list[Image.Image] = []
+    for hue in hues:
+        # Build RGB gradient: top row is full hue colour; bottom row is dark.
+        arr_rgb = np.zeros((64, 64, 3), dtype=np.uint8)
+        for row in range(64):
+            blend = row / 63.0
+            arr_rgb[row, :] = (
+                int(hue[0] * (1 - blend) + 40 * blend),
+                int(hue[1] * (1 - blend) + 40 * blend),
+                int(hue[2] * (1 - blend) + 40 * blend),
+            )
+        img_rgb = Image.fromarray(arr_rgb, mode="RGB")
+
+        # Quantise to 255 colours; palette indices 0..254 cover all content.
+        p = img_rgb.quantize(
+            colors=255, dither=Image.Dither.NONE, method=Image.Quantize.MEDIANCUT
+        )
+
+        # Extend palette to 256 entries; slot 255 = white (the RGBA-composite
+        # result for a fully-transparent pixel composited onto white).
+        palette = list(p.getpalette())  # 768 values (256 × RGB), partially used
+        palette[_TRANSPARENT_INDEX * 3 : _TRANSPARENT_INDEX * 3 + 3] = [255, 255, 255]
+
+        # Stamp the oval with the transparency index.
+        p_arr = np.array(p, dtype=np.uint8).copy()
+        p_arr[transparent_mask] = _TRANSPARENT_INDEX
+
+        frame = Image.fromarray(p_arr, mode="P")
+        frame.putpalette(palette)
+        p_frames.append(frame)
+
+    output_path = output_dir / "transparency_bearing_monotonicity.gif"
+    p_frames[0].save(
+        output_path,
+        save_all=True,
+        append_images=p_frames[1:],
+        duration=100,
+        loop=0,
+        transparency=_TRANSPARENT_INDEX,
+        disposal=2,
+        optimize=False,
+    )
+    return output_path
+
+
+# ---------------------------------------------------------------------------
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
@@ -628,6 +747,8 @@ def generate_all(output_dir: Path | None = None) -> list[Path]:
         create_disposal_clean_gif,
         create_smooth_animation_gif,
         create_static_with_noise_gif,
+        # Sanity-audit transparency fixture (guards PR #8 alpha-compositing regression)
+        create_transparency_bearing_monotonicity_gif,
     ]
 
     created: list[Path] = []
