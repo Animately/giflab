@@ -1522,16 +1522,50 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
 # --------------------------------------------------------------------------- #
 
 
-def _aggregate_metric(values: list[float], metric_name: str) -> dict[str, float]:
+# Metrics whose per-frame distributions are heavy-tailed toward 1.0 on
+# sparse-edge content (Canny union==0 guard), causing ``np.max`` to be
+# INCONCLUSIVE and ``np.mean`` to be non-monotonic under palette reduction.
+# For these metrics, ``_aggregate_metric`` uses ``np.median`` as the primary
+# aggregation instead of ``np.mean``.
+#
+# Background: smooth-gradient GIFs quantized to few colours develop banding
+# edges in the compressed stream that aren't in the original, so most
+# frame pairs score near-zero Jaccard.  However, when *neither* stream has
+# any detectable edges (both flat colour patches within the Canny window),
+# the ``union == 0`` guard in ``edge_similarity()`` returns 1.0.  A ``mean``
+# aggregation is dragged upward by these 1.0 outliers and produces
+# non-monotonic scores as the palette shrinks further (scores go 1.0 →
+# ~0 → 0.02 → 0.04 at [256, 64, 16, 4] colours — audit 2026-05-22, report.md
+# line 105–106).  ``np.median`` ignores the outliers and faithfully reflects
+# the typical frame quality (task: giflab-edge-similarity-max-aggregation-
+# sparse-edges, Wave 2 of giflab-rollout-2026-05-26).
+_MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(["edge_similarity"])
+
+
+def _aggregate_metric(
+    values: list[float],
+    metric_name: str,
+    primary_agg: Any | None = None,
+) -> dict[str, float]:
     """Aggregate frame-level metric values into descriptive statistics.
 
     Args:
         values: List of frame-level metric values
         metric_name: Name of the metric for key generation
+        primary_agg: Callable that reduces a 1-D np.ndarray to a scalar.
+            When ``None`` (default), the function resolves the aggregation
+            automatically: metrics listed in ``_MEDIAN_AGGREGATED_METRICS``
+            (currently just ``edge_similarity``) use ``np.median``; all
+            others use ``np.mean``.
 
     Returns:
-        Dictionary with mean, std, min, max for the metric
+        Dictionary with primary (median or mean), std, min, max for the metric.
+        The primary key equals ``metric_name``; sub-keys are always the
+        full min/max/std regardless of the primary aggregation function.
     """
+    if primary_agg is None:
+        primary_agg = np.median if metric_name in _MEDIAN_AGGREGATED_METRICS else np.mean
+
     if not values:
         return {
             metric_name: 0.0,
@@ -1552,7 +1586,7 @@ def _aggregate_metric(values: list[float], metric_name: str) -> dict[str, float]
         }
 
     return {
-        metric_name: float(np.mean(values_array)),
+        metric_name: float(primary_agg(values_array)),
         f"{metric_name}_std": float(np.std(values_array)),
         f"{metric_name}_min": float(np.min(values_array)),
         f"{metric_name}_max": float(np.max(values_array)),
@@ -1806,6 +1840,8 @@ def calculate_selected_metrics(
 
     # Aggregate frame-level metrics
     # Add "_mean" suffix to match expected format for composite quality calculation
+    # Note: _aggregate_metric auto-selects the primary aggregation function from
+    # _MEDIAN_AGGREGATED_METRICS (e.g. edge_similarity uses median, others use mean).
     for metric_name, values in metric_values.items():
         aggregated = _aggregate_metric(values, metric_name)
         # Rename the main metric to have "_mean" suffix for compatibility
@@ -2881,6 +2917,8 @@ def calculate_comprehensive_metrics_from_frames(
         result: dict[str, float | str] = {}
 
         # Add aggregated metrics
+        # Note: _aggregate_metric auto-selects the primary aggregation function from
+        # _MEDIAN_AGGREGATED_METRICS (e.g. edge_similarity uses median, others use mean).
         for metric_name, values in metric_values.items():
             result.update(_aggregate_metric(values, metric_name))
 
