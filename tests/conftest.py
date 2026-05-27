@@ -35,7 +35,12 @@ def _create_dummy_gif(path: Path, frames: int = 1, colors: int = 2) -> None:
 
 
 def _ensure_required_gif_fixtures() -> None:
-    """Regenerate core GIF fixtures if they were cleaned from git."""
+    """Regenerate core GIF fixtures if they were cleaned from git.
+
+    Simple fixtures (small, dummy-quality) are recreated inline.
+    Higher-fidelity fixtures delegate to ``tests/fixtures/_generators.py``
+    so the generation logic is importable and reusable by other scripts.
+    """
     fixtures = {
         "simple_4frame.gif": (4, 4),
         "single_frame.gif": (1, 2),
@@ -46,6 +51,13 @@ def _ensure_required_gif_fixtures() -> None:
         gif_path = base / name
         if not gif_path.exists():
             _create_dummy_gif(gif_path, frames=frames, colors=colors)
+
+    # test_4_frames.gif — 4-frame, 80×80 px, solid-colour frames.
+    # Used by tests/functional/test_quality_validation.py and integration tests.
+    # Generated deterministically via _generators.py (importable by scripts).
+    from tests.fixtures._generators import ensure_test_4_frames_gif
+
+    ensure_test_4_frames_gif(base)
 
 
 # Run at import time so all downstream fixtures see the files
