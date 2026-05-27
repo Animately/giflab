@@ -237,7 +237,17 @@ class GifLabStorage:
 
                     -- Compressibility
                     lossless_compression_ratio REAL NOT NULL,
-                    transparency_ratio REAL NOT NULL,
+                    -- transparency_ratio: nullable. NULL means
+                    -- _calculate_transparency_ratio() failed to decode the
+                    -- GIF (corrupt file, missing transparency_ratio metadata,
+                    -- PIL seek error, …). Pydantic schema field is
+                    -- ``float | None``; SQLite stores NULL; the ML feature
+                    -- matrix coerces NULL → np.nan. See PR #19 review:
+                    -- the prior REAL NOT NULL constraint combined with
+                    -- ``return float('nan')`` from the helper caused
+                    -- Pydantic ValidationError to crash extract_gif_features
+                    -- on any unreadable GIF.
+                    transparency_ratio REAL,
 
                     -- CLIP content classification scores
                     clip_screen_capture REAL,
@@ -352,11 +362,102 @@ class GifLabStorage:
                 except sqlite3.OperationalError:
                     pass  # column already exists
 
+            # Idempotent migration: drop NOT NULL on gif_features.transparency_ratio
+            # (PR #19 follow-up). SQLite has no ALTER COLUMN, so we detect the
+            # old constraint via PRAGMA and rebuild the table only if needed.
+            self._migrate_transparency_ratio_nullable(conn)
+
             conn.commit()
             self.logger.debug(f"Initialized GifLab storage: {self.db_path}")
 
             # Populate param presets
             self._populate_param_presets(conn)
+
+    def _migrate_transparency_ratio_nullable(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        """Drop the NOT NULL constraint on gif_features.transparency_ratio.
+
+        PR #19 review: the Pydantic field changed to ``float | None`` so the
+        SQLite column must accept NULL. SQLite cannot alter a column
+        constraint in place, so we detect the prior constraint via PRAGMA
+        table_info and rebuild only when necessary (idempotent).
+        """
+        try:
+            cols = conn.execute("PRAGMA table_info(gif_features)").fetchall()
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet — fresh DB, the new CREATE TABLE above
+            # already used the nullable definition. Nothing to do.
+            return
+
+        transparency_col = next(
+            (c for c in cols if c["name"] == "transparency_ratio"), None
+        )
+        if transparency_col is None:
+            return  # column missing entirely — let CREATE TABLE handle it
+
+        # PRAGMA table_info row exposes `notnull` as 1 if NOT NULL is set.
+        if transparency_col["notnull"] == 0:
+            return  # already nullable, nothing to migrate
+
+        self.logger.info(
+            "Migrating gif_features.transparency_ratio: dropping NOT NULL"
+        )
+        # Rebuild table preserving all data. The new column list matches the
+        # CREATE TABLE above EXCEPT for `transparency_ratio REAL` (no NOT NULL).
+        conn.executescript(
+            """
+            PRAGMA foreign_keys = OFF;
+            BEGIN;
+
+            CREATE TABLE gif_features__new (
+                gif_sha TEXT PRIMARY KEY,
+                gif_name TEXT NOT NULL,
+                file_path TEXT,
+                width INTEGER NOT NULL,
+                height INTEGER NOT NULL,
+                frame_count INTEGER NOT NULL,
+                duration_ms INTEGER NOT NULL,
+                file_size_bytes INTEGER NOT NULL,
+                unique_colors INTEGER NOT NULL,
+                entropy REAL NOT NULL,
+                edge_density REAL NOT NULL,
+                color_complexity REAL NOT NULL,
+                gradient_smoothness REAL NOT NULL,
+                contrast_score REAL NOT NULL,
+                text_density REAL NOT NULL,
+                dct_energy_ratio REAL NOT NULL,
+                color_histogram_entropy REAL NOT NULL,
+                dominant_color_ratio REAL NOT NULL,
+                motion_intensity REAL NOT NULL,
+                motion_smoothness REAL NOT NULL,
+                static_region_ratio REAL NOT NULL,
+                temporal_entropy REAL NOT NULL,
+                frame_similarity REAL NOT NULL,
+                inter_frame_mse_mean REAL NOT NULL,
+                inter_frame_mse_std REAL NOT NULL,
+                lossless_compression_ratio REAL NOT NULL,
+                transparency_ratio REAL,
+                clip_screen_capture REAL,
+                clip_vector_art REAL,
+                clip_photography REAL,
+                clip_hand_drawn REAL,
+                clip_3d_rendered REAL,
+                clip_pixel_art REAL,
+                feature_extraction_version TEXT NOT NULL,
+                extracted_at TEXT NOT NULL,
+                compression_complete BOOLEAN DEFAULT FALSE
+            );
+
+            INSERT INTO gif_features__new SELECT * FROM gif_features;
+
+            DROP TABLE gif_features;
+            ALTER TABLE gif_features__new RENAME TO gif_features;
+
+            COMMIT;
+            PRAGMA foreign_keys = ON;
+            """
+        )
 
     def _populate_param_presets(self, conn: sqlite3.Connection) -> None:
         """Populate the param_presets table with standard grid."""

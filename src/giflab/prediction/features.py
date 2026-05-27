@@ -461,7 +461,7 @@ def _calculate_dominant_color_ratio(pixels: np.ndarray) -> float:
     return float(dominant_ratio)
 
 
-def _calculate_transparency_ratio(gif_path: Path) -> float:
+def _calculate_transparency_ratio(gif_path: Path) -> float | None:
     """Calculate ratio of transparent pixels averaged across all frames of the GIF.
 
     Transparency is determined by the alpha channel after ``convert('RGBA')``,
@@ -477,17 +477,21 @@ def _calculate_transparency_ratio(gif_path: Path) -> float:
       ALL frames using ``img.n_frames`` so that a single unusual frame cannot
       dominate.
     - Previously returned ``0.0`` on any exception, violating the CLAUDE.md
-      'NaN over fabricated values' rule. Now returns ``float('nan')`` so that
-      callers can detect measurement failure and downstream aggregations
-      (``composite_quality``, ML feature tables) handle it correctly via
-      ``np.nanmean`` / NaN-aware guards.
+      'NaN over fabricated values' rule (PR #19 review). NaN was the first
+      attempted fix but it broke Pydantic schema validation (the
+      ``GifFeaturesV1.transparency_ratio`` field has ``le=1.0`` and Pydantic
+      V2 rejects NaN against any comparison bound — verified). The schema
+      now accepts ``float | None``, and this helper returns ``None`` on any
+      decode/seek failure. ``None`` round-trips cleanly through SQLite as
+      NULL (the ``gif_features`` column is nullable) and is coerced to
+      ``np.nan`` inside the ML feature matrix where bounds no longer apply.
 
     Args:
         gif_path: Path to the GIF file to analyse.
 
     Returns:
         Mean transparent-pixel ratio in [0.0, 1.0] across all frames, or
-        ``float('nan')`` if the file cannot be read or has no frames.
+        ``None`` if the GIF could not be decoded for transparency analysis.
     """
     try:
         with Image.open(gif_path) as img:
@@ -506,13 +510,18 @@ def _calculate_transparency_ratio(gif_path: Path) -> float:
                 frame_ratios.append(float(transparent_pixels / total_pixels))
 
             if not frame_ratios:
-                return float("nan")
+                # Defensive: any GIF that opens but yields no frames is
+                # treated as unmeasurable. Reaching this branch should be
+                # impossible after a successful Image.open() since PIL
+                # always exposes at least frame 0, but we don't want a
+                # malformed file to slip a zero ratio into the ML pipeline.
+                return None
 
             return float(np.mean(frame_ratios))
 
     except Exception as e:
         logger.debug(f"Could not calculate transparency for {gif_path}: {e}")
-        return float("nan")
+        return None
 
 
 def compute_gif_sha(gif_path: Path) -> str:
