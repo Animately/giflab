@@ -6,9 +6,24 @@ configurable thresholds, and multi-metric validation combinations.
 """
 
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Any
+
+
+def _is_missing(v: object) -> bool:
+    """Return True when *v* is absent or unmeasurable.
+
+    A value is considered missing when it is:
+    - ``None`` — the metric was never computed, or
+    - ``float("nan")`` — the metric was attempted but failed end-to-end.
+
+    Any real float (including 0.0 and negatives) is NOT missing.  This is the
+    canonical predicate used throughout the validation guards so that
+    ``any([nan, nan])``-style NaN-truthy bugs cannot arise.
+    """
+    return v is None or (isinstance(v, float) and math.isnan(v))
 
 from ..meta import GifMetadata
 from .config import load_validation_config
@@ -395,7 +410,7 @@ class ValidationChecker:
 
         composite_quality = compression_metrics.get("composite_quality")
 
-        if composite_quality is None:
+        if _is_missing(composite_quality):
             result.warnings.append(
                 ValidationWarning(
                     category="quality_threshold",
@@ -439,7 +454,7 @@ class ValidationChecker:
 
         efficiency = compression_metrics.get("efficiency")
 
-        if efficiency is None:
+        if _is_missing(efficiency):
             result.warnings.append(
                 ValidationWarning(
                     category="efficiency_threshold",
@@ -476,7 +491,7 @@ class ValidationChecker:
         disposal_post = compression_metrics.get("disposal_artifacts_post")
         disposal_delta = compression_metrics.get("disposal_artifacts_delta")
 
-        if not disposal_pre or not disposal_post:
+        if _is_missing(disposal_pre) or _is_missing(disposal_post):
             result.warnings.append(
                 ValidationWarning(
                     category="disposal_artifacts",
@@ -491,7 +506,7 @@ class ValidationChecker:
         if (
             disposal_pre < artifact_threshold
             or disposal_post < artifact_threshold
-            or (disposal_delta is not None and abs(disposal_delta) > delta_threshold)
+            or (not _is_missing(disposal_delta) and abs(disposal_delta) > delta_threshold)
         ):
             result.issues.append(
                 ValidationIssue(
@@ -514,7 +529,7 @@ class ValidationChecker:
 
         temporal_score = compression_metrics.get("temporal_consistency_post")
 
-        if temporal_score is None:
+        if _is_missing(temporal_score):
             result.warnings.append(
                 ValidationWarning(
                     category="temporal_consistency",
@@ -638,8 +653,8 @@ class ValidationChecker:
         temporal_pumping = compression_metrics.get("temporal_pumping_score")
         lpips_t_mean = compression_metrics.get("lpips_t_mean")
 
-        if not any(
-            [flicker_excess, flat_flicker_ratio, temporal_pumping, lpips_t_mean]
+        if all(
+            _is_missing(v) for v in (flicker_excess, flat_flicker_ratio, temporal_pumping, lpips_t_mean)
         ):
             result.warnings.append(
                 ValidationWarning(
@@ -651,7 +666,7 @@ class ValidationChecker:
 
         # Validate flicker excess
         flicker_threshold = thresholds.get("flicker_excess_threshold", 0.02)
-        if flicker_excess is not None and flicker_excess > flicker_threshold:
+        if not _is_missing(flicker_excess) and flicker_excess > flicker_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="flicker_excess",
@@ -666,7 +681,7 @@ class ValidationChecker:
         # Validate flat region flicker
         flat_flicker_threshold = thresholds.get("flat_flicker_ratio_threshold", 0.1)
         if (
-            flat_flicker_ratio is not None
+            not _is_missing(flat_flicker_ratio)
             and flat_flicker_ratio > flat_flicker_threshold
         ):
             result.issues.append(
@@ -681,7 +696,7 @@ class ValidationChecker:
 
         # Validate temporal pumping
         pumping_threshold = thresholds.get("temporal_pumping_threshold", 0.15)
-        if temporal_pumping is not None and temporal_pumping > pumping_threshold:
+        if not _is_missing(temporal_pumping) and temporal_pumping > pumping_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="temporal_pumping",
@@ -694,7 +709,7 @@ class ValidationChecker:
 
         # Validate LPIPS-T for perceptual temporal consistency
         lpips_threshold = thresholds.get("lpips_t_threshold", 0.05)
-        if lpips_t_mean is not None and lpips_t_mean > lpips_threshold:
+        if not _is_missing(lpips_t_mean) and lpips_t_mean > lpips_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="perceptual_temporal_degradation",
@@ -725,19 +740,30 @@ class ValidationChecker:
             compression_metrics.get("deep_perceptual_device", "fallback") != "fallback"
         )
 
-        if (
-            not any([lpips_quality_mean, lpips_quality_p95, lpips_quality_max])
-            or not deep_perceptual_used
-        ):
-            # Only warn if deep perceptual was expected but unavailable
-            composite_quality = compression_metrics.get("composite_quality")
-            if (
-                composite_quality is not None and 0.3 <= composite_quality <= 0.7
-            ):  # Borderline quality
+        all_lpips_missing = all(
+            _is_missing(v) for v in (lpips_quality_mean, lpips_quality_p95, lpips_quality_max)
+        )
+        if all_lpips_missing or not deep_perceptual_used:
+            if not deep_perceptual_used:
+                # Deep perceptual not attempted — only warn for borderline quality.
+                composite_quality = compression_metrics.get("composite_quality")
+                if (
+                    not _is_missing(composite_quality) and 0.3 <= composite_quality <= 0.7
+                ):  # Borderline quality
+                    result.warnings.append(
+                        ValidationWarning(
+                            category="deep_perceptual_unavailable",
+                            message="Deep perceptual metrics unavailable for borderline quality case",
+                            recommendation="Consider investigating why LPIPS calculation failed",
+                        )
+                    )
+            else:
+                # deep_perceptual_used=True but all scores missing: measurement failed.
+                # Always warn regardless of composite_quality.
                 result.warnings.append(
                     ValidationWarning(
                         category="deep_perceptual_unavailable",
-                        message="Deep perceptual metrics unavailable for borderline quality case",
+                        message="Deep perceptual (LPIPS) metrics unavailable despite device being active — measurement failed end-to-end",
                         recommendation="Consider investigating why LPIPS calculation failed",
                     )
                 )
@@ -746,7 +772,7 @@ class ValidationChecker:
         # Validate LPIPS quality - higher scores indicate more perceptual difference (worse quality)
         lpips_threshold = thresholds.get("lpips_quality_threshold", 0.3)
 
-        if lpips_quality_mean is not None and lpips_quality_mean > lpips_threshold:
+        if not _is_missing(lpips_quality_mean) and lpips_quality_mean > lpips_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="perceptual_quality_degradation",
@@ -760,7 +786,7 @@ class ValidationChecker:
 
         # Validate extreme cases with p95 metric
         extreme_threshold = thresholds.get("lpips_quality_extreme_threshold", 0.5)
-        if lpips_quality_p95 is not None and lpips_quality_p95 > extreme_threshold:
+        if not _is_missing(lpips_quality_p95) and lpips_quality_p95 > extreme_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="extreme_perceptual_degradation",
@@ -774,7 +800,7 @@ class ValidationChecker:
 
         # Check for very high maximum values that indicate severe artifacts
         max_threshold = thresholds.get("lpips_quality_max_threshold", 0.7)
-        if lpips_quality_max is not None and lpips_quality_max > max_threshold:
+        if not _is_missing(lpips_quality_max) and lpips_quality_max > max_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="severe_perceptual_artifacts",
@@ -789,8 +815,8 @@ class ValidationChecker:
         # Combination check: Low composite quality + High LPIPS = Comprehensive quality degradation
         composite_quality = compression_metrics.get("composite_quality")
         if (
-            composite_quality is not None
-            and lpips_quality_mean is not None
+            not _is_missing(composite_quality)
+            and not _is_missing(lpips_quality_mean)
             and composite_quality < 0.6
             and lpips_quality_mean > 0.2
         ):
@@ -819,22 +845,23 @@ class ValidationChecker:
         ssimulacra2_min = compression_metrics.get("ssimulacra2_min")
         ssimulacra2_triggered = compression_metrics.get("ssimulacra2_triggered", 0.0)
 
-        if (
-            not any([ssimulacra2_mean, ssimulacra2_p95, ssimulacra2_min])
-            or ssimulacra2_triggered == 0.0
-        ):
-            # Only warn if SSIMULACRA2 was expected but unavailable
-            composite_quality = compression_metrics.get("composite_quality")
-            if (
-                composite_quality is not None and composite_quality < 0.7
-            ):  # Borderline quality
-                result.warnings.append(
-                    ValidationWarning(
-                        category="ssimulacra2_unavailable",
-                        message="SSIMULACRA2 metrics unavailable for borderline quality case",
-                        recommendation="Check if ssimulacra2 binary is installed and accessible",
-                    )
+        all_scores_missing = all(
+            _is_missing(v) for v in (ssimulacra2_mean, ssimulacra2_p95, ssimulacra2_min)
+        )
+        if all_scores_missing or ssimulacra2_triggered == 0.0:
+            if ssimulacra2_triggered == 0.0:
+                # Explicitly disabled — skip silently.
+                return
+            # triggered=1.0 but all scores missing: measurement failed end-to-end.
+            # Always warn; the original borderline-only guard was too narrow and left
+            # higher-quality GIFs silently unchecked when ssimulacra2 crashed.
+            result.warnings.append(
+                ValidationWarning(
+                    category="ssimulacra2_unavailable",
+                    message="SSIMULACRA2 metrics unavailable despite being triggered — measurement failed end-to-end",
+                    recommendation="Check if ssimulacra2 binary is installed and accessible",
                 )
+            )
             return
 
         # Validate SSIMULACRA2 quality - scores are normalized (0-1, higher = better quality)
@@ -845,7 +872,7 @@ class ValidationChecker:
         thresholds.get("ssimulacra2_high_threshold", 0.7)  # High quality
 
         # Check mean quality
-        if ssimulacra2_mean is not None and ssimulacra2_mean < low_threshold:
+        if not _is_missing(ssimulacra2_mean) and ssimulacra2_mean < low_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="ssimulacra2_poor_quality",
@@ -856,7 +883,7 @@ class ValidationChecker:
                     severity="CRITICAL",
                 )
             )
-        elif ssimulacra2_mean is not None and ssimulacra2_mean < medium_threshold:
+        elif not _is_missing(ssimulacra2_mean) and ssimulacra2_mean < medium_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="ssimulacra2_medium_quality",
@@ -869,7 +896,7 @@ class ValidationChecker:
             )
 
         # Check worst case (minimum) quality
-        if ssimulacra2_min is not None and ssimulacra2_min < low_threshold:
+        if not _is_missing(ssimulacra2_min) and ssimulacra2_min < low_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="ssimulacra2_worst_frame",
@@ -882,7 +909,7 @@ class ValidationChecker:
             )
 
         # Check 95th percentile quality
-        if ssimulacra2_p95 is not None and ssimulacra2_p95 < medium_threshold:
+        if not _is_missing(ssimulacra2_p95) and ssimulacra2_p95 < medium_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="ssimulacra2_poor_consistency",
@@ -897,8 +924,8 @@ class ValidationChecker:
         # Combination check: SSIMULACRA2 disagrees with composite quality
         composite_quality = compression_metrics.get("composite_quality")
         if (
-            composite_quality is not None
-            and ssimulacra2_mean is not None
+            not _is_missing(composite_quality)
+            and not _is_missing(ssimulacra2_mean)
             and composite_quality > 0.7  # High composite quality
             and ssimulacra2_mean < medium_threshold  # But poor perceptual quality
         ):
