@@ -210,3 +210,9 @@ elimination_results
 
 # Benchmark results and performance analysis data
 benchmark_results/
+
+# Audit infrastructure — keep scripts/audit/, audit/sanity.json, audit/pilot.csv,
+# audit/manifest.json, and audit/pilot_decisions.json tracked.
+# Exclude regeneratable / large artefacts:
+audit/synthetic/          # Generated GIF corpus — regenerate with scripts/audit/build_sample.py
+/audit/sweep.csv          # Derived sweep output — regenerate after each fix wave
