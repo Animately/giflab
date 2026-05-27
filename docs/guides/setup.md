@@ -164,6 +164,24 @@ This installs all required packages:
 - **Quality Metrics**: scipy, scikit-learn
 - **Testing**: pytest, pytest-cov
 
+3. Generate test fixtures:
+```bash
+make fixtures
+```
+
+Test fixture GIFs live in `tests/fixtures/` but are gitignored (they are
+binary files generated from code).  `make fixtures` runs
+`scripts/fixtures/generate.py` which deterministically recreates every
+fixture from fixed seeds — no external tools required, only Pillow + NumPy.
+
+**You must run this after a fresh clone, after switching to a new git
+worktree, or whenever `make test` reports missing fixture files.**
+
+```bash
+# Combined one-liner for fresh setup
+poetry install && make fixtures && make test
+```
+
 ### Step 5: Environment Variables (Optional)
 
 Configure custom engine paths if needed:

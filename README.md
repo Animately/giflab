@@ -368,6 +368,17 @@ poetry run pytest tests/smoke/ -v
 
 ## Testing
 
+### Test Fixtures
+
+Test fixture GIFs (`tests/fixtures/*.gif`) are gitignored.  After a fresh
+clone or in a new git worktree, regenerate them before running tests:
+
+```bash
+make fixtures       # Regenerate all test GIF fixtures (deterministic, no external tools)
+```
+
+### Test Layers
+
 Tests are organized into four layers. New tests must go in the correct layer.
 
 | Layer | Path | Purpose | Time budget |
@@ -378,6 +389,7 @@ Tests are organized into four layers. New tests must go in the correct layer.
 | nightly | `tests/nightly/` | Memory, perf, stress, golden | No limit |
 
 ```bash
+make fixtures       # Regenerate gitignored GIF fixtures (run once after clone / worktree)
 make test           # Fast feedback: smoke + functional (<2min)
 make test-ci        # CI: + integration (<5min)
 make test-nightly   # Everything including perf/memory

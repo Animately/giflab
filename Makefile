@@ -14,7 +14,12 @@ CSV_PATH := $(CSV_DIR)/results_$(DATE).csv
 # TARGETS
 # -----------------------------------------------------------------------------
 
-.PHONY: data help clean-temp clean-testing-mess test-workspace test test-ci test-nightly test-file benchmark-baseline benchmark-compare benchmark-ci performance-status performance-baseline performance-monitor performance-ci
+.PHONY: data help clean-temp clean-testing-mess test-workspace fixtures test test-ci test-nightly test-file benchmark-baseline benchmark-compare benchmark-ci performance-status performance-baseline performance-monitor performance-ci
+
+fixtures: ## Regenerate all gitignored GIF test fixtures deterministically (run after clone / in worktrees)
+	@echo "Generating GIF test fixtures into tests/fixtures/ ..."
+	poetry run python scripts/fixtures/generate.py
+	@echo "Done. Run 'make test' to verify."
 
 data: ## Run compression pipeline on RAW_DIR and generate EDA artefacts
 	@echo "🎞️  Running GifLab compression pipeline (raw=$(RAW_DIR))…"
