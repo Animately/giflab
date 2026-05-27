@@ -77,13 +77,30 @@ class TestQualityThresholdValidator:
         checks = validator._check_metric_outliers(metrics)
         assert checks["temporal"]["acceptable"] is False
 
-    def test_check_metric_outliers_frame_reduction_uses_renamed_threshold(self):
-        """Frame-reduction path must also source its lenient threshold without error."""
+    def test_check_metric_outliers_frame_reduction_branch_independent_of_rename(self):
+        """The frame-reduction branch uses a hardcoded 0.05 literal — verify the
+        rename did not accidentally route it through the renamed key.
+
+        NB: this test guards the *frame-reduction branch default* (the
+        hardcoded 0.05 literal in _check_metric_outliers), not the renamed
+        key.  The renamed-key path is exercised by
+        test_check_metric_outliers_uses_renamed_threshold via the
+        non-frame-reduction branch.  Asserting both branches in one test
+        with the same input (0.07) confirms (a) the branches still differ,
+        and (b) the rename only affected the non-frame-reduction lookup.
+        """
         validator = QualityThresholdValidator()
         metrics = {"temporal_consistency": 0.07}  # Above 0.05, below 0.10
-        checks = validator._check_metric_outliers(metrics, frame_reduction_context=True)
-        # 0.07 >= 0.05 → acceptable under the lenient frame-reduction path
-        assert checks["temporal"]["acceptable"] is True
+
+        # Frame-reduction branch: 0.07 >= 0.05 lenient literal → acceptable
+        lenient = validator._check_metric_outliers(metrics, frame_reduction_context=True)
+        assert lenient["temporal"]["threshold"] == 0.05
+        assert lenient["temporal"]["acceptable"] is True
+
+        # Non-frame-reduction branch: must read renamed key (0.10) → rejected
+        strict = validator._check_metric_outliers(metrics, frame_reduction_context=False)
+        assert strict["temporal"]["threshold"] == 0.1
+        assert strict["temporal"]["acceptable"] is False
 
     def test_quality_validator_custom_config(self):
         """Test quality validator with custom metrics config."""

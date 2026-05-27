@@ -663,7 +663,7 @@ if frame_reduction_context:
     # Use more lenient threshold based on research findings
     temporal_threshold = 0.05  # 5% threshold for frame reduction (vs 10% normal)
 else:
-    temporal_threshold = self.catastrophic_thresholds["min_temporal_consistency"]
+    temporal_threshold = self.catastrophic_thresholds["min_compressed_temporal_consistency"]
 ```
 
 ### 15.3 Pipeline Integration
