@@ -42,8 +42,13 @@ class QualityThresholdValidator:
             "min_ssim_mean": 0.2,  # SSIM below 20% is very bad
             "max_mse_mean": 10000.0,  # MSE above 10000 indicates major corruption
             "min_psnr_mean": 10.0,  # PSNR below 10dB is extremely poor
-            # Temporal consistency (animation-specific)
-            "min_temporal_consistency": 0.1,  # Severe temporal artifacts
+            # Compressed-stream stability floor (animation-specific).
+            # NB: the underlying metric (temporal_consistency) is computed only
+            # on the *compressed* stream (temporal_consistency_post), NOT as an
+            # original-vs-compressed pair.  The name reflects that single-stream
+            # reality — see CLAUDE.md "Pair-wise over single-stream — and
+            # labelled honestly".
+            "min_compressed_temporal_consistency": 0.1,  # Severe compressed-stream instability
             # Edge case protections
             "max_quality_variance": 0.9,  # Quality shouldn't vary wildly between frames
         }
@@ -296,7 +301,7 @@ class QualityThresholdValidator:
                 )
             else:
                 temporal_threshold = self.catastrophic_thresholds[
-                    "min_temporal_consistency"
+                    "min_compressed_temporal_consistency"
                 ]
 
             # Only compare if value is numeric

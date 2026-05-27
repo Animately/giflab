@@ -663,7 +663,7 @@ if frame_reduction_context:
     # Use more lenient threshold based on research findings
     temporal_threshold = 0.05  # 5% threshold for frame reduction (vs 10% normal)
 else:
-    temporal_threshold = self.catastrophic_thresholds["min_temporal_consistency"]
+    temporal_threshold = self.catastrophic_thresholds["min_compressed_temporal_consistency"]
 ```
 
 ### 15.3 Pipeline Integration
@@ -757,7 +757,7 @@ metrics = calculate_comprehensive_metrics(
 CONTEXT_AWARE_THRESHOLDS = {
     "frame_reduction": {
         "composite_quality": 0.05,  # vs 0.1 normal
-        "temporal_consistency": 0.05,        # vs 0.1 normal
+        "temporal_consistency": 0.05,        # vs 0.1 normal — metric output key (legacy alias); see min_compressed_temporal_consistency for the threshold-dict key
         "disposal_artifacts": {
             "density_threshold": 1.2,         # vs 1.1 normal (more lenient)
             "diff_threshold": 1.1,            # vs 1.05 normal (more lenient)
