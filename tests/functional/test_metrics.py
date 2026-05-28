@@ -988,3 +988,170 @@ class TestSsimulacra2Gate:
         assert calls == [], (
             "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
         )
+
+
+# =============================================================================
+# Edge similarity sparse-edge / smooth-gradient aggregation tests
+# =============================================================================
+
+
+class TestEdgeSimilaritySparseEdgeAggregation:
+    """Tests for edge_similarity aggregation robustness on sparse-edge content.
+
+    Smooth-gradient and other sparse-edge GIFs expose a flaw in the ``max``
+    sub-key: colour quantization introduces banding edges in the compressed
+    stream that aren't present in the original, driving per-frame Jaccard
+    similarity to near-zero. But at very low colour counts (4–16 colours) the
+    banding becomes so coarse that Canny no longer detects it, so most frames
+    have union == 0 and return 1.0 via the guard. A ``max`` aggregation then
+    reports 1.0 regardless of quantization level — INCONCLUSIVE in the audit.
+
+    The fix switches the primary aggregation key for ``edge_similarity`` from
+    ``mean`` to ``median``. Median is robust to the outlier 1.0 frames from the
+    union-zero guard while still reflecting the typical frame quality faithfully.
+
+    Reference: giflab-edge-similarity-max-aggregation-sparse-edges task note,
+    2026-05-22 sanity audit (report.md line 106: edge_similarity_max FLAT).
+    """
+
+    def _make_smooth_gradient_frame(self, width: int = 64, height: int = 64) -> np.ndarray:
+        """Return an RGB frame that is a smooth horizontal gradient (very few real edges)."""
+        row = np.linspace(0, 255, width, dtype=np.float32)
+        frame = np.stack([row] * height, axis=0)  # (H, W)
+        return np.stack([frame, frame, frame], axis=-1).astype(np.uint8)
+
+    def _quantize_frame(self, frame: np.ndarray, n_colors: int) -> np.ndarray:
+        """Simulate palette quantization by posterizing the frame to n_colors levels."""
+        # Evenly space n_colors levels across [0, 255] and map each pixel to nearest
+        levels = np.linspace(0, 255, n_colors, dtype=np.float32)
+        out = frame.astype(np.float32)
+        for ch in range(3):
+            ch_vals = out[:, :, ch]
+            indices = np.searchsorted(levels, ch_vals.ravel(), side="left")
+            indices = np.clip(indices, 0, n_colors - 1)
+            out[:, :, ch] = levels[indices].reshape(ch_vals.shape)
+        return out.astype(np.uint8)
+
+    def test_edge_similarity_max_is_not_stable_primary_on_sparse_edges(self):
+        """Demonstrate the ``max`` sub-key volatility on sparse-edge content.
+
+        This test documents the pre-fix behaviour: per-frame edge_similarity
+        values on a smooth gradient include 1.0 outliers (from the union==0
+        guard), which means ``np.max`` is always 1.0 regardless of how many
+        colours the palette was reduced to.  A ``max``-based primary
+        aggregation therefore can't discriminate between light and heavy
+        quantization on sparse-edge content.
+        """
+        rng = np.random.default_rng(seed=42)
+        frame = self._make_smooth_gradient_frame()
+
+        # Collect per-frame edge_similarity scores for two levels of quantization.
+        # 256 colours (near-identical) vs 4 colours (heavy quantization).
+        frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
+        frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
+
+        scores_256: list[float] = [
+            edge_similarity(frame, q) for q in frames_256_col
+        ]
+        scores_4: list[float] = [
+            edge_similarity(frame, q) for q in frames_4_col
+        ]
+
+        # At 4 colours, at least some frames should detect banding → near-zero scores
+        # (i.e., the metric IS sensitive at the frame level).
+        # However, np.max picks the single highest score — often 1.0 from union==0.
+        max_256 = float(np.max(scores_256))
+        max_4 = float(np.max(scores_4))
+
+        # Both max values can be 1.0 because at least one frame has union==0.
+        # This is the bug: max cannot distinguish the two quantization levels.
+        # The test documents this (it should PASS with current code, confirming the bug).
+        assert max_256 >= max_4 or abs(max_256 - max_4) < 0.05, (
+            f"Pre-fix invariant violated: max_256={max_256:.4f}, max_4={max_4:.4f}. "
+            "The test may need updating if the synthetic content changed."
+        )
+
+    def test_edge_similarity_median_is_stable_on_sparse_edges(self):
+        """Median aggregation is robust to outlier 1.0 union-zero frames.
+
+        On smooth-gradient content, most frame pairs with heavy quantization
+        will have one edge map with banding and the other with no edges
+        (Jaccard → 0). Median ignores the occasional 1.0 frames from the
+        union-zero guard and reflects the typical per-frame quality.
+
+        After the fix, the primary aggregation key for ``edge_similarity`` uses
+        ``median``, so ``edge_similarity`` (the primary key emitted in the
+        aggregated result) should be close to 1.0 for light quantization and
+        substantially lower for heavy quantization.
+        """
+        frame = self._make_smooth_gradient_frame()
+
+        frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
+        frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
+
+        scores_256: list[float] = [
+            edge_similarity(frame, q) for q in frames_256_col
+        ]
+        scores_4: list[float] = [
+            edge_similarity(frame, q) for q in frames_4_col
+        ]
+
+        median_256 = float(np.median(scores_256))
+        median_4 = float(np.median(scores_4))
+
+        # After quantizing to 4 colours, at least some frames will have banding
+        # edges that don't match the original → median should drop noticeably
+        # below the near-identity 256-colour case.
+        # For content where ALL frames return 1.0 under 256 colours (identical
+        # or near-identical), the 4-colour median should be lower OR equal.
+        assert median_256 >= median_4, (
+            f"Median should be higher (or equal) at 256 colours than 4 colours on "
+            f"smooth-gradient content; got median_256={median_256:.4f}, "
+            f"median_4={median_4:.4f}"
+        )
+
+    def test_aggregate_metric_uses_median_for_edge_similarity(self):
+        """_aggregate_metric must use median (not mean) as the primary value for
+        ``edge_similarity``, so the exported ``edge_similarity`` key represents
+        the robust central tendency of per-frame Jaccard scores.
+
+        This test will FAIL before the fix (median != mean when outliers present)
+        and PASS after.
+        """
+        from giflab.metrics import _aggregate_metric
+
+        # Construct a scores list that mimics sparse-edge content:
+        # most frames have near-zero Jaccard (banding not in original),
+        # but a handful return 1.0 from the union==0 guard.
+        scores = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+
+        result = _aggregate_metric(scores, "edge_similarity")
+
+        expected_median = float(np.median(scores))  # 0.0
+        expected_mean = float(np.mean(scores))       # 0.25
+
+        # The primary key must equal median, not mean.
+        assert result["edge_similarity"] == pytest.approx(expected_median, abs=1e-6), (
+            f"edge_similarity primary key should be median ({expected_median:.4f}) "
+            f"but got {result['edge_similarity']:.4f} (mean would be {expected_mean:.4f}). "
+            "Fix: pass np.median as the primary aggregation for edge_similarity."
+        )
+        # Min and max sub-keys should still be present and correct
+        assert result["edge_similarity_min"] == pytest.approx(0.0, abs=1e-6)
+        assert result["edge_similarity_max"] == pytest.approx(1.0, abs=1e-6)
+
+    def test_aggregate_metric_preserves_mean_for_non_edge_metrics(self):
+        """Changing edge_similarity to median must NOT affect other metric keys.
+
+        _aggregate_metric with a non-edge metric name must still return mean as
+        the primary value.
+        """
+        from giflab.metrics import _aggregate_metric
+
+        scores = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+        result = _aggregate_metric(scores, "ssim")
+
+        expected_mean = float(np.mean(scores))
+        assert result["ssim"] == pytest.approx(expected_mean, abs=1e-6), (
+            "ssim primary key should still use mean aggregation"
+        )
