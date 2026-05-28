@@ -228,6 +228,34 @@ class FrameExtractResult:
     duration_ms: int
 
 
+def _frame_to_rgb_composited(
+    img: Image.Image, background: tuple[int, int, int]
+) -> np.ndarray:
+    """Convert a PIL frame to RGB by compositing transparent pixels onto a fixed background.
+
+    Audit-fix: ``Image.convert('RGB')`` on a palette+transparency GIF resolves
+    transparent pixels through the file's declared background palette index.
+    That palette entry's COLOUR is unstable across re-encoding — animately
+    (and most compressors) rearrange the palette during recompression, so the
+    same transparent region resolves to a different RGB value in the original
+    vs. the compressed file. Every pixel-comparison metric (ssim, ms_ssim,
+    chist, lpips, …) then treats that as real content disagreement and
+    collapses, even on essentially lossless compressions.
+
+    Fix: always go via RGBA, then alpha-blend onto a fixed RGB background.
+    The result is invariant to palette ordering and to PIL's background-index
+    interpretation. White is the conventional choice for email/marketing
+    content (`MetricsConfig.ALPHA_BACKGROUND`).
+
+    See: `audit-fix/extract-gif-frames-alpha-compositing-bug` and the
+    `TestExtractGifFramesAlphaCompositing` regression test.
+    """
+    rgba = img.convert("RGBA")
+    bg = Image.new("RGBA", rgba.size, (*background, 255))
+    composited = Image.alpha_composite(bg, rgba).convert("RGB")
+    return np.array(composited)
+
+
 def extract_gif_frames(
     gif_path: Path, max_frames: int | None = None
 ) -> FrameExtractResult:
@@ -284,12 +312,20 @@ def extract_gif_frames(
                 duration_ms=duration_ms,
             )
 
+    # Audit-fix: composite RGBA onto a fixed background before returning RGB
+    # frames. PIL's `.convert('RGB')` on palette+transparency GIFs resolves
+    # transparent pixels via the file's background palette colour, which is
+    # unstable across re-encoding (palette gets reordered). White is the
+    # conventional choice for email/marketing content. See
+    # _frame_to_rgb_composited for the full rationale.
+    background = DEFAULT_METRICS_CONFIG.ALPHA_BACKGROUND
+
     # Not in cache, extract frames
     try:
         with Image.open(gif_path) as img:
             if not hasattr(img, "n_frames") or img.n_frames == 1:
                 # Single frame image (PNG, JPEG, etc.) or single-frame GIF
-                frame = np.array(img.convert("RGB"))
+                frame = _frame_to_rgb_composited(img, background)
                 result = FrameExtractResult(
                     frames=[frame],
                     frame_count=1,
@@ -344,7 +380,7 @@ def extract_gif_frames(
 
             for i in frame_indices:
                 img.seek(i)
-                frame = np.array(img.convert("RGB"))
+                frame = _frame_to_rgb_composited(img, background)
                 frames.append(frame)
 
                 # Get frame duration

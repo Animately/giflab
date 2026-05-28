@@ -1302,3 +1302,162 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         assert result["ssim"] == pytest.approx(expected_mean, abs=1e-6), (
             "ssim primary key should still use mean aggregation"
         )
+
+
+class TestExtractGifFramesAlphaCompositing:
+    """Regression tests for the alpha-compositing bug.
+
+    Bug: ``extract_gif_frames`` previously called ``Image.convert('RGB')``
+    directly, which resolves transparent palette indices through the GIF's
+    declared background colour. Animately (and other compressors) often
+    rearrange the palette during recompression, so the "background colour"
+    resolves differently for original vs. compressed copies of the same GIF
+    — even when the visible content is identical. Naively-extracted RGB
+    frames therefore disagree on the transparent regions and every metric
+    collapses.
+
+    These tests pin the fix: RGBA frames must be composited onto a fixed
+    background (white) before being returned as RGB, so identity-pair
+    extraction and identity-pair metrics behave as expected on
+    transparency-bearing GIFs.
+
+    Surfaced from audit/2026-05-22 — the corpus's #1 outlier
+    (``8e172835-…-244425430cd5.gif``) collapsed to ssim=0.116 purely
+    because of this rendering bug.
+    """
+
+    def _make_transparent_palette_gif(
+        self,
+        path: Path,
+        background_index: int,
+        n_frames: int = 2,
+        size: tuple[int, int] = (32, 32),
+    ) -> Path:
+        """Build a palette-mode animated GIF with a transparent index.
+
+        The visible content (a solid red square in the corner) is identical
+        regardless of ``background_index``. The bug is that the *unused*
+        background palette entry's COLOUR differs between two builds, so
+        ``.convert('RGB')`` resolves the transparent pixels to different
+        RGB values for files that look identical to a human.
+        """
+        # Construct a 4-entry palette: red, green, blue, yellow.
+        # background_index picks which entry is treated as transparent —
+        # callers vary this so the "transparent region resolves to red /
+        # green / blue / yellow" between the two GIFs even though the
+        # visible (non-transparent) content is the same.
+        palette = [
+            255, 0, 0,    # 0 = red
+            0, 255, 0,    # 1 = green
+            0, 0, 255,    # 2 = blue
+            255, 255, 0,  # 3 = yellow
+        ] + [0] * (256 * 3 - 12)
+
+        frames = []
+        for _ in range(n_frames):
+            # Fill entire frame with the transparent index so the
+            # transparent region dominates — mirrors the audit's
+            # 76% transparent GIF.
+            img = Image.new("P", size, background_index)
+            img.putpalette(palette)
+            # Stamp a small visible patch (index 0 = red) in the corner so
+            # the GIF actually has visible content too.
+            for y in range(0, 4):
+                for x in range(0, 4):
+                    img.putpixel((x, y), 0)
+            frames.append(img)
+
+        frames[0].save(
+            path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+            transparency=background_index,
+            disposal=2,
+        )
+        return path
+
+    def test_extracted_frames_are_stable_across_palette_reorder(self, tmp_path):
+        """Identical visible content with different palette → identical RGB frames.
+
+        This is the core invariant the fix enforces: an originally-transparent
+        pixel must composite to the SAME RGB value regardless of what colour
+        happened to occupy the background palette index.
+        """
+        gif_a = self._make_transparent_palette_gif(
+            tmp_path / "a.gif", background_index=1  # transparent ≈ green
+        )
+        gif_b = self._make_transparent_palette_gif(
+            tmp_path / "b.gif", background_index=2  # transparent ≈ blue
+        )
+
+        frames_a = extract_gif_frames(gif_a).frames
+        frames_b = extract_gif_frames(gif_b).frames
+
+        assert len(frames_a) == len(frames_b)
+        for fa, fb in zip(frames_a, frames_b):
+            # Frames must be byte-identical: same content, transparent
+            # region composited onto the same background colour.
+            assert np.array_equal(fa, fb), (
+                "extract_gif_frames returned different RGB pixels for "
+                "GIFs whose only difference is the unused background "
+                "palette colour. The transparent region must composite "
+                "to a fixed background regardless of palette ordering."
+            )
+
+    def test_identity_metrics_on_transparent_gif_hit_ceiling(self, tmp_path):
+        """metric(gif, gif) must return ceiling values for a transparent GIF.
+
+        Independent of palette weirdness — comparing a GIF against itself
+        must yield perfect metric scores. This is the simplest possible
+        regression test: any deviation from ceiling indicates the
+        extraction pipeline is introducing noise.
+        """
+        gif = self._make_transparent_palette_gif(
+            tmp_path / "transparent.gif", background_index=2
+        )
+
+        metrics = calculate_comprehensive_metrics(gif, gif)
+
+        # Identity-pair must hit ceiling on the pair-comparison metrics.
+        # (The high-quality tier in the optimisation pass may legitimately
+        # short-circuit some metrics; we assert ceiling for everything that
+        # IS reported plus the always-present composite.)
+        assert metrics["ssim"] == pytest.approx(1.0, abs=1e-6), metrics
+        assert metrics["mse"] == pytest.approx(0.0, abs=1e-6), metrics
+        assert metrics["composite_quality"] == pytest.approx(1.0, abs=1e-6), metrics
+        # ms_ssim and chist are conditionally computed; if present, ceiling.
+        if "ms_ssim" in metrics:
+            assert metrics["ms_ssim"] == pytest.approx(1.0, abs=1e-6), metrics
+        if "chist" in metrics:
+            assert metrics["chist"] == pytest.approx(1.0, abs=1e-6), metrics
+
+    def test_metrics_invariant_to_palette_reorder(self, tmp_path):
+        """Cross-pair metrics on visually-identical transparent GIFs hit ceiling.
+
+        This is the audit-corpus scenario in miniature: two GIFs that look
+        identical (same visible content, same transparent regions) but whose
+        underlying palette ordering differs — exactly what animately's lossy
+        re-encoding produces. Before the fix, the transparent regions
+        composited to different RGB values and every metric collapsed
+        (audit/2026-05-22 reported ssim=0.116 on the real corpus example).
+        After the fix, metrics should treat the two as essentially identical.
+        """
+        gif_a = self._make_transparent_palette_gif(
+            tmp_path / "a.gif", background_index=1
+        )
+        gif_b = self._make_transparent_palette_gif(
+            tmp_path / "b.gif", background_index=2
+        )
+
+        metrics = calculate_comprehensive_metrics(gif_a, gif_b)
+
+        # Visually-identical content should yield ceiling on the structural
+        # similarity metrics. Pre-fix this collapsed to ~0.12 on real GIFs.
+        assert metrics["ssim"] == pytest.approx(1.0, abs=1e-3), metrics
+        if "ms_ssim" in metrics:
+            assert metrics["ms_ssim"] == pytest.approx(1.0, abs=1e-3), metrics
+        if "chist" in metrics:
+            assert metrics["chist"] == pytest.approx(1.0, abs=1e-3), metrics
+        assert metrics["composite_quality"] == pytest.approx(1.0, abs=1e-3), metrics
