@@ -1768,7 +1768,27 @@ def edge_similarity(
 
 
 def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
-    """Texture-Histogram correlation using uniform LBP (0-1, higher is better)."""
+    """Texture-Histogram correlation using uniform LBP (0-1, higher is better).
+
+    Compares two frames via a Local Binary Pattern histogram correlation.
+    LBP is a TRUE PAIR-COMPARISON metric, but it has known mathematical
+    INVARIANCES that make some "obviously different" pairs report near 1.0:
+
+    - Intensity inversion: a frame and its inverted-intensity counterpart
+      produce nearly identical uniform-LBP histograms. White↔black
+      pathological pairs from the audit corpus report
+      ``texture_similarity ≈ 0.9996`` for this reason.
+    - Spatially-uniform regions: both frames being solid colours (any
+      colours) produce identical near-degenerate histograms and the
+      function returns 1.0 (see the ``np.std == 0`` early return).
+    - Monotonic intensity transforms more generally: LBP encodes local
+      ORDER relations between pixels, not absolute intensities, so any
+      monotone intensity remapping preserves the pattern.
+
+    Despite these invariances the metric is NOT single-stream — both
+    frames are required and the LBP statistics are compared. See
+    docs/metrics-audit/2026-05-22/report.md for the audit context.
+    """
     f1, f2 = _resize_if_needed(frame1, frame2)
 
     if f1.ndim == 3:
@@ -2624,6 +2644,14 @@ def calculate_comprehensive_metrics_from_frames(
                         optimized_results["temporal_consistency_delta"] = float(
                             temporal_delta
                         )
+                        # Audit-fix (Wave 3): explicit single-stream aliases
+                        # (see calculate_comprehensive_metrics_from_frames).
+                        optimized_results["temporal_consistency_compressed"] = float(
+                            temporal_post
+                        )
+                        optimized_results["temporal_consistency_original"] = float(
+                            temporal_pre
+                        )
                     except Exception as e:
                         logger.warning(f"Temporal consistency calculation failed: {e}")
                         # Use default values if calculation fails
@@ -2631,6 +2659,8 @@ def calculate_comprehensive_metrics_from_frames(
                         optimized_results["temporal_consistency_pre"] = 1.0
                         optimized_results["temporal_consistency_post"] = 1.0
                         optimized_results["temporal_consistency_delta"] = 0.0
+                        optimized_results["temporal_consistency_compressed"] = 1.0
+                        optimized_results["temporal_consistency_original"] = 1.0
 
                     # Process with quality system
                     from .enhanced_metrics import process_metrics_with_enhanced_quality
@@ -3266,6 +3296,15 @@ def calculate_comprehensive_metrics_from_frames(
         result["temporal_consistency_post"] = float(temporal_post)
         result["temporal_consistency_delta"] = float(temporal_delta)
 
+        # Audit-fix (Wave 3): explicit single-stream aliases so consumers can
+        # tell at a glance whether the value describes the original or the
+        # compressed stream. The legacy bare ``temporal_consistency`` key is
+        # set to the post-compression value (compressed-only); the
+        # ``_compressed`` / ``_original`` suffixes make that explicit. See
+        # docs/metrics-audit/2026-05-22/report.md and Wave 3 task note.
+        result["temporal_consistency_compressed"] = float(temporal_post)
+        result["temporal_consistency_original"] = float(temporal_pre)
+
         # Add disposal artifact metrics
         result["disposal_artifacts"] = float(disposal_artifacts_post)
         result["disposal_artifacts_std"] = 0.0
@@ -3274,6 +3313,9 @@ def calculate_comprehensive_metrics_from_frames(
         result["disposal_artifacts_pre"] = float(disposal_artifacts_pre)
         result["disposal_artifacts_post"] = float(disposal_artifacts_post)
         result["disposal_artifacts_delta"] = float(disposal_artifacts_delta)
+        # Audit-fix (Wave 3): same _compressed / _original convention.
+        result["disposal_artifacts_compressed"] = float(disposal_artifacts_post)
+        result["disposal_artifacts_original"] = float(disposal_artifacts_pre)
 
         # Add enhanced temporal artifact metrics (Task 1.2)
         for metric_key, metric_value in enhanced_temporal_metrics.items():
@@ -3282,6 +3324,34 @@ def calculate_comprehensive_metrics_from_frames(
                 if isinstance(metric_value, int | float)
                 else metric_value
             )
+
+        # Audit-fix (Wave 3): all of the enhanced temporal metrics
+        # (flicker_excess, flicker_frame_ratio, flat_flicker_ratio,
+        # flat_region_count, temporal_pumping_score,
+        # quality_oscillation_frequency, lpips_t_mean, lpips_t_p95) are
+        # computed on COMPRESSED FRAMES ONLY (see
+        # temporal_artifacts.calculate_enhanced_temporal_metrics — the
+        # ``original_frames`` argument is accepted but never used in the
+        # detector calls). Expose ``_compressed`` aliases so callers can
+        # tell at a glance that these describe the compressed stream's
+        # behaviour, not how compression altered it relative to the
+        # original. The legacy bare keys are retained for one cycle for
+        # backward compatibility with downstream consumers (storage CSV
+        # schema, validation_checker, etc.).
+        _single_stream_temporal_keys = (
+            "flicker_excess",
+            "flicker_frame_ratio",
+            "flat_flicker_ratio",
+            "flat_region_count",
+            "temporal_pumping_score",
+            "quality_oscillation_frequency",
+            "lpips_t_mean",
+            "lpips_t_p95",
+            "lpips_t_max",
+        )
+        for legacy_key in _single_stream_temporal_keys:
+            if legacy_key in result:
+                result[f"{legacy_key}_compressed"] = result[legacy_key]
 
         # Add enhanced gradient and color artifact metrics (Task 1.3 & 1.4)
         for metric_key, metric_value in gradient_color_metrics.items():

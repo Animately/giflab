@@ -171,7 +171,31 @@ def calculate_composite_quality(
         total_weight += config.ENHANCED_TEXTURE_WEIGHT
 
     # Temporal consistency (5% total)
-    if "temporal_consistency" in metrics:
+    #
+    # The bare ``temporal_consistency`` key is set to the post-compression
+    # value of a metric computed on the COMPRESSED STREAM ONLY (see
+    # ``metrics.py``: ``calculate_temporal_consistency`` runs on
+    # ``compressed_frames_resized``). Using it as a composite contribution
+    # treats single-stream content stability as if it were a quality-vs-
+    # reference signal. A static-black output scores 1.0 here regardless of
+    # the original, lifting composite_quality by the full temporal weight.
+    #
+    # Audit-fix (Wave 3): when ``USE_TEMPORAL_DELTA_FOR_COMPOSITE`` is True,
+    # use ``temporal_consistency_delta = |post - pre|`` instead — a true
+    # pair signal where 0 means "compression preserved temporal behaviour"
+    # and 1 means "temporal behaviour was destroyed". Falls back to the
+    # legacy post-only value if delta is unavailable.
+    use_temporal_delta = getattr(
+        config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True
+    )
+    if use_temporal_delta and "temporal_consistency_delta" in metrics:
+        delta = float(metrics["temporal_consistency_delta"])
+        # Smaller delta = higher quality; clamp delta to [0, 1] before
+        # inverting so out-of-range values don't blow up the score.
+        normalized = max(0.0, min(1.0, 1.0 - max(0.0, min(1.0, delta))))
+        composite_quality += config.ENHANCED_TEMPORAL_WEIGHT * normalized
+        total_weight += config.ENHANCED_TEMPORAL_WEIGHT
+    elif "temporal_consistency" in metrics:
         normalized = normalize_metric(
             "temporal_consistency", metrics["temporal_consistency"]
         )

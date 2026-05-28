@@ -211,12 +211,40 @@ class GradientBandingDetector:
     ) -> dict[str, float]:
         """Detect banding artifacts across frame pairs.
 
+        This is a TRUE PAIR-COMPARISON metric (both original and compressed
+        patches are extracted and compared), but it is CONDITIONAL on the
+        original frames containing detectable smooth gradient regions:
+
+        - The detector first calls ``detect_gradient_regions(original_frame)``
+          to find smooth-gradient patches.
+        - If no gradient regions are found, no per-patch severity is
+          computed and the function returns
+          ``banding_score_mean == 0.0`` and ``banding_patch_count == 0``.
+        - ``banding_score_mean == 0.0`` therefore means EITHER
+          (a) compression introduced no banding in the original's gradients,
+          or
+          (b) THE ORIGINAL HAS NO GRADIENT REGIONS to evaluate (e.g. solid
+          colours, inverted gradients without smooth ramps, text/UI content).
+
+        Callers comparing banding scores across content types must account
+        for (b) — a 0.0 score is not necessarily "good quality". The
+        ``gradient_region_count`` field in the returned dict indicates
+        whether any gradients were found at all. See
+        docs/metrics-audit/2026-05-22/report.md for the audit context that
+        surfaced this ambiguity.
+
         Args:
             original_frames: List of original RGB frames
             compressed_frames: List of compressed RGB frames
 
         Returns:
-            Dictionary with banding detection metrics
+            Dictionary with banding detection metrics. Keys:
+            - ``banding_score_mean``: mean severity 0-100 (0 = no banding
+              detected OR no gradient regions in original)
+            - ``banding_score_p95``: 95th percentile severity
+            - ``banding_patch_count``: number of gradient patches evaluated
+              (0 means no gradients found in original)
+            - ``gradient_region_count``: total gradient regions across frames
         """
         if not original_frames or not compressed_frames:
             return {
