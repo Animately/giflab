@@ -243,6 +243,10 @@ gh api -X PATCH repos/Animately/giflab/pulls/<N> -f body="<body content>"
 
 The REST endpoint doesn't touch projects-classic and exits 0 on success. Verify the change landed via `gh pr view <N> --json body`.
 
+**Squash-merging a stale branch silently reverts newer same-file work.** A PR branched from an older `main` carries a full snapshot of every file it touches. When squash-merged, GitHub replaces those files with the branch's snapshot — so any change another PR landed in the *same file* after this branch was cut is silently overwritten, with no merge conflict. This bit us when PR #31 (branched before #30) squash-merged and wiped out #30's `edge_similarity` median-aggregation code in `metrics.py`; #30's test survived but its production code was gone, and `composite_quality` quietly reverted to a non-monotonic signal (restored via PR #32).
+
+**Rule**: always `git fetch origin && git rebase origin/main` an audit-fix branch immediately before squash-merge, then re-run `make test` on the rebased branch. `main` now enforces "require branches up to date before merging" (branch protection, gated on the green `Fast Tests` checks), which makes GitHub demand the rebase — but do it locally first so you catch any same-file conflict and verify tests before pushing.
+
 ## Agent Teams
 
 Agent teams are enabled for this project. When using them, follow these guidelines.
