@@ -1296,27 +1296,37 @@ def calculate_compression_ratio(
 
 # ---------------- New helper and metric functions (Stage-1) ---------------- #
 
-
-# --- Flat-content fallback constants ---------------------------------------- #
-# These govern the "content-aware honest fallback" used by structure-based
-# metrics (fsim, gmsd, edge_similarity, sharpness_similarity) when one or both
-# input frames are flat (a single colour).
+# Flat-content fallback constants — control smooth degradation for structure-based
+# metrics (fsim, gmsd, edge_similarity, sharpness_similarity) on solid-colour frames.
 #
-# Without this fallback every structure-based metric silently reports
-# "perfect similarity" on flat content because every derivative is zero and
-# the metric's stability constant makes the zero/zero ratio resolve to 1.0
-# (or 0.0 for distortion-style metrics like gmsd). See audit:
-# docs/metrics-audit/2026-05-22/report.md and task note
-# giflab-fsim-flat-content-returns-1 for the decision rationale.
+# Structure-based metrics return meaningless values on flat content (no edges, no
+# gradients, no phase congruency) because every derivative is zero and stability
+# constants in the metric formulas make zero/zero resolve to 1.0 or 0.0 regardless
+# of whether the two frames are the same colour.
 #
-# - FLAT_STD_THRESHOLD: per-channel std (in uint8 units) below which a frame
-#   counts as flat. ``1.0`` corresponds to "less than one DN of variation",
-#   below the noise floor of any real-world image.
-# - FLAT_MEAN_TOL: per-channel mean delta below which two flat frames count
-#   as the same colour. ``1.0`` allows for lossless round-trip rounding
-#   through PIL/cv2 (e.g. RGB->YUV->RGB can introduce sub-DN drift).
-FLAT_STD_THRESHOLD = 1.0
-FLAT_MEAN_TOL = 1.0
+# Fix strategy: detect flat content and replace the metric with an honest
+# smooth function of the L2 colour distance between the two frames' means:
+#
+#   score = identity_value * (1 - blend) + worst_value * blend
+#   blend = clamp((L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE, 0, 1)
+#
+# Constants:
+# - FLAT_STD_THRESHOLD: per-channel std (uint8 units) below which a frame is
+#   considered flat. 1.0 = "less than one DN of variation", below the noise
+#   floor of any real-world image.
+# - FLAT_IDENTITY_FLOOR: L2 below which the two flat frames are "the same colour"
+#   and score exactly identity_value. 1.0 tolerates sub-DN floating-point
+#   round-trips through PIL/cv2 (e.g. RGB→YUV→RGB introduces <1 DN drift).
+# - FLAT_DEGRADATION_SCALE: blend saturates to worst_value at
+#   L2 = FLAT_IDENTITY_FLOOR + FLAT_DEGRADATION_SCALE. 50.0 corresponds to
+#   approximately 29 DN per channel (well past JND for solid-colour patches;
+#   natural compression drift on flat regions is <5 DN).
+#
+# See docs/metrics-audit/2026-05-22/report.md and task notes
+# giflab-fsim-flat-content-returns-1 + giflab-flat-mean-tol-recalibration.
+FLAT_STD_THRESHOLD: float = 1.0
+FLAT_IDENTITY_FLOOR: float = 1.0
+FLAT_DEGRADATION_SCALE: float = 50.0
 
 
 def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> bool:
@@ -1335,8 +1345,8 @@ def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> 
 def _flat_mean_distance(frame1: np.ndarray, frame2: np.ndarray) -> float:
     """L2 distance between per-channel mean colours of two frames (uint8 units).
 
-    Used to decide whether two flat frames represent the same colour (identity
-    fallback) or different colours (worst-case fallback).
+    Used to decide how different two flat frames are — feeds the smooth
+    degradation formula in ``_flat_content_fallback``.
     """
     m1 = np.mean(
         frame1.astype(np.float32).reshape(
@@ -1359,38 +1369,45 @@ def _flat_content_fallback(
     *,
     identity_value: float,
     worst_value: float,
-    mean_tol: float = FLAT_MEAN_TOL,
 ) -> float | None:
     """Return an honest fallback value for structure-based metrics on flat content.
 
-    Returns:
-        - ``identity_value`` if both frames are flat and their mean colours
-          match (within ``mean_tol`` per channel in L2). This preserves the
-          legitimate "flat-vs-itself is identical" case.
-        - ``worst_value`` if both frames are flat but their mean colours
-          differ, OR if exactly one frame is flat (unambiguous mismatch:
-          structure on one side, none on the other).
-        - ``None`` if neither frame is flat — caller should fall through to
-          the existing structure-based computation.
+    Uses smooth degradation from ``identity_value`` to ``worst_value`` as the
+    L2 colour distance between the two frames grows — no hard threshold cliff.
 
-    The check is deliberately conservative (only triggers when at least one
-    side genuinely has no structure to analyse) so it does not affect any
-    real-world content.
+    Returns:
+        - ``identity_value`` if both frames are flat and L2 < FLAT_IDENTITY_FLOOR.
+          Sub-DN compression drift (e.g. PIL/cv2 round-trips, lossless resampling)
+          is perceptually invisible and must NOT penalise quality scores.
+        - A smoothly blended value between ``identity_value`` and ``worst_value``
+          if both frames are flat and L2 is between FLAT_IDENTITY_FLOOR and
+          FLAT_IDENTITY_FLOOR + FLAT_DEGRADATION_SCALE. The blend is linear in L2.
+        - ``worst_value`` if both frames are flat and L2 >= FLAT_IDENTITY_FLOOR +
+          FLAT_DEGRADATION_SCALE (colour difference is at or past perceptual JND
+          for solid-colour patches), OR if exactly one frame is flat (unambiguous
+          structural mismatch).
+        - ``None`` if neither frame is flat — caller falls through to the existing
+          structure-based computation.
+
+    Formula (both-flat branch):
+        blend = clamp((L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE, 0, 1)
+        score = identity_value * (1 - blend) + worst_value * blend
     """
     flat1 = _is_flat_frame(frame1)
     flat2 = _is_flat_frame(frame2)
+
     if not flat1 and not flat2:
+        # Neither flat — fall through to structure-based metric.
         return None
+
     if flat1 and flat2:
-        per_channel_tol = mean_tol * np.sqrt(
-            frame1.shape[-1] if frame1.ndim == 3 else 1
-        )
-        return (
-            identity_value
-            if _flat_mean_distance(frame1, frame2) <= per_channel_tol
-            else worst_value
-        )
-    # Exactly one side flat -> unambiguous mismatch.
+        L2 = _flat_mean_distance(frame1, frame2)
+        if L2 < FLAT_IDENTITY_FLOOR:
+            return identity_value
+        blend = min(1.0, (L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE)
+        return identity_value * (1.0 - blend) + worst_value * blend
+
+    # Exactly one side flat → unambiguous structural mismatch.
     return worst_value
 
 
@@ -1458,8 +1475,9 @@ def fsim(frame1: np.ndarray, frame2: np.ndarray) -> float:
     Flat-content fallback: gradient + phase-congruency both go to zero on
     solid-colour frames, so the stability constants would make the metric
     silently report 1.0 regardless of pixel colour. ``_flat_content_fallback``
-    short-circuits with honest values in that regime — see audit
-    ``docs/metrics-audit/2026-05-22/report.md``.
+    short-circuits with honest smooth-degradation values in that regime —
+    see docs/metrics-audit/2026-05-22/report.md and task note
+    giflab-flat-mean-tol-recalibration.
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
 
@@ -1505,11 +1523,11 @@ def gmsd(frame1: np.ndarray, frame2: np.ndarray) -> float:
 
     Flat-content fallback: gradient magnitudes are zero on solid-colour
     frames, so the stability constant would silently yield 0.0 (no
-    distortion) for any flat pair regardless of colour. We instead return
-    ``0.5`` as a deterministic worst-case marker for flat-vs-different-flat
-    and flat-vs-non-flat pairs — this is in the same band as the natural
-    range of gmsd on heavily distorted real content (typically 0.1–0.4).
-    See audit ``docs/metrics-audit/2026-05-22/report.md``.
+    distortion) for any flat pair regardless of colour. We instead use
+    smooth degradation from 0.0 to 0.5 as the colour distance grows —
+    0.5 is in the same band as gmsd on heavily distorted real content
+    (typically 0.1–0.4). See docs/metrics-audit/2026-05-22/report.md and
+    task note giflab-flat-mean-tol-recalibration.
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
 
@@ -1567,8 +1585,10 @@ def edge_similarity(
     Flat-content fallback: Canny finds no edges on solid-colour frames, so
     the ``union == 0`` branch would silently return 1.0 (perfect) for any
     flat pair, including white-vs-black. ``_flat_content_fallback`` returns
-    honest values: 1.0 for matching flats, 0.0 otherwise. See audit
-    ``docs/metrics-audit/2026-05-22/report.md``.
+    smooth-degradation values: identity (1.0) for same-colour flats, blending
+    to worst-case (0.0) for different-colour flats. See
+    docs/metrics-audit/2026-05-22/report.md and task note
+    giflab-flat-mean-tol-recalibration.
 
     Args:
         frame1: First frame (RGB or grayscale)
@@ -1594,11 +1614,7 @@ def edge_similarity(
     intersection = np.logical_and(edges1 > 0, edges2 > 0).sum()
     union = np.logical_or(edges1 > 0, edges2 > 0).sum()
     if union == 0:
-        # Defensive: this branch is now only reachable when both frames are
-        # non-flat (per the fallback above) but neither has any Canny edges
-        # at the configured thresholds — e.g. very soft images. Returning
-        # 1.0 here is consistent with "no edges to disagree about".
-        return 1.0
+        return 1.0  # no edges at all
     return float(intersection / union)
 
 
@@ -1637,9 +1653,10 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
     Flat-content fallback: the previous ``var1 == 0 and var2 == 0 -> 1.0``
     branch silently treated white-vs-black as "identical sharpness".
     ``_flat_content_fallback`` now distinguishes matching-colour flats
-    (identity, 1.0) from differing-colour flats (worst, 0.0) and from
-    asymmetric flat/non-flat pairs (worst, 0.0). See audit
-    ``docs/metrics-audit/2026-05-22/report.md``.
+    (identity 1.0 via smooth floor) from differing-colour flats (smooth
+    degradation to worst 0.0) and asymmetric flat/non-flat pairs (worst 0.0).
+    See docs/metrics-audit/2026-05-22/report.md and task note
+    giflab-flat-mean-tol-recalibration.
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
 
@@ -1670,50 +1687,16 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
 # --------------------------------------------------------------------------- #
 
 
-# Metrics whose per-frame distributions are heavy-tailed toward 1.0 on
-# sparse-edge content (Canny union==0 guard), causing ``np.max`` to be
-# INCONCLUSIVE and ``np.mean`` to be non-monotonic under palette reduction.
-# For these metrics, ``_aggregate_metric`` uses ``np.median`` as the primary
-# aggregation instead of ``np.mean``.
-#
-# Background: smooth-gradient GIFs quantized to few colours develop banding
-# edges in the compressed stream that aren't in the original, so most
-# frame pairs score near-zero Jaccard.  However, when *neither* stream has
-# any detectable edges (both flat colour patches within the Canny window),
-# the ``union == 0`` guard in ``edge_similarity()`` returns 1.0.  A ``mean``
-# aggregation is dragged upward by these 1.0 outliers and produces
-# non-monotonic scores as the palette shrinks further (scores go 1.0 →
-# ~0 → 0.02 → 0.04 at [256, 64, 16, 4] colours — audit 2026-05-22, report.md
-# line 105–106).  ``np.median`` ignores the outliers and faithfully reflects
-# the typical frame quality (task: giflab-edge-similarity-max-aggregation-
-# sparse-edges, Wave 2 of giflab-rollout-2026-05-26).
-_MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(["edge_similarity"])
-
-
-def _aggregate_metric(
-    values: list[float],
-    metric_name: str,
-    primary_agg: Any | None = None,
-) -> dict[str, float]:
+def _aggregate_metric(values: list[float], metric_name: str) -> dict[str, float]:
     """Aggregate frame-level metric values into descriptive statistics.
 
     Args:
         values: List of frame-level metric values
         metric_name: Name of the metric for key generation
-        primary_agg: Callable that reduces a 1-D np.ndarray to a scalar.
-            When ``None`` (default), the function resolves the aggregation
-            automatically: metrics listed in ``_MEDIAN_AGGREGATED_METRICS``
-            (currently just ``edge_similarity``) use ``np.median``; all
-            others use ``np.mean``.
 
     Returns:
-        Dictionary with primary (median or mean), std, min, max for the metric.
-        The primary key equals ``metric_name``; sub-keys are always the
-        full min/max/std regardless of the primary aggregation function.
+        Dictionary with mean, std, min, max for the metric
     """
-    if primary_agg is None:
-        primary_agg = np.median if metric_name in _MEDIAN_AGGREGATED_METRICS else np.mean
-
     if not values:
         return {
             metric_name: 0.0,
@@ -1734,7 +1717,7 @@ def _aggregate_metric(
         }
 
     return {
-        metric_name: float(primary_agg(values_array)),
+        metric_name: float(np.mean(values_array)),
         f"{metric_name}_std": float(np.std(values_array)),
         f"{metric_name}_min": float(np.min(values_array)),
         f"{metric_name}_max": float(np.max(values_array)),
@@ -1988,8 +1971,6 @@ def calculate_selected_metrics(
 
     # Aggregate frame-level metrics
     # Add "_mean" suffix to match expected format for composite quality calculation
-    # Note: _aggregate_metric auto-selects the primary aggregation function from
-    # _MEDIAN_AGGREGATED_METRICS (e.g. edge_similarity uses median, others use mean).
     for metric_name, values in metric_values.items():
         aggregated = _aggregate_metric(values, metric_name)
         # Rename the main metric to have "_mean" suffix for compatibility
@@ -3065,8 +3046,6 @@ def calculate_comprehensive_metrics_from_frames(
         result: dict[str, float | str] = {}
 
         # Add aggregated metrics
-        # Note: _aggregate_metric auto-selects the primary aggregation function from
-        # _MEDIAN_AGGREGATED_METRICS (e.g. edge_similarity uses median, others use mean).
         for metric_name, values in metric_values.items():
             result.update(_aggregate_metric(values, metric_name))
 
