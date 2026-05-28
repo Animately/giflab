@@ -60,7 +60,11 @@ class TestMonotonicityCheck:
         assert sanity._monotonicity_check([1.0, 0.9, 1.1, 0.8], "flat") == []
 
     def test_tolerance_absorbs_noise(self) -> None:
-        # Default tol is 1e-4; a sub-tolerance bump is not flagged.
+        # Range-derived tol on [0.9, 0.85, 0.85+5e-5, 0.84]:
+        # observed_range = 0.9 - 0.84 = 0.06
+        # tol = max(1e-4, 0.06 * 0.05) = max(1e-4, 0.003) = 0.003
+        # The sub-tolerance bump of 5e-5 (≈0.08% of range) is well within
+        # tol and is not flagged.
         invs = sanity._monotonicity_check(
             [0.9, 0.85, 0.85 + 5e-5, 0.84], "higher_better"
         )
@@ -111,15 +115,12 @@ class TestMonotonicityCheck:
 
     def test_range_derived_tol_lower_better(self) -> None:
         """Range-derived tolerance works symmetrically for lower_better metrics."""
-        # Observed range: 10.0 - 8.0 = 2.0
-        # Flip size at index 2→3: 8.2 - 8.3 = -0.1 (went down when should go up)
-        # Old tol=1e-4: 0.1 > 1e-4 → flagged
-        # New tol=max(1e-4, 2.0*0.05)=0.1: 0.1 <= 0.1 → absorbed (boundary case)
-        # Use 0.09 to be safely inside:
-        # values: [8.0, 8.8, 9.0, 8.91] — flip from 9.0 to 8.91 = -0.09
-        # range: 9.0 - 8.0 = 1.0; tol = max(1e-4, 1.0*0.05)=0.05
-        # flip 0.09 > 0.05 → still flagged. Use smaller flip:
-        # values: [8.0, 8.8, 9.0, 8.96] — flip = -0.04, tol=0.05 → absorbed
+        # Values [8.0, 8.8, 9.0, 8.96]:
+        # observed_range = 9.0 - 8.0 = 1.0
+        # tol = max(1e-4, 1.0 * 0.05) = 0.05
+        # Flip at index 2→3: 8.96 - 9.0 = -0.04 (went down when should go up)
+        # |flip| = 0.04 < tol = 0.05 → absorbed as noise-floor
+        # (Old fixed tol=1e-4 would have flagged this.)
         invs = sanity._monotonicity_check(
             [8.0, 8.8, 9.0, 8.96], "lower_better"
         )
@@ -374,9 +375,12 @@ class TestCoalesceIntegratedIntoRunSanity:
         captured: dict[str, list[list[float]]] = {"seen": []}
         real_check = sanity._monotonicity_check
 
-        def _check_spy(values, direction, tol=1e-4):
+        # tol defaults to None so the spy exercises the new range-derived
+        # code path inside _monotonicity_check rather than silently pinning
+        # the wiring test to the old fixed-tol behaviour.
+        def _check_spy(values, direction, tol=None):
             captured["seen"].append(list(values))
-            return real_check(values, direction, tol)
+            return real_check(values, direction, tol=tol)
 
         monkeypatch.setattr(sanity, "_monotonicity_check", _check_spy)
 
