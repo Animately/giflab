@@ -62,6 +62,34 @@ def validate_raw_dir(raw_dir: str | Path, require_gifs: bool = True) -> Path:
 def validate_path_security(path: str | Path) -> Path:
     """Validate path for security concerns.
 
+    Security model
+    --------------
+    GifLab invokes every external tool (animately, gifsicle, ffmpeg,
+    imagemagick, gifski, ...) through ``subprocess.run(cmd_list, shell=False)``
+    -- see :func:`giflab.external_engines.common.run_command`. Arguments are
+    handed straight to ``execve`` and are *never* re-interpreted by a shell,
+    so traditional shell-meta-characters (``;``, ``&``, ``|``, ``$``,
+    backticks, etc.) cannot be used for command injection in this codebase.
+
+    Rejecting those characters here previously broke perfectly legitimate
+    filenames sourced from HubSpot / generic CDN URLs (e.g.
+    ``Untitled-1-2.gif_upscale=true&width=1600&name=foo.gif``) without
+    providing any actual security benefit. The audit at
+    ``docs/metrics-audit/2026-05-22/report.md`` lost 9 sweep attempts to
+    this misfire.
+
+    The remaining blacklist deliberately covers only characters that are
+    dangerous *regardless* of how the path is later used:
+
+    * ``\\x00`` (null byte) -- truncates C strings, can confuse libc and
+      external tools
+    * ``\\n`` / ``\\r`` -- corrupt log output and can be smuggled into other
+      structured outputs (CSV rows, JSON, etc.) the pipeline emits
+
+    If a future caller starts forwarding paths into ``shell=True`` or building
+    shell strings by interpolation, that caller is responsible for its own
+    escaping (e.g. ``shlex.quote``) -- it must not lean on this validator.
+
     Args:
         path: Path to validate
 
@@ -84,12 +112,14 @@ def validate_path_security(path: str | Path) -> Path:
     # Now resolve the path
     resolved_path_str = str(path_obj.resolve())
 
-    # Check for shell injection characters
-    dangerous_chars = [";", "&", "|", "`", "$", "$(", "`", "\n", "\r"]
-    for char in dangerous_chars:
+    # Reject control characters that corrupt logs / structured outputs.
+    # Shell-meta-chars (; & | ` $) are intentionally *not* here -- see the
+    # docstring above for the security model.
+    control_chars = ["\n", "\r"]
+    for char in control_chars:
         if char in resolved_path_str:
             raise ValidationError(
-                f"Path contains potentially dangerous characters: {resolved_path_str}"
+                f"Path contains potentially dangerous characters: {resolved_path_str!r}"
             )
 
     # Check for path traversal attempts
