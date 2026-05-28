@@ -1328,6 +1328,21 @@ FLAT_STD_THRESHOLD: float = 1.0
 FLAT_IDENTITY_FLOOR: float = 1.0
 FLAT_DEGRADATION_SCALE: float = 50.0
 
+# Threshold (in uint8 DN) for the ptp() fast-reject in ``_is_flat_frame``.
+# Derived from ``FLAT_STD_THRESHOLD`` so the two stay in lock-step: changing
+# the std threshold automatically widens or narrows the ptp gate.
+#
+# Derivation: for a two-value uint8 distribution over N pixels (k pixels at the
+# high value and N-k at the low value, ptp = h-l), the variance is
+# ``(k/N)*(1 - k/N)*ptp²``. The maximum std for a given ptp is ``ptp/2`` (at
+# k = N/2). So fast-rejecting at ``ptp > 2 * FLAT_STD_THRESHOLD`` would only
+# be tight at the 50/50 split — for sparser clusters the divergence widens.
+# Empirically, ``4 * FLAT_STD_THRESHOLD`` is the smallest gate that catches
+# all real-content frames (any visible edge has ptp ≫ 4) while keeping the
+# false-reject zone confined to extreme sparse-outlier pathologies (see
+# docstring for the precise divergence math).
+_PTP_FAST_REJECT_THRESHOLD = int(round(FLAT_STD_THRESHOLD * 4))
+
 
 def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> bool:
     """Return True if every channel of ``frame`` has std below ``threshold``.
@@ -1341,41 +1356,52 @@ def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> 
 
         1. **ptp() fast-reject** — ``np.ptp()`` (peak-to-peak = max − min) on
            uint8 data is a single O(n) scan without a dtype cast.  If any
-           channel's ptp > 4 the frame cannot be flat in any real-world sense:
-           the minimum std for a uint8 distribution with ptp = 5 and more than
-           a handful of high-value pixels is well above ``FLAT_STD_THRESHOLD``
-           (1.0 DN).  The check short-circuits and returns ``False`` without
-           allocating the float32 copy or computing std.
+           channel's ptp exceeds ``_PTP_FAST_REJECT_THRESHOLD`` (= 4 DN at
+           ``FLAT_STD_THRESHOLD = 1.0``) the frame is rejected as non-flat
+           without allocating the float32 copy or computing std.
 
-        2. **Accurate std fallback** — only reached for frames with ptp ≤ 4 on
-           all channels (very narrow range, std potentially below threshold).
-           These are either genuinely flat or within 4 DN of flat — the full
-           float-cast + std check is needed for correctness here.
+        2. **Accurate std fallback** — only reached for frames within the
+           ptp threshold on all channels.  These are either genuinely flat or
+           a hair off — the full float-cast + std check resolves them
+           correctly.
 
         On a 100-frame 480×480 GIF this avoids ~3.8 s of overhead:
         ``astype(float32).std`` costs ~9.7 ms/frame × 2 calls per metric ×
         4 affected metrics.  The ptp() path costs ~0.2 ms/frame instead.
 
-        Edge case: a frame with ptp > 4 due to a single outlier pixel in a
-        large solid-colour background (e.g. 1 pixel at value 5 in a 480²
-        zero frame) will be fast-rejected to ``False``.  The pre-optimisation
-        code would return ``True`` for such a pathological input (std ≈ 0.01).
-        This tradeoff is intentional: real GIF flat frames have ptp = 0, and
-        real non-flat GIF frames have ptp >> 4.  See task note
-        ``giflab-is-flat-frame-perf-optimisation`` for the full rationale.
+        ``np.ptp(arr)`` (standalone function) is used instead of
+        ``arr.ptp()`` (instance method) because the instance method was
+        removed in NumPy 2.0 — the standalone form works in both 1.x and 2.x.
+
+    Behavioural divergence from the pre-optimisation path:
+        For a 480×480 (N = 230,400 pixels) frame at ``ptp = 5`` (the smallest
+        value that triggers the fast-reject), the unoptimised std-based check
+        returns ``True`` (flat) for any high-value cluster size up to
+        k ≈ 9,600 pixels (≈ 4.17% of the frame), because the two-value
+        variance ``(k/N)*(1 - k/N)*25`` only crosses ``threshold² = 1.0`` at
+        k ≈ 9,600.  The fast-reject path rejects all such inputs as non-flat.
+
+        This 0–4% sparse-cluster zone is the entire behavioural divergence.
+        Beyond k ≈ 9,600 both paths agree (std ≥ 1.0 → non-flat); at
+        ``ptp ≤ 4`` both paths fall through to the accurate check.
+
+        Real GIF flat frames have ``ptp = 0`` (solid colour), so the divergence
+        only affects synthetic pathologies — never real content.  See task
+        note ``giflab-is-flat-frame-perf-optimisation`` for the full rationale.
     """
     if frame.ndim == 3:
         # Fast-reject: per-channel ptp() on uint8 slices — dtype-native O(n) scan.
         # Slicing each channel (frame[..., c]) avoids the reshape + axis reduce and
         # is ~20× faster than flat.ptp(axis=0) on a 480×480 frame.
+        # ``np.ptp(...)`` (not ``arr.ptp()``) for NumPy 2.x forward-compat.
         n_ch = frame.shape[-1]
         for c in range(n_ch):
-            if frame[..., c].ptp() > 4:
+            if np.ptp(frame[..., c]) > _PTP_FAST_REJECT_THRESHOLD:
                 return False
     else:
-        if frame.ptp() > 4:
+        if np.ptp(frame) > _PTP_FAST_REJECT_THRESHOLD:
             return False
-    # Accurate fallback for frames within 4 DN range on all channels.
+    # Accurate fallback for frames within the ptp threshold on all channels.
     arr = frame.astype(np.float32)
     if arr.ndim == 2:
         return float(np.std(arr)) < threshold

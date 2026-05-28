@@ -40,7 +40,7 @@ _N_FRAMES = 100
 # The budget is set to 0.5 s — 25× the expected time — to be robust on CI and
 # loaded laptops, while still catching a regression to the pre-optimisation path
 # (~1.0 s on an M3 machine; the unoptimised code fails this budget).
-_WALL_BUDGET_S = 0.5
+_NONFLAT_BATCH_WALL_BUDGET_S = 0.5
 
 
 @pytest.fixture(scope="module")
@@ -89,9 +89,9 @@ def test_is_flat_frame_nonflat_batch_within_time_budget(
         _is_flat_frame(frame)
     elapsed = time.perf_counter() - t_start
 
-    assert elapsed < _WALL_BUDGET_S, (
+    assert elapsed < _NONFLAT_BATCH_WALL_BUDGET_S, (
         f"_is_flat_frame processed {_N_FRAMES} non-flat 480×480 frames in "
-        f"{elapsed:.3f}s — exceeds {_WALL_BUDGET_S}s budget. "
+        f"{elapsed:.3f}s — exceeds {_NONFLAT_BATCH_WALL_BUDGET_S}s budget. "
         f"The ptp() fast-reject optimisation may be missing or disabled. "
         f"(Per-frame: {elapsed / _N_FRAMES * 1000:.2f} ms; "
         f"unoptimised path takes ~10 ms/frame on this hardware.)"
