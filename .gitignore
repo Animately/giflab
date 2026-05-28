@@ -152,6 +152,12 @@ tests/fixtures/**/*.jpg
 tests/fixtures/**/*.jpeg
 tests/fixtures/phase3/
 
+# Audit regression-guard fixtures: committed so the sanity harness has the
+# transparency-bearing monotonicity base even when `make fixtures` has not
+# been run.  Without this exception the sanity check would silently skip the
+# PR #8 alpha-compositing guard on a fresh clone and report all PASS.
+!tests/fixtures/transparency_bearing_monotonicity.gif
+
 # Pipeline cache databases
 pipeline_results_cache.db
 **/pipeline_results_cache.db

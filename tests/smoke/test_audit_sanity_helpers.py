@@ -431,10 +431,12 @@ class TestTransparencyBearingGifFixture:
     def test_fixture_is_deterministic(self, tmp_path: Path) -> None:
         """Running the generator twice must produce byte-identical output."""
         mod = _import_fixture_generator()
-        p1 = (tmp_path / "run1").mkdir() or (tmp_path / "run1")
-        p2 = (tmp_path / "run2").mkdir() or (tmp_path / "run2")
-        out1 = mod.create_transparency_bearing_monotonicity_gif(tmp_path / "run1")
-        out2 = mod.create_transparency_bearing_monotonicity_gif(tmp_path / "run2")
+        run1_dir = tmp_path / "run1"
+        run2_dir = tmp_path / "run2"
+        run1_dir.mkdir()
+        run2_dir.mkdir()
+        out1 = mod.create_transparency_bearing_monotonicity_gif(run1_dir)
+        out2 = mod.create_transparency_bearing_monotonicity_gif(run2_dir)
         assert out1.read_bytes() == out2.read_bytes(), (
             "create_transparency_bearing_monotonicity_gif() produced different "
             "bytes on two consecutive calls — generator must be fully deterministic."
@@ -443,29 +445,30 @@ class TestTransparencyBearingGifFixture:
     def test_buggy_path_gives_different_frame_than_correct_path(
         self, tmp_path: Path
     ) -> None:
-        """Demonstrates the PR #8 regression class.
+        """Demonstrates the PR #8 regression class on the saved fixture.
 
-        The fixture has a transparent oval whose pixels carry palette index 255
-        (the transparency sentinel).  PIL's ``convert('RGB')`` resolves those
-        pixels to whatever colour is stored at palette entry 255 — which is
-        white (255,255,255) in this fixture but would be a different (unstable)
-        colour in a re-encoded copy.
+        Mechanism actually observed on the saved fixture (verified empirically
+        on Pillow 10.x): Pillow's GIF encoder truncates the saved palette to
+        the smallest power of two that covers the in-use *content* indices —
+        in this fixture, 128 entries.  Palette index 255 (our chosen
+        transparency sentinel) is therefore OUT OF RANGE in the saved file.
+        When PIL loads the file and ``convert('RGB')`` tries to resolve
+        transparent pixels through that missing palette entry, it falls back
+        to ``(0, 0, 0)`` (black).
 
-        The correct RGBA-composite path always yields white for fully transparent
-        pixels, regardless of palette ordering.
+        The correct RGBA-composite path always yields ``(255, 255, 255)``
+        (white) for fully transparent pixels regardless of how the encoder
+        compacted the palette.
 
-        This test compares the two paths on the *same* fixture file (not a
-        re-encoded copy).  If the palette entry at the transparency index is
-        NOT white, the buggy path will decode those pixels to a wrong colour
-        and the test proves the compositing fix is necessary.
+        So on this fixture:
+        - Buggy ``convert('RGB')`` path → transparent pixels = black
+        - Correct RGBA composite onto white → transparent pixels = white
+        - Per-channel delta ≈ 255 DN — strong enough to collapse any
+          pair-comparison metric (ssim, ms_ssim, chist, lpips, …)
 
-        Note: in this fixture ``palette[255] = (255,255,255)`` by construction,
-        so the buggy path actually gives the SAME white for transparent pixels.
-        The important assertion is structural: the RGBA path yields alpha=0 for
-        transparent pixels, while the buggy ``convert('RGB')`` path discards
-        alpha and fills them from the palette.  We therefore check that the
-        RGBA conversion correctly identifies which pixels are transparent, and
-        that compositing them onto white yields (255,255,255).
+        Reverting the compositing fix in PR #8 would cause that 255 DN delta
+        to corrupt every metric reading on this fixture, which is exactly the
+        regression the sanity monotonicity check is meant to catch.
         """
         import numpy as np
         from PIL import Image
@@ -477,20 +480,16 @@ class TestTransparencyBearingGifFixture:
             t_idx = im.info.get("transparency")
             assert t_idx is not None
 
-            arr_p = np.array(im)
-            transparent_mask = arr_p == t_idx
-            assert transparent_mask.sum() > 0
-
-            # RGBA path: transparent pixels should have alpha=0
+            # RGBA path: which pixels are transparent?
             rgba = im.convert("RGBA")
             rgba_arr = np.array(rgba)
             alpha_zero_mask = rgba_arr[:, :, 3] == 0
-            # The RGBA conversion must recognise the same pixels as transparent
             assert alpha_zero_mask.sum() > 0, (
                 "RGBA conversion did not produce any alpha=0 pixels — "
                 "the GIF transparency index is not being respected."
             )
-            # Compositing onto white must yield (255,255,255) for those pixels
+
+            # Correct path: alpha-composite onto white → transparent pixels become white.
             bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
             composited_arr = np.array(
                 Image.alpha_composite(bg, rgba).convert("RGB")
@@ -499,6 +498,43 @@ class TestTransparencyBearingGifFixture:
             assert (transparent_composited == 255).all(), (
                 "RGBA-composite path did not yield (255,255,255) for transparent "
                 f"pixels — got values: {np.unique(transparent_composited, axis=0)}"
+            )
+
+            # Buggy path: convert('RGB') directly — must NOT yield white on these pixels.
+            # This is the load-bearing assertion: if it DID yield white, the buggy
+            # path and the correct path would coincide on the fixture, the
+            # regression-class would not be demonstrated, and the sanity check
+            # would have no signal to flag a reverted compositing fix.
+            buggy_arr = np.array(im.convert("RGB"))
+            transparent_buggy = buggy_arr[alpha_zero_mask]
+            n_white_pixels = int(np.all(transparent_buggy == 255, axis=-1).sum())
+            n_total = int(alpha_zero_mask.sum())
+            assert n_white_pixels < n_total, (
+                "Buggy convert('RGB') path produced white (255,255,255) for "
+                f"{n_white_pixels}/{n_total} transparent pixels — same value as "
+                "the correct RGBA-composite path.  If buggy and correct paths "
+                "coincide, this fixture does not demonstrate the PR #8 "
+                "alpha-compositing regression and offers no protection if the "
+                "compositing fix is reverted.  Inspect the fixture's saved "
+                "palette: it likely now includes white at the transparency "
+                "index (the original failure mode depended on Pillow truncating "
+                "the saved palette so index 255 was out of range)."
+            )
+
+            # And the per-channel delta on transparent pixels must be large
+            # (~255 DN in practice) — strong enough to collapse any pair-
+            # comparison metric if the compositing fix is reverted.
+            mean_delta = float(
+                np.abs(
+                    transparent_buggy.astype(float)
+                    - transparent_composited.astype(float)
+                ).mean()
+            )
+            assert mean_delta > 64.0, (
+                f"Buggy-vs-correct per-channel delta on transparent pixels = "
+                f"{mean_delta:.1f} DN — too small to corrupt metrics.  PR #8's "
+                "regression class is only demonstrated by a large delta "
+                "(~255 DN in practice — black-vs-white)."
             )
 
 
@@ -593,8 +629,9 @@ class TestFixtureMonotonicityBasesIntegration:
     def test_missing_fixture_skipped_gracefully(
         self, tmp_path: Path, monkeypatch, capsys
     ) -> None:
-        """When the fixture file does not exist, skip without error."""
-        empty_fixtures_dir = tmp_path / "no_fixtures_here"
+        """When the fixture file does not exist inside an existing fixtures dir,
+        skip without error AND record the skip in ``skipped_fixture_checks``."""
+        empty_fixtures_dir = tmp_path / "fixtures_dir_exists_but_empty"
         empty_fixtures_dir.mkdir()
 
         self._pin_constants(monkeypatch)
@@ -621,6 +658,91 @@ class TestFixtureMonotonicityBasesIntegration:
         assert "skip fixture monotonicity" in captured.out, (
             "Expected a 'skip fixture monotonicity' message in stdout when the "
             "fixture file is not found."
+        )
+
+        # The skipped fixture must be surfaced in the results — otherwise a
+        # silent skip looks identical to "all PASS" to downstream consumers.
+        skipped = results.get("skipped_fixture_checks", [])
+        assert any(
+            entry.get("logical_name") == "transparency_bearing" for entry in skipped
+        ), (
+            "Expected skipped_fixture_checks to record 'transparency_bearing' "
+            f"when the fixture file is absent — got: {skipped}.  Without this "
+            "the verdict loop's empty-iteration produces a silent PASS that's "
+            "indistinguishable from 'all monotonicity checks passed'."
+        )
+
+    def test_missing_fixtures_dir_records_all_skips(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """When tests/fixtures/ does not exist at all, every configured fixture
+        base must appear in ``skipped_fixture_checks``.
+
+        This is the silent-PASS guard: on a fresh clone where neither the
+        committed fixture nor `make fixtures` has produced anything, the
+        sanity check must NOT report all-green for the alpha-compositing
+        regression class.  Downstream CI gates can read skipped_fixture_checks
+        and fail the build.
+        """
+        self._pin_constants(monkeypatch)
+        gl = self._make_fake_gl()
+        monkeypatch.setattr(sanity, "_import_giflab", lambda: gl)
+        monkeypatch.setattr(
+            sanity,
+            "FIXTURE_MONOTONICITY_BASES",
+            {
+                "transparency_bearing": "transparency_bearing_monotonicity.gif",
+                "another_guard": "another_fixture.gif",
+            },
+        )
+        # _FIXTURES_DIR itself does not exist
+        monkeypatch.setattr(sanity, "_FIXTURES_DIR", tmp_path / "no_such_dir")
+
+        results = sanity.run_sanity(tmp_path / "workdir", skip_lossy=True)
+
+        skipped = results.get("skipped_fixture_checks", [])
+        skipped_names = {entry["logical_name"] for entry in skipped}
+        assert skipped_names == {"transparency_bearing", "another_guard"}, (
+            "Expected ALL configured fixture bases in skipped_fixture_checks "
+            f"when tests/fixtures/ is missing — got: {skipped_names}"
+        )
+
+    def test_present_fixture_does_not_record_skip(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Happy path: when the fixture is present, skipped_fixture_checks must be empty."""
+        from PIL import Image
+
+        fixture_dir = tmp_path / "fixtures"
+        fixture_dir.mkdir()
+        fixture_path = fixture_dir / "transparency_bearing_monotonicity.gif"
+        frames_list = [Image.new("P", (16, 16), color=i) for i in (100, 120)]
+        for fl in frames_list:
+            fl.putpalette([i % 256 for i in range(768)])
+        frames_list[0].save(
+            fixture_path,
+            save_all=True,
+            append_images=frames_list[1:],
+            duration=100,
+            loop=0,
+            optimize=False,
+        )
+
+        self._pin_constants(monkeypatch)
+        gl = self._make_fake_gl()
+        monkeypatch.setattr(sanity, "_import_giflab", lambda: gl)
+        monkeypatch.setattr(
+            sanity,
+            "FIXTURE_MONOTONICITY_BASES",
+            {"transparency_bearing": "transparency_bearing_monotonicity.gif"},
+        )
+        monkeypatch.setattr(sanity, "_FIXTURES_DIR", fixture_dir)
+
+        results = sanity.run_sanity(tmp_path / "workdir", skip_lossy=True)
+
+        assert results.get("skipped_fixture_checks", []) == [], (
+            "Expected empty skipped_fixture_checks when the fixture is present, "
+            f"got: {results.get('skipped_fixture_checks')}"
         )
 
     def test_config_output_includes_fixture_bases(

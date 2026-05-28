@@ -485,14 +485,29 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
     # These are pre-generated regression-guard fixtures from tests/fixtures/.
     # They exercise specific bug classes (e.g. alpha-compositing) that synthetic
     # specs don't cover.  Run the same noise/blur/quantize/lossy sequences.
+    #
+    # The canonical copies of these fixtures are COMMITTED to tests/fixtures/
+    # (with a .gitignore exception) so the sanity check has a real regression
+    # guard even on a fresh clone where `make fixtures` has not been run.
+    #
+    # ``skipped_fixture_checks`` surfaces any fixture that could not be loaded
+    # (file or directory absent) so downstream CI / reviewers can gate on it
+    # rather than silently treating "no monotonicity checks ran" as "all PASS".
+    skipped_fixture_checks: list[dict[str, str]] = []
     if FIXTURE_MONOTONICITY_BASES and _FIXTURES_DIR.exists():
         for logical_name, filename in FIXTURE_MONOTONICITY_BASES.items():
             base_path = _FIXTURES_DIR / filename
             if not base_path.exists():
+                msg = (
+                    f"{base_path} not found — fixture should be committed in-tree; "
+                    "run `make fixtures` if it was deleted"
+                )
                 print(
-                    f"[sanity]   skip fixture monotonicity {logical_name}: "
-                    f"{base_path} not found — run `make fixtures` to generate",
+                    f"[sanity]   skip fixture monotonicity {logical_name}: {msg}",
                     flush=True,
+                )
+                skipped_fixture_checks.append(
+                    {"logical_name": logical_name, "reason": msg}
                 )
                 continue
             print(f"[sanity]   fixture base: {logical_name} ({filename})", flush=True)
@@ -570,11 +585,15 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                         )
                     monotonicity[(kind, logical_name)] = coalesced_metrics
     elif FIXTURE_MONOTONICITY_BASES:
-        print(
-            f"[sanity]   skip fixture monotonicity bases: {_FIXTURES_DIR} not found"
-            " — run `make fixtures`",
-            flush=True,
+        msg = (
+            f"{_FIXTURES_DIR} not found — fixtures directory absent; "
+            "run `make fixtures` or check tests/fixtures/ exists in the repo"
         )
+        print(f"[sanity]   skip fixture monotonicity bases: {msg}", flush=True)
+        for logical_name in FIXTURE_MONOTONICITY_BASES:
+            skipped_fixture_checks.append(
+                {"logical_name": logical_name, "reason": msg}
+            )
 
     # ---- Verdict per metric ----
     print("[sanity] Computing verdicts...", flush=True)
@@ -641,6 +660,7 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
         "monotonicity": {
             f"{kind}::{base}": per_metric for (kind, base), per_metric in monotonicity.items()
         },
+        "skipped_fixture_checks": skipped_fixture_checks,
         "verdicts": [asdict(v) for v in verdicts],
         "config": {
             "identity_sample": IDENTITY_SAMPLE,
@@ -669,6 +689,17 @@ def print_verdict_table(results: dict[str, Any]) -> None:
             f"{r['note']}"
         )
     print()
+
+    # Loudly surface any fixture-based checks that were skipped — these are
+    # regression guards that didn't run, so a clean PASS table above does not
+    # mean "everything was checked".  Downstream CI gates should treat a
+    # non-empty skipped list as a warning or failure.
+    skipped = results.get("skipped_fixture_checks", [])
+    if skipped:
+        print("⚠️  SKIPPED FIXTURE CHECKS (regression guards that did not run):")
+        for entry in skipped:
+            print(f"  - {entry['logical_name']}: {entry['reason']}")
+        print()
 
 
 def main() -> int:

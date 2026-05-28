@@ -619,24 +619,39 @@ def create_transparency_bearing_monotonicity_gif(output_dir: Path) -> Path:
     noise/blur/quantize degradation sequences to be ordered) with a fixed
     transparent oval in the bottom-right corner.
 
-    Palette construction:
+    Palette construction (in-memory):
 
     - Quantise each frame's RGB content to 255 colours (palette indices 0–254).
-    - Reserve palette index 255 as the ``transparency`` sentinel; set it to
-      white (255, 255, 255) — this is what the correct RGBA-composite path
-      produces for fully transparent pixels.
-    - Set every pixel inside the oval to index 255.
+    - Reserve palette index 255 as the ``transparency`` sentinel; this code
+      writes white (255, 255, 255) into palette slot 255 in the in-memory P
+      image, then stamps every pixel inside the oval with index 255.
     - Save with ``transparency=255`` so the GIF header marks index 255 as
       the transparent palette entry.
 
-    With the **buggy** ``img.convert('RGB')`` path, PIL resolves palette index
-    255 to the colour in the file's palette table.  Because that entry is white
-    ``(255, 255, 255)`` in this fixture, re-encoding (which rearranges the
-    palette) will map a *different* non-white colour to those pixels, causing
-    the visible-content mismatch that corrupts pair-comparison metrics.
+    What actually ends up in the saved file (the regression-relevant part):
 
-    Determinism: all random state is seeded; output is byte-identical across
-    runs on the same Python / Pillow version.
+    Pillow's GIF encoder **truncates the saved palette to the smallest power of
+    two that covers the highest in-use index for the content colours**, often
+    well below 256.  In this fixture the saved palette is truncated to 128
+    entries — palette index 255 is OUT OF RANGE in the file.  When PIL later
+    loads the file and ``convert('RGB')`` resolves transparent pixels through
+    that (missing) palette entry, it returns ``(0, 0, 0)`` for them.
+
+    So the buggy path decodes transparent pixels as **black**, while the correct
+    RGBA-composite path (alpha-blend onto white) decodes them as **white**.
+    That is a ~255 DN per-channel difference — exactly the kind of decode
+    instability PR #8 was meant to eliminate, and a strong enough signal that
+    every pair-comparison metric (ssim, ms_ssim, chist, lpips, …) on a
+    transparency-bearing GIF will collapse if the compositing fix is reverted.
+
+    The exact colour the buggy path picks is encoder-dependent (Pillow version,
+    optimisation flags, palette compaction heuristics).  What matters for
+    regression detection is only that the buggy path differs from the correct
+    white — which is asserted directly in
+    ``test_buggy_path_gives_different_frame_than_correct_path``.
+
+    Determinism: deterministic content — output is byte-identical across runs on
+    the same Python / Pillow version.
     """
     # Fixed transparent palette index — palette slots 0..254 are content colours;
     # slot 255 is reserved as the transparency sentinel.
@@ -673,8 +688,11 @@ def create_transparency_bearing_monotonicity_gif(output_dir: Path) -> Path:
             colors=255, dither=Image.Dither.NONE, method=Image.Quantize.MEDIANCUT
         )
 
-        # Extend palette to 256 entries; slot 255 = white (the RGBA-composite
-        # result for a fully-transparent pixel composited onto white).
+        # Write white into in-memory palette slot 255.  NOTE: Pillow's GIF
+        # encoder will likely truncate the saved palette to a smaller
+        # power-of-two (e.g. 128 entries) on serialisation, so the saved file
+        # does NOT actually contain white at index 255 — see the docstring for
+        # why that is the regression-relevant point, not a bug.
         palette = list(p.getpalette())  # 768 values (256 × RGB), partially used
         palette[_TRANSPARENT_INDEX * 3 : _TRANSPARENT_INDEX * 3 + 3] = [255, 255, 255]
 
