@@ -217,8 +217,41 @@ def _direction(identity_v: float, pathological_v: float, tol: float = 1e-3) -> s
     return "higher_better" if delta < 0 else "lower_better"
 
 
+def _range_derived_tol(values: list[float], tol_floor: float = 1e-4, relative_eps: float = 0.05) -> float:
+    """Compute a content-aware monotonicity tolerance from the observed range.
+
+    A fixed tolerance is too tight for metrics that vary over a wide range
+    (e.g. MSE on noisy content) and too loose for metrics that barely move
+    at all (e.g. chist on non-gradient content).  Scaling by the observed
+    range lets the threshold track the metric's effective resolution.
+
+    Formula: ``max(tol_floor, observed_range * relative_eps)``
+
+    - ``tol_floor`` (default 1e-4): minimum epsilon regardless of range, so
+      metrics that return identical values don't produce a zero tolerance.
+    - ``relative_eps`` (default 0.05): 5% of the observed range is allowed
+      as noise before an inversion is flagged.  Inversions larger than this
+      are treated as real non-monotonicity rather than noise-floor artefacts.
+
+    Args:
+        values: The ordered metric values for a single degradation sweep.
+            NaN values are excluded from the range calculation.
+        tol_floor: Minimum tolerance (absolute).  Defaults to 1e-4.
+        relative_eps: Fraction of the observed range to use as tolerance.
+            Defaults to 0.05 (5%).
+
+    Returns:
+        Content-aware tolerance >= tol_floor.
+    """
+    finite = [v for v in values if not math.isnan(v)]
+    if len(finite) < 2:
+        return tol_floor
+    observed_range = max(finite) - min(finite)
+    return max(tol_floor, observed_range * relative_eps)
+
+
 def _monotonicity_check(
-    values: list[float], direction: str, tol: float = 1e-4
+    values: list[float], direction: str, tol: float | None = None
 ) -> list[tuple[int, float, float]]:
     """Return inversions: (level_idx, value_at_idx, value_at_idx+1) where the
     pair is worse-ordered than expected given the direction. Empty list = OK.
@@ -226,20 +259,30 @@ def _monotonicity_check(
     direction "higher_better" expects values to be non-increasing as severity
     increases. "lower_better" expects non-decreasing. "flat" means we can't
     really test monotonicity — return empty so it doesn't false-flag.
+
+    Tolerance is content-aware by default: ``tol`` is derived from the
+    observed value range via :func:`_range_derived_tol` (``max(1e-4,
+    range * 0.05)``).  This prevents metrics that are saturated near their
+    ceiling from accumulating false SUSPICIOUS verdicts due to noise-floor
+    flips that are well within the metric's effective resolution.
+
+    Pass an explicit ``tol`` to override the range-derived value (e.g. in
+    tests that verify the raw check logic against a known epsilon).
     """
     if direction == "flat":
         return []
+    effective_tol = tol if tol is not None else _range_derived_tol(values)
     inversions: list[tuple[int, float, float]] = []
     for i in range(len(values) - 1):
         a, b = values[i], values[i + 1]
         if any(math.isnan(x) for x in (a, b)):
             continue
         if direction == "higher_better":
-            # Expect b <= a + tol
-            if b > a + tol:
+            # Expect b <= a + effective_tol
+            if b > a + effective_tol:
                 inversions.append((i, a, b))
         else:  # lower_better
-            if b < a - tol:
+            if b < a - effective_tol:
                 inversions.append((i, a, b))
     return inversions
 
