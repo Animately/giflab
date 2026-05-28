@@ -1630,7 +1630,34 @@ def gmsd(frame1: np.ndarray, frame2: np.ndarray) -> float:
 
 
 def chist(frame1: np.ndarray, frame2: np.ndarray, bins: int = 32) -> float:
-    """Colour-Histogram Correlation (0-1, higher is better)."""
+    """Colour-Histogram Correlation (0-1, higher is better).
+
+    Per-channel marginal histogram correlation: 32-bin histograms are built
+    independently for R, G, B; Pearson correlation between matched channels
+    is averaged, then mapped from [-1, 1] to [0, 1].
+
+    Invariances (intentional, documented after the 2026-05-22 metrics audit):
+        1. **Spatial invariance.** Only marginal pixel-value distributions
+           are compared; spatial arrangement is invisible. A spatially
+           scrambled copy of the input scores ~1.0 against the original.
+        2. **Channel independence.** Per-channel correlation is averaged;
+           joint-channel structure (e.g. R/G/B covariance, hue rotations
+           that preserve per-channel marginals) is invisible.
+        3. **Bin coarseness.** With 32 bins, each bin covers 8 intensity
+           levels. Small intra-bin shifts are invisible; large degradations
+           that collapse pixel values toward already-populous bins (e.g.
+           extreme palette quantization, extreme blur) can *rebound* the
+           correlation because bin overlap rises again. This makes chist
+           non-monotonic across degradation strength on smooth/photographic
+           content — see the audit report under
+           `docs/metrics-audit/2026-05-22/report.md` ("chist" section).
+
+    Implication: chist is a colour-fidelity signal, not a holistic quality
+    signal. It is appropriately weighted at ~4% in `composite_quality`
+    (see `config.ENHANCED_CHIST_WEIGHT`). Do not use it as a sole quality
+    discriminator; pair with a spatially-aware metric (ssim, fsim, gmsd,
+    lpips) for any ranking decision.
+    """
     f1, f2 = _resize_if_needed(frame1, frame2)
     scores: list[float] = []
     for ch in range(3):  # R,G,B channels
