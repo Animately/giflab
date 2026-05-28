@@ -31,6 +31,10 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageFilter
 
+# Project root: scripts/audit/sanity.py → scripts/audit/ → scripts/ → project root
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_FIXTURES_DIR = _PROJECT_ROOT / "tests" / "fixtures"
+
 # Lazy giflab imports (heavy)
 def _import_giflab():
     from giflab.config import MetricsConfig
@@ -58,6 +62,25 @@ MONOTONICITY_BASES = [
     "geometric_patterns",
     "animation_heavy",
 ]
+
+# Additional fixture-based monotonicity bases.  These are deterministically
+# generated GIFs (via ``make fixtures`` / ``scripts/fixtures/generate.py``)
+# that guard specific regression classes discovered in the audit.  They are
+# loaded by name from ``tests/fixtures/`` and injected into the monotonicity
+# loop alongside the synthetic specs so they exercise the same degradation
+# sequences (noise, blur, quantize, lossy).
+#
+# - transparency_bearing: guards PR #8's alpha-compositing bug.
+#   A palette-P GIF with a ``transparency`` index in its header.  With the
+#   buggy ``Image.convert('RGB')`` path, transparent regions resolve to a
+#   palette-dependent colour that changes across re-encodings, corrupting
+#   every pair-comparison metric.  Running degradation sequences through this
+#   fixture means a regression would produce palette-noise-driven inversions
+#   that the monotonicity check flags as SUSPICIOUS.
+FIXTURE_MONOTONICITY_BASES: dict[str, str] = {
+    # logical name → filename in tests/fixtures/
+    "transparency_bearing": "transparency_bearing_monotonicity.gif",
+}
 
 # Identity sample: 1 GIF per major content category, picked to keep runtime
 # reasonable. The sanity verdict only needs a handful to detect "metric
@@ -501,6 +524,120 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                     )
                 monotonicity[(kind, base_name)] = coalesced_metrics
 
+    # ---- Fixture-based monotonicity bases (FIXTURE_MONOTONICITY_BASES) ----
+    # These are pre-generated regression-guard fixtures from tests/fixtures/.
+    # They exercise specific bug classes (e.g. alpha-compositing) that synthetic
+    # specs don't cover.  Run the same noise/blur/quantize/lossy sequences.
+    #
+    # The canonical copies of these fixtures are COMMITTED to tests/fixtures/
+    # (with a .gitignore exception) so the sanity check has a real regression
+    # guard even on a fresh clone where `make fixtures` has not been run.
+    #
+    # ``skipped_fixture_checks`` surfaces any fixture that could not be loaded
+    # (file or directory absent) so downstream CI / reviewers can gate on it
+    # rather than silently treating "no monotonicity checks ran" as "all PASS".
+    skipped_fixture_checks: list[dict[str, str]] = []
+    if FIXTURE_MONOTONICITY_BASES and _FIXTURES_DIR.exists():
+        for logical_name, filename in FIXTURE_MONOTONICITY_BASES.items():
+            base_path = _FIXTURES_DIR / filename
+            if not base_path.exists():
+                msg = (
+                    f"{base_path} not found — fixture should be committed in-tree; "
+                    "run `make fixtures` if it was deleted"
+                )
+                print(
+                    f"[sanity]   skip fixture monotonicity {logical_name}: {msg}",
+                    flush=True,
+                )
+                skipped_fixture_checks.append(
+                    {"logical_name": logical_name, "reason": msg}
+                )
+                continue
+            print(f"[sanity]   fixture base: {logical_name} ({filename})", flush=True)
+            base_frames, dur = read_gif_frames(base_path)
+
+            # Noise
+            kind = "noise"
+            per_metric_levels = defaultdict(list)
+            for sigma in NOISE_SIGMAS:
+                degraded_path = workdir / f"{logical_name}_noise_{sigma}.gif"
+                degraded = add_gaussian_noise(base_frames, sigma, rng)
+                save_gif(degraded, degraded_path, duration_ms=dur)
+                m = run_metrics(base_path, degraded_path, gl=gl)
+                for k, v in m.items():
+                    per_metric_levels[k].append(v)
+            monotonicity[(kind, logical_name)] = dict(per_metric_levels)
+
+            # Blur
+            kind = "blur"
+            per_metric_levels = defaultdict(list)
+            for sigma in BLUR_SIGMAS:
+                degraded_path = workdir / f"{logical_name}_blur_{sigma}.gif"
+                degraded = gaussian_blur(base_frames, sigma)
+                save_gif(degraded, degraded_path, duration_ms=dur)
+                m = run_metrics(base_path, degraded_path, gl=gl)
+                for k, v in m.items():
+                    per_metric_levels[k].append(v)
+            monotonicity[(kind, logical_name)] = dict(per_metric_levels)
+
+            # Quantize
+            kind = "quantize"
+            per_metric_levels = defaultdict(list)
+            for ncolors in QUANTIZE_COLORS:
+                degraded_path = workdir / f"{logical_name}_q_{ncolors}.gif"
+                degraded = quantize_palette(base_frames, ncolors)
+                save_gif(degraded, degraded_path, duration_ms=dur)
+                m = run_metrics(base_path, degraded_path, gl=gl)
+                for k, v in m.items():
+                    per_metric_levels[k].append(v)
+            monotonicity[(kind, logical_name)] = dict(per_metric_levels)
+
+            # Lossy
+            if not skip_lossy:
+                kind = "lossy"
+                per_metric_levels = defaultdict(list)
+                degraded_paths: list[Path] = []
+                for level in LOSSY_LEVELS:
+                    degraded_path = workdir / f"{logical_name}_lossy_{level}.gif"
+                    try:
+                        gl["compress"](
+                            base_path, degraded_path, "animately", {"lossy_level": level}
+                        )
+                    except Exception as e:
+                        print(
+                            f"[sanity]     animately --lossy {level} failed on {logical_name}: {e}",
+                            flush=True,
+                        )
+                        continue
+                    m = run_metrics(base_path, degraded_path, gl=gl)
+                    for k, v in m.items():
+                        per_metric_levels[k].append(v)
+                    degraded_paths.append(degraded_path)
+                if per_metric_levels:
+                    _, coalesced_metrics = _coalesce_byte_identical_levels(
+                        degraded_paths, dict(per_metric_levels)
+                    )
+                    dropped = len(degraded_paths) - len(
+                        next(iter(coalesced_metrics.values()), [])
+                    )
+                    if dropped > 0:
+                        print(
+                            f"[sanity]     coalesced {dropped} byte-identical lossy level(s)"
+                            f" on {logical_name}",
+                            flush=True,
+                        )
+                    monotonicity[(kind, logical_name)] = coalesced_metrics
+    elif FIXTURE_MONOTONICITY_BASES:
+        msg = (
+            f"{_FIXTURES_DIR} not found — fixtures directory absent; "
+            "run `make fixtures` or check tests/fixtures/ exists in the repo"
+        )
+        print(f"[sanity]   skip fixture monotonicity bases: {msg}", flush=True)
+        for logical_name in FIXTURE_MONOTONICITY_BASES:
+            skipped_fixture_checks.append(
+                {"logical_name": logical_name, "reason": msg}
+            )
+
     # ---- Verdict per metric ----
     print("[sanity] Computing verdicts...", flush=True)
     verdicts: list[PerMetricVerdict] = []
@@ -566,10 +703,12 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
         "monotonicity": {
             f"{kind}::{base}": per_metric for (kind, base), per_metric in monotonicity.items()
         },
+        "skipped_fixture_checks": skipped_fixture_checks,
         "verdicts": [asdict(v) for v in verdicts],
         "config": {
             "identity_sample": IDENTITY_SAMPLE,
             "monotonicity_bases": MONOTONICITY_BASES,
+            "fixture_monotonicity_bases": list(FIXTURE_MONOTONICITY_BASES.keys()),
             "noise_sigmas": NOISE_SIGMAS,
             "blur_sigmas": BLUR_SIGMAS,
             "quantize_colors": QUANTIZE_COLORS,
@@ -593,6 +732,17 @@ def print_verdict_table(results: dict[str, Any]) -> None:
             f"{r['note']}"
         )
     print()
+
+    # Loudly surface any fixture-based checks that were skipped — these are
+    # regression guards that didn't run, so a clean PASS table above does not
+    # mean "everything was checked".  Downstream CI gates should treat a
+    # non-empty skipped list as a warning or failure.
+    skipped = results.get("skipped_fixture_checks", [])
+    if skipped:
+        print("⚠️  SKIPPED FIXTURE CHECKS (regression guards that did not run):")
+        for entry in skipped:
+            print(f"  - {entry['logical_name']}: {entry['reason']}")
+        print()
 
 
 def main() -> int:
