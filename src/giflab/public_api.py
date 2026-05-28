@@ -215,10 +215,22 @@ def compress(
     See ``docs/public-api.md`` for the full contract. Overwrites ``output_path``
     if a file already exists there. Does not mutate ``input_path``.
 
+    Recognised ``params`` keys:
+
+    - ``lossy_level`` *(required for lossy engines)* — engine-native lossy
+      compression level.
+    - ``timeout_s`` *(optional)* — per-call wall-clock timeout in seconds for
+      the engine subprocess. Honoured by the animately and gifsicle engines.
+      Precedence: ``params["timeout_s"]`` > ``GIFLAB_RUN_TIMEOUT`` env var >
+      default of 10s. Surfaced for batch / audit workflows where the default
+      cuts off legitimate ~10 MB+ inputs (see audit
+      ``docs/metrics-audit/2026-05-22/report.md``). Must be a positive integer.
+
     Raises:
         UnknownEngineError: ``engine`` is not in :data:`SUPPORTED_ENGINES`.
         EngineUnavailableError: the engine binary is not available on PATH.
         FileNotFoundError: ``input_path`` does not exist.
+        ValueError: ``params["timeout_s"]`` is not a positive integer.
     """
     if engine not in SUPPORTED_ENGINES:
         raise UnknownEngineError(engine)

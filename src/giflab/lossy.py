@@ -52,11 +52,66 @@ from pathlib import Path
 from shutil import rmtree, which
 from typing import Any
 
-RUN_TIMEOUT = int(os.getenv("GIFLAB_RUN_TIMEOUT", "10"))
+DEFAULT_RUN_TIMEOUT = 10
+"""Default wall-clock timeout (seconds) for external engine subprocess calls.
+
+Sensible for interactive product use; can be raised for batch / large-input
+work via the ``GIFLAB_RUN_TIMEOUT`` env var or a per-call ``timeout_s``
+param. See :func:`_resolve_run_timeout`.
+"""
+
+# Backwards-compat alias. Older call sites read this constant directly at
+# module load to derive a static timeout (e.g. ADVANCED_TIMEOUT_MULTIPLIER
+# math). New code should call ``_resolve_run_timeout()`` so that env var and
+# per-call params are honoured.
+RUN_TIMEOUT = int(os.getenv("GIFLAB_RUN_TIMEOUT", str(DEFAULT_RUN_TIMEOUT)))
 
 # Constants for advanced lossy compression
 MIN_FRAME_DELAY_MS = 20  # Minimum frame delay in milliseconds (GIF standard)
 ADVANCED_TIMEOUT_MULTIPLIER = 2  # Timeout multiplier for PNG sequence processing
+
+
+def _resolve_run_timeout(params: dict[str, Any] | None) -> int:
+    """Resolve the wall-clock timeout (seconds) to apply to an engine subprocess.
+
+    Precedence (highest first):
+
+    1. ``params["timeout_s"]`` — per-call override; the consumer of the public
+       :func:`giflab.compress` API can pass ``params={"timeout_s": 60}`` to
+       lift the default for a known-slow input.
+    2. ``GIFLAB_RUN_TIMEOUT`` environment variable — process-wide override;
+       read at *call time* (not module-import time) so test/orchestration
+       code can flip it dynamically.
+    3. :data:`DEFAULT_RUN_TIMEOUT` (10 s) — the historic safety net, kept as
+       the default so existing behaviour is preserved when no override is
+       supplied.
+
+    Raises:
+        ValueError: if ``timeout_s`` (or the env var) parses to a non-positive
+            integer. We refuse to silently coerce — a 0s timeout would cancel
+            every call.
+    """
+    # 1. params override
+    if params is not None and "timeout_s" in params:
+        value = int(params["timeout_s"])
+        if value <= 0:
+            raise ValueError(
+                f"timeout_s must be a positive integer, got {value}"
+            )
+        return value
+
+    # 2. env var (read at call time)
+    env_val = os.getenv("GIFLAB_RUN_TIMEOUT")
+    if env_val is not None and env_val.strip() != "":
+        value = int(env_val)
+        if value <= 0:
+            raise ValueError(
+                f"GIFLAB_RUN_TIMEOUT must be a positive integer, got {value}"
+            )
+        return value
+
+    # 3. default
+    return DEFAULT_RUN_TIMEOUT
 
 from .color_keep import (
     build_animately_color_args,
@@ -440,6 +495,8 @@ def compress_with_gifsicle(
     lossy_level: int,
     frame_keep_ratio: float = 1.0,
     color_keep_count: int | None = None,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Compress GIF using gifsicle with lossy, frame reduction, and color reduction options.
 
@@ -591,13 +648,14 @@ def compress_with_gifsicle(
     cmd.extend(["--output", output_str])
 
     # Command ready for execution
+    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
 
     # Execute command and measure time
     start_time = time.time()
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=RUN_TIMEOUT
+            cmd, capture_output=True, text=True, check=True, timeout=run_timeout
         )
 
         end_time = time.time()
@@ -635,7 +693,7 @@ def compress_with_gifsicle(
     except subprocess.TimeoutExpired as e:
         # subprocess.run already cleans up the child process on timeout.
         # The previous kill() attempt used the wrong object (cmd string) and was ineffective.
-        raise RuntimeError(f"Gifsicle timed out after {RUN_TIMEOUT} seconds") from e
+        raise RuntimeError(f"Gifsicle timed out after {run_timeout} seconds") from e
     except Exception as e:
         raise RuntimeError(f"Gifsicle execution failed: {str(e)}") from e
 
@@ -646,6 +704,8 @@ def compress_with_animately(
     lossy_level: int,
     frame_keep_ratio: float = 1.0,
     color_keep_count: int | None = None,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Compress GIF using animately CLI with lossy, frame reduction, and color reduction options.
 
@@ -694,6 +754,9 @@ def compress_with_animately(
         lossy_level: Lossy compression level for animately
         frame_keep_ratio: Ratio of frames to keep (0.0 to 1.0)
         color_keep_count: Number of colors to keep (optional)
+        timeout_s: Optional wall-clock timeout in seconds for the animately
+            subprocess. If None, falls back to GIFLAB_RUN_TIMEOUT env var,
+            then to DEFAULT_RUN_TIMEOUT (10s). See :func:`_resolve_run_timeout`.
 
     Returns:
         Dictionary with compression metadata including:
@@ -711,6 +774,7 @@ def compress_with_animately(
         Animately uses decimal ratios (0.50 for 50%) and consistent flag syntax.
         All parameters are specified via flags, unlike gifsicle's mixed approach.
     """
+    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
     animately_path = DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
 
     # Check if animately is available
@@ -807,7 +871,7 @@ def compress_with_animately(
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=RUN_TIMEOUT
+            cmd, capture_output=True, text=True, check=True, timeout=run_timeout
         )
 
         end_time = time.time()
@@ -844,7 +908,7 @@ def compress_with_animately(
         ) from e
     except subprocess.TimeoutExpired as e:
         # subprocess.run already terminates the child process on timeout.
-        raise RuntimeError(f"Animately timed out after {RUN_TIMEOUT} seconds") from e
+        raise RuntimeError(f"Animately timed out after {run_timeout} seconds") from e
     except Exception as e:
         raise RuntimeError(f"Animately execution failed: {str(e)}") from e
 
@@ -853,6 +917,8 @@ def compress_with_animately_hard(
     input_path: Path,
     output_path: Path,
     lossy_level: int,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Compress GIF using animately CLI with --hard --lossy flags.
 
@@ -865,6 +931,9 @@ def compress_with_animately_hard(
         input_path: Path to input GIF file
         output_path: Path to save compressed GIF
         lossy_level: Lossy compression level for animately
+        timeout_s: Optional wall-clock timeout in seconds for the animately
+            subprocess. If None, falls back to GIFLAB_RUN_TIMEOUT env var,
+            then to DEFAULT_RUN_TIMEOUT (10s).
 
     Returns:
         Dictionary with compression metadata.
@@ -873,6 +942,7 @@ def compress_with_animately_hard(
         RuntimeError: If animately command fails or binary not found
         ValueError: If paths contain dangerous characters
     """
+    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
     animately_path = DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
 
     if not animately_path or not _is_executable(animately_path):
@@ -903,7 +973,7 @@ def compress_with_animately_hard(
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=RUN_TIMEOUT
+            cmd, capture_output=True, text=True, check=True, timeout=run_timeout
         )
 
         end_time = time.time()
@@ -933,7 +1003,7 @@ def compress_with_animately_hard(
         ) from e
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
-            f"Animately hard mode timed out after {RUN_TIMEOUT} seconds"
+            f"Animately hard mode timed out after {run_timeout} seconds"
         ) from e
     except Exception as e:
         raise RuntimeError(f"Animately hard mode execution failed: {str(e)}") from e
@@ -1375,7 +1445,11 @@ def _generate_json_config(
 
 
 def _execute_animately_advanced(
-    animately_path: str, json_config_path: Path, output_path: Path
+    animately_path: str,
+    json_config_path: Path,
+    output_path: Path,
+    *,
+    timeout_s: int | None = None,
 ) -> tuple[int, str | None]:
     """Execute Animately with advanced lossy configuration.
 
@@ -1383,6 +1457,10 @@ def _execute_animately_advanced(
         animately_path: Path to Animately executable
         json_config_path: Path to JSON configuration file
         output_path: Path for output file
+        timeout_s: Optional wall-clock timeout in seconds. If None, falls back
+            to (resolved base timeout) × ADVANCED_TIMEOUT_MULTIPLIER. PNG
+            sequence pipelines take roughly 2× the standard mode, hence the
+            multiplier on the resolved base value.
 
     Returns:
         Tuple of (render_ms, stderr_output)
@@ -1405,6 +1483,15 @@ def _execute_animately_advanced(
 
     logger.info(f"Executing Animately advanced lossy: {' '.join(cmd)}")
 
+    if timeout_s is not None:
+        run_timeout = int(timeout_s)
+        if run_timeout <= 0:
+            raise ValueError(
+                f"timeout_s must be a positive integer, got {run_timeout}"
+            )
+    else:
+        run_timeout = _resolve_run_timeout(None) * ADVANCED_TIMEOUT_MULTIPLIER
+
     # Execute command and measure time
     start_time = time.time()
 
@@ -1414,7 +1501,7 @@ def _execute_animately_advanced(
             capture_output=True,
             text=True,
             check=True,
-            timeout=RUN_TIMEOUT * ADVANCED_TIMEOUT_MULTIPLIER,
+            timeout=run_timeout,
         )
 
         end_time = time.time()
@@ -1492,10 +1579,9 @@ def _execute_animately_advanced(
             f"Animately advanced lossy failed with exit code {e.returncode}: {e.stderr}"
         ) from e
     except subprocess.TimeoutExpired as e:
-        timeout_duration = RUN_TIMEOUT * ADVANCED_TIMEOUT_MULTIPLIER
         # subprocess.run already cleans up; simply propagate a clear error.
         raise RuntimeError(
-            f"Animately advanced lossy timed out after {timeout_duration} seconds"
+            f"Animately advanced lossy timed out after {run_timeout} seconds"
         ) from e
     except Exception as e:
         raise RuntimeError(
@@ -1509,6 +1595,8 @@ def compress_with_animately_advanced_lossy(
     lossy_level: int,
     color_keep_count: int | None = None,
     png_sequence_dir: Path | None = None,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Compress GIF using Animately's advanced lossy mode with PNG sequence input.
 
@@ -1526,6 +1614,9 @@ def compress_with_animately_advanced_lossy(
         lossy_level: Lossy compression level (0-100)
         color_keep_count: Number of colors to keep (1-256, optional)
         png_sequence_dir: Directory for PNG sequence (optional, auto-generated if None)
+        timeout_s: Optional wall-clock timeout in seconds for the animately
+            subprocess. If None, falls back to (resolved base timeout) ×
+            ADVANCED_TIMEOUT_MULTIPLIER. See :func:`_resolve_run_timeout`.
 
     Returns:
         Dictionary with compression metadata including:
@@ -1575,6 +1666,7 @@ def compress_with_animately_advanced_lossy(
             total_frames,
             original_colors,
             animately_path,
+            timeout_s=timeout_s,
         )
     else:
         # Use context manager for automatic cleanup
@@ -1589,6 +1681,7 @@ def compress_with_animately_advanced_lossy(
                 total_frames,
                 original_colors,
                 animately_path,
+                timeout_s=timeout_s,
             )
         finally:
             # Clean up temporary directory
@@ -1609,6 +1702,8 @@ def _process_advanced_lossy(
     total_frames: int,
     original_colors: int,
     animately_path: str,
+    *,
+    timeout_s: int | None = None,
 ) -> dict[str, Any]:
     """Process the advanced lossy compression pipeline.
 
@@ -1641,7 +1736,7 @@ def _process_advanced_lossy(
 
     # Step 7: Execute Animately
     render_ms, stderr_output = _execute_animately_advanced(
-        animately_path, json_config_path, output_path
+        animately_path, json_config_path, output_path, timeout_s=timeout_s
     )
 
     # Step 8: Get engine version and return results
