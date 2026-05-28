@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image
 
 from .config import MetricsConfig
-from .metrics import extract_gif_frames
+from .metrics import align_frames, extract_gif_frames
 
 logger = logging.getLogger(__name__)
 
@@ -164,29 +164,49 @@ class Ssimulacra2Validator:
             config: Metrics configuration
 
         Returns:
-            Dictionary of SSIMULACRA2 metrics
+            Dictionary of SSIMULACRA2 metrics. All score keys
+            (``ssimulacra2_mean``, ``ssimulacra2_p95``, ``ssimulacra2_min``)
+            live on the **normalised** [0, 1] scale or are ``NaN`` when the
+            metric could not be computed. ``ssimulacra2_triggered`` is the
+            0/1 "did we actually run" flag — check that, not the score values,
+            to know whether SSIMULACRA2 ran.
         """
         if not self.is_available():
-            logger.warning("SSIMULACRA2 binary not available, returning defaults")
-            return {
-                "ssimulacra2_mean": 50.0,
-                "ssimulacra2_p95": 50.0,
-                "ssimulacra2_min": 50.0,
-                "ssimulacra2_frame_count": 0.0,
-                "ssimulacra2_triggered": 0.0,
-            }
+            logger.warning("SSIMULACRA2 binary not available, returning NaN")
+            return self._nan_result()
 
+        # Frame counts may legitimately differ — animately's lossy stage can
+        # drop frames (e.g. Malthouse season-launch-header.gif: 8 -> 3).
+        # Align via the same MSE-based content alignment the rest of metrics.py
+        # uses so we produce a real measurement on whatever overlap exists.
         if len(original_frames) != len(compressed_frames):
-            raise ValueError("Frame count mismatch between original and compressed")
+            logger.debug(
+                "Frame count mismatch (orig=%d, comp=%d) — aligning via MSE",
+                len(original_frames),
+                len(compressed_frames),
+            )
+            try:
+                aligned = align_frames(original_frames, compressed_frames)
+            except Exception as e:
+                logger.error(f"Frame alignment failed: {e}")
+                return self._nan_result()
+            if not aligned:
+                logger.error("Frame alignment produced no pairs")
+                return self._nan_result()
+            aligned_orig = [pair[0] for pair in aligned]
+            aligned_comp = [pair[1] for pair in aligned]
+        else:
+            aligned_orig = original_frames
+            aligned_comp = compressed_frames
 
         max_frames = min(
-            len(original_frames), getattr(config, "SSIMULACRA2_MAX_FRAMES", 30)
+            len(aligned_orig), getattr(config, "SSIMULACRA2_MAX_FRAMES", 30)
         )
 
         # Sample frames uniformly if we have too many
-        frame_indices = self._sample_frame_indices(len(original_frames), max_frames)
+        frame_indices = self._sample_frame_indices(len(aligned_orig), max_frames)
 
-        scores = []
+        scores: list[float] = []
 
         with tempfile.TemporaryDirectory(prefix="ssimulacra2_") as temp_dir:
             temp_path = Path(temp_dir)
@@ -197,8 +217,8 @@ class Ssimulacra2Validator:
 
                 try:
                     # Export frames to PNG
-                    self._export_frame_to_png(original_frames[frame_idx], orig_png)
-                    self._export_frame_to_png(compressed_frames[frame_idx], comp_png)
+                    self._export_frame_to_png(aligned_orig[frame_idx], orig_png)
+                    self._export_frame_to_png(aligned_comp[frame_idx], comp_png)
 
                     # Calculate SSIMULACRA2 score
                     raw_score = self._run_ssimulacra2_on_pair(orig_png, comp_png)
@@ -212,19 +232,40 @@ class Ssimulacra2Validator:
 
                 except Exception as e:
                     logger.error(f"SSIMULACRA2 failed for frame {frame_idx}: {e}")
-                    # Use fallback score for failed frames
-                    scores.append(0.5)
+                    # NaN, not a midpoint sentinel — biasing the mean toward
+                    # 0.5 is silent data corruption. nanmean ignores NaN frames.
+                    scores.append(float("nan"))
 
-        if not scores:
+        frame_count = float(len(scores))
+
+        if not scores or all(np.isnan(s) for s in scores):
             logger.error("No SSIMULACRA2 scores calculated")
-            scores = [0.5]  # Fallback
+            return self._nan_result(triggered=1.0, frame_count=frame_count)
 
         return {
-            "ssimulacra2_mean": float(np.mean(scores)),
-            "ssimulacra2_p95": float(np.percentile(scores, 95)),
-            "ssimulacra2_min": float(np.min(scores)),
-            "ssimulacra2_frame_count": float(len(scores)),
+            "ssimulacra2_mean": float(np.nanmean(scores)),
+            "ssimulacra2_p95": float(np.nanpercentile(scores, 95)),
+            "ssimulacra2_min": float(np.nanmin(scores)),
+            "ssimulacra2_frame_count": frame_count,
             "ssimulacra2_triggered": 1.0,
+        }
+
+    @staticmethod
+    def _nan_result(
+        triggered: float = 0.0, frame_count: float = 0.0
+    ) -> dict[str, float]:
+        """Build the canonical 'no measurement' result.
+
+        Score keys are NaN — the universal "no data" signal — so downstream
+        aggregators (corpus mean, composite quality) skip them honestly
+        instead of mistaking a raw-scale sentinel for a real score.
+        """
+        return {
+            "ssimulacra2_mean": float("nan"),
+            "ssimulacra2_p95": float("nan"),
+            "ssimulacra2_min": float("nan"),
+            "ssimulacra2_frame_count": frame_count,
+            "ssimulacra2_triggered": triggered,
         }
 
     def _sample_frame_indices(self, total_frames: int, max_frames: int) -> list[int]:

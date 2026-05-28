@@ -160,11 +160,13 @@ class TestMetricsPipelineIntegration:
                 "edge_sharpness_score": 100.0,
             }
 
-            # Mock SSIMULACRA2 to return default metrics
+            # Mock SSIMULACRA2 to return default (unavailable) metrics — NaN
+            # on the normalised [0, 1] scale (was previously the raw-scale
+            # 50.0 sentinel, fixed by audit-fix/ssimulacra2-scale-inconsistency).
             mock_ssim2.return_value = {
-                "ssimulacra2_mean": 50.0,
-                "ssimulacra2_p95": 50.0,
-                "ssimulacra2_min": 50.0,
+                "ssimulacra2_mean": float("nan"),
+                "ssimulacra2_p95": float("nan"),
+                "ssimulacra2_min": float("nan"),
                 "ssimulacra2_frame_count": 0.0,
                 "ssimulacra2_triggered": 0.0,
             }
