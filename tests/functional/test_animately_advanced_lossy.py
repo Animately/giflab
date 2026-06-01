@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
+from giflab.capability_registry import tools_for
 from giflab.lossy import (
     _execute_animately_advanced,
     _extract_gif_metadata,
@@ -21,6 +22,16 @@ from giflab.lossy import (
 )
 from giflab.tool_wrappers import AnimatelyAdvancedLossyCompressor
 from PIL import Image, ImageDraw
+
+# The capability registry is frozen at import time: a wrapper is registered only
+# if its binary was available then. So "is the advanced compressor registered?"
+# is the exact precondition for it to appear in generated pipelines — and the
+# honest skip condition for the pipeline-generation test when animately is absent
+# (e.g. the Linux CI image), where the registry legitimately excludes it.
+_ADVANCED_LOSSY_REGISTERED = any(
+    cls.__name__ == "AnimatelyAdvancedLossyCompressor"
+    for cls in tools_for("lossy_compression")
+)
 
 
 def create_test_gif(path: Path, frames: int = 5, size: tuple = (50, 50)) -> None:
@@ -223,6 +234,15 @@ class TestCompressWithAnimatelyAdvancedLossy:
 class TestPNGSequenceOptimization:
     """Test PNG sequence optimization in pipeline generation."""
 
+    @pytest.mark.skipif(
+        not _ADVANCED_LOSSY_REGISTERED,
+        reason=(
+            "animately binary not installed — AnimatelyAdvancedLossyCompressor is "
+            "not registered as available, so it cannot appear in generated "
+            "pipelines. The registry is frozen at import time, so this assertion is "
+            "environment-dependent by design (passes where the binary is present)."
+        ),
+    )
     def test_pipeline_generation_includes_advanced_lossy(self):
         """Test that pipeline generation includes the new advanced lossy compressor."""
         from giflab.dynamic_pipeline import generate_all_pipelines
@@ -528,31 +548,43 @@ class TestAnimatelyAdvancedLossyFast:
             assert total_frames == 3
             assert original_colors > 0
 
-    def test_compress_function_delegates_to_process(self, fast_compress):
-        """Test the main public function delegates correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "input.gif"
-            output_path = Path(tmpdir) / "output.gif"
+    @patch("giflab.lossy._process_advanced_lossy")
+    @patch("giflab.lossy._setup_png_sequence_directory")
+    @patch("giflab.lossy._extract_gif_metadata")
+    @patch("giflab.lossy._validate_animately_availability")
+    def test_compress_function_delegates_to_process(
+        self, mock_validate, mock_metadata, mock_setup, mock_process
+    ):
+        """The public function delegates to _process_advanced_lossy and returns it.
 
-            create_test_gif(input_path, frames=3)
+        Fully mocks the internal chain (availability gate, metadata, PNG-sequence
+        setup, processing) so the test is hermetic — it must not depend on the
+        real animately binary or imagemagick, neither of which is on the Linux CI
+        image. Mirrors ``test_successful_compression_with_provided_png`` above.
+        """
+        mock_validate.return_value = "/usr/bin/animately"
+        mock_metadata.return_value = (3, 128)
+        mock_setup.return_value = (
+            Path("/tmp/png_seq"),
+            {"frame_count": 3, "engine": "provided_by_previous_step"},
+            True,
+        )
+        mock_process.return_value = {
+            "render_ms": 150,
+            "engine": "animately-advanced",
+            "command": ["animately", "advanced", "args"],
+            "kilobytes": 25.5,
+            "lossy_level": 70,
+        }
 
-            with patch("giflab.lossy._process_advanced_lossy") as mock_process:
-                mock_process.return_value = {
-                    "render_ms": 150,
-                    "engine": "animately-advanced",
-                    "command": ["animately", "advanced", "args"],
-                    "kilobytes": 25.5,
-                    "lossy_level": 70,
-                }
+        result = compress_with_animately_advanced_lossy(
+            input_path=Path("input.gif"), output_path=Path("output.gif"), lossy_level=70
+        )
 
-                result = compress_with_animately_advanced_lossy(
-                    input_path=input_path, output_path=output_path, lossy_level=70
-                )
-
-                assert result["engine"] == "animately-advanced"
-                assert result["lossy_level"] == 70
-                assert result["render_ms"] == 150
-                mock_process.assert_called_once()
+        assert result["engine"] == "animately-advanced"
+        assert result["lossy_level"] == 70
+        assert result["render_ms"] == 150
+        mock_process.assert_called_once()
 
     def test_animately_execution_failure(self):
         """Test handling of animately execution failure with non-zero exit code."""
