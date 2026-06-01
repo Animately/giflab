@@ -273,8 +273,13 @@ class ParallelMetricsCalculator:
                 for idx, _ in metric_values:
                     max_idx = max(max_idx, idx)
 
-        # Initialize result arrays
-        aggregated = {name: [0.0] * (max_idx + 1) for name in metric_names}
+        # Initialize result arrays with NaN ("not measured"). Any index left
+        # unfilled (a frame whose metric produced no value) stays NaN rather
+        # than a fabricated 0.0; the NaN-aware aggregator in
+        # metrics._aggregate_metric then skips it honestly.
+        aggregated = {
+            name: [float("nan")] * (max_idx + 1) for name in metric_names
+        }
 
         # Place values at their correct indices
         for chunk_result in chunk_results:
@@ -399,9 +404,14 @@ def _process_chunk_worker(
                 results[metric_name].append((idx, float(value)))
 
             except Exception as e:
-                # Log error and use default value
+                # Log error and record NaN ("not measured") for this frame.
+                # This is the DEFAULT live per-frame path (parallel metrics,
+                # aligned_pairs > 1); a fabricated 0.0 here would drag the
+                # NaN-aware aggregate in metrics._aggregate_metric toward zero
+                # exactly as the sequential loop's old append(0.0) did. NaN
+                # lets the surviving frames carry the score honestly.
                 logger.warning(f"Metric {metric_name} failed for frame {idx}: {e}")
-                results[metric_name].append((idx, 0.0))
+                results[metric_name].append((idx, float("nan")))
 
     return results
 

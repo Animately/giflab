@@ -498,12 +498,16 @@ class TestExtendedComprehensiveMetrics:
         assert single_result["single_min"] == 0.5
         assert single_result["single_max"] == 0.5
 
-        # Test with empty values
+        # Test with empty values: nothing was measured, so every key is NaN
+        # ("not measured"), NOT 0.0 — a 0.0 here looks like a real worst-case
+        # score downstream (audit-fix: NaN over fabricated values).
+        import math
+
         empty_result = _aggregate_metric([], "empty")
-        assert empty_result["empty"] == 0.0
-        assert empty_result["empty_std"] == 0.0
-        assert empty_result["empty_min"] == 0.0
-        assert empty_result["empty_max"] == 0.0
+        assert math.isnan(empty_result["empty"])
+        assert math.isnan(empty_result["empty_std"])
+        assert math.isnan(empty_result["empty_min"])
+        assert math.isnan(empty_result["empty_max"])
 
 
 class TestSsimClampBehaviour:
@@ -1077,7 +1081,15 @@ class TestDeepPerceptualGate:
         )
 
     def test_disabled_returns_fallback_lpips_values(self):
-        """Disabled path must still surface the expected fallback keys."""
+        """Disabled path must still surface the expected fallback keys.
+
+        Audit-fix (NaN over sentinels): the disabled-LPIPS fallback now reports
+        NaN score keys ("not measured") rather than the old 0.5 midpoint
+        sentinel, which silently inflated composite_quality and corpus
+        aggregates. The keys are still present (same shape), just honest.
+        """
+        import math
+
         from giflab.metrics import calculate_comprehensive_metrics_from_frames
 
         a, b = self._frames()
@@ -1085,10 +1097,40 @@ class TestDeepPerceptualGate:
             a, b, config=self._quiet_config(), force_all_metrics=True
         )
 
-        # The fallback dict defined inline at the call site uses 0.5 sentinels.
-        assert result.get("lpips_quality_mean") == 0.5
-        assert result.get("lpips_quality_p95") == 0.5
-        assert result.get("lpips_quality_max") == 0.5
+        # Keys present (same schema), values NaN ("not measured"), not 0.5.
+        assert "lpips_quality_mean" in result
+        assert math.isnan(result["lpips_quality_mean"])
+        assert math.isnan(result["lpips_quality_p95"])
+        assert math.isnan(result["lpips_quality_max"])
+
+    def test_lpips_exception_path_returns_nan_not_sentinel(self, monkeypatch):
+        """When the LPIPS entry point hits its exception path, the returned
+        dict's score keys must be NaN (not the old 0.5 midpoint sentinel).
+
+        Forces the exception via monkeypatch so no real LPIPS model is needed
+        — pure functional layer.
+        """
+        from giflab.deep_perceptual_metrics import (
+            calculate_deep_perceptual_quality_metrics,
+        )
+
+        def _boom(*args, **kwargs):  # noqa: ANN001
+            raise RuntimeError("synthetic LPIPS validator failure")
+
+        # The entry point calls _get_or_create_validator(...).calculate_...;
+        # make the validator factory blow up to hit the outer except path.
+        monkeypatch.setattr(
+            "giflab.deep_perceptual_metrics._get_or_create_validator",
+            _boom,
+        )
+
+        a, b = self._frames()
+        result = calculate_deep_perceptual_quality_metrics(a, b, config={})
+
+        assert math.isnan(result["lpips_quality_mean"])
+        assert math.isnan(result["lpips_quality_p95"])
+        assert math.isnan(result["lpips_quality_max"])
+        assert result["deep_perceptual_device"] == "fallback"
 
 
 class TestSsimulacra2Gate:
@@ -1135,6 +1177,244 @@ class TestSsimulacra2Gate:
         assert calls == [], (
             "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
         )
+
+
+# =============================================================================
+# NaN-over-sentinel hardening tests (audit-fix:
+# giflab-metrics-nan-sentinel-hardening)
+# =============================================================================
+
+
+class TestAggregateMetricNaNAware:
+    """``_aggregate_metric`` must be NaN-aware so a failed frame (now appended
+    as NaN by the per-frame except blocks) doesn't drag the aggregate toward a
+    fabricated 0.0. Mirrors the SSIMULACRA2 nanmean tests in
+    tests/functional/test_ssimulacra2_metrics.py.
+    """
+
+    def test_mixed_nan_uses_nanmean(self):
+        from giflab.metrics import _aggregate_metric
+
+        values = [0.9, float("nan"), 0.8]
+        result = _aggregate_metric(values, "ssim")
+
+        # The surviving frames carry the score; NOT contaminated toward 0.
+        expected = float(np.nanmean(values))
+        assert result["ssim"] == pytest.approx(expected)
+        assert result["ssim"] == pytest.approx(0.85)
+        assert result["ssim_min"] == pytest.approx(0.8)
+        assert result["ssim_max"] == pytest.approx(0.9)
+
+    def test_all_nan_returns_nan(self):
+        from giflab.metrics import _aggregate_metric
+
+        result = _aggregate_metric([float("nan"), float("nan")], "ssim")
+        assert math.isnan(result["ssim"])
+        assert math.isnan(result["ssim_min"])
+        assert math.isnan(result["ssim_max"])
+        assert math.isnan(result["ssim_std"])
+
+    def test_single_nan_returns_nan(self):
+        from giflab.metrics import _aggregate_metric
+
+        # A single NaN frame must produce NaN, not float(nan) silently cast to
+        # a real-looking number (it stays NaN, which is correct).
+        result = _aggregate_metric([float("nan")], "ssim")
+        assert math.isnan(result["ssim"])
+
+    def test_edge_similarity_uses_nanmedian(self):
+        from giflab.metrics import _aggregate_metric
+
+        values = [0.0, 0.0, float("nan"), 1.0, 0.0]
+        result = _aggregate_metric(values, "edge_similarity")
+        # nanmedian of [0,0,1,0] = 0.0 (NaN dropped); proves median path is
+        # NaN-aware too (preserves _MEDIAN_AGGREGATED_METRICS behaviour).
+        assert result["edge_similarity"] == pytest.approx(
+            float(np.nanmedian(values))
+        )
+
+
+class TestPerFrameExceptionNaNPropagation:
+    """A per-frame metric exception must append NaN and propagate through the
+    aggregate as nanmean, NOT contaminate the mean toward 0.
+    """
+
+    def _frames(self):
+        rng = np.random.default_rng(7)
+        return (
+            [rng.integers(0, 256, (32, 32, 3), dtype=np.uint8) for _ in range(3)],
+            [rng.integers(0, 256, (32, 32, 3), dtype=np.uint8) for _ in range(3)],
+        )
+
+    def _quiet_config(self):
+        config = MetricsConfig()
+        # Disable expensive / external-binary metrics so this stays a fast
+        # functional test exercising only the per-frame loop + aggregation.
+        config.ENABLE_DEEP_PERCEPTUAL = False
+        config.ENABLE_SSIMULACRA2 = False
+        config.ENABLE_TEMPORAL_ARTIFACTS = False
+        return config
+
+    def test_gmsd_exception_on_one_frame_propagates_as_nanmean(self, monkeypatch):
+        """Force ``gmsd`` to raise on one frame; the aggregated ``gmsd`` value
+        must be the nanmean of the surviving frames, not be dragged toward the
+        fabricated 0.0 a failed frame used to append.
+
+        ``gmsd`` is chosen because (unlike SSIM, which ``calculate_ms_ssim``
+        also calls) it is computed exactly once per frame in the sequential
+        loop, so the failure targets the per-frame except block deterministically.
+        The sequential ``_from_frames`` path emits the bare ``gmsd`` key (no
+        ``_mean`` suffix; that rename only happens in calculate_selected_metrics).
+        """
+        import giflab.metrics as metrics_mod
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        real_gmsd = metrics_mod.gmsd
+        a, b = self._frames()
+        fail_idx = 1
+
+        # Reference run: a clean 2-frame call over only the SURVIVING frames,
+        # through the same resize+aggregate pipeline. The NaN-aware aggregate
+        # of the 3-frame run (with frame `fail_idx` failing) must equal the
+        # mean of this 2-frame survivor run — i.e. the NaN frame was dropped,
+        # not averaged in as 0.
+        survivors_a = [f for i, f in enumerate(a) if i != fail_idx]
+        survivors_b = [f for i, f in enumerate(b) if i != fail_idx]
+        survivor_result = calculate_comprehensive_metrics_from_frames(
+            survivors_a, survivors_b, config=self._quiet_config(), force_all_metrics=True
+        )
+        expected = survivor_result["gmsd"]
+
+        state = {"n": 0}
+
+        def flaky_gmsd(*args, **kwargs):  # noqa: ANN001
+            idx = state["n"]
+            state["n"] += 1
+            if idx == fail_idx:
+                raise RuntimeError("synthetic GMSD failure")
+            return real_gmsd(*args, **kwargs)
+
+        # Force the sequential loop so the per-frame except block is exercised
+        # deterministically (the parallel path runs in subprocesses where this
+        # monkeypatch wouldn't apply).
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        monkeypatch.setattr(metrics_mod, "gmsd", flaky_gmsd)
+
+        result = calculate_comprehensive_metrics_from_frames(
+            a, b, config=self._quiet_config(), force_all_metrics=True
+        )
+
+        gmsd_value = result["gmsd"]
+        # Finite, and equal to the survivor-only mean — proves the NaN frame
+        # was dropped. The old bug (append 0.0 + plain mean) would instead give
+        # (s0 + 0 + s2)/3, materially lower; assert we're NOT near that.
+        assert not math.isnan(gmsd_value)
+        assert gmsd_value == pytest.approx(expected, rel=1e-6)
+        contaminated = (expected * 2) / 3.0  # mean with a fabricated 0.0 frame
+        assert abs(gmsd_value - expected) < abs(gmsd_value - contaminated)
+
+
+class TestSsimulacra2ErrorPathKeyShape:
+    """Every SSIMULACRA2 error / disabled path must emit the full 5-key shape,
+    not just ``ssimulacra2_mean`` (the calculate_selected_metrics partial-keys
+    bug). NaN scores, 0.0 bookkeeping.
+    """
+
+    _KEYS = (
+        "ssimulacra2_mean",
+        "ssimulacra2_p95",
+        "ssimulacra2_min",
+        "ssimulacra2_frame_count",
+        "ssimulacra2_triggered",
+    )
+
+    def _frames(self):
+        rng = np.random.default_rng(3)
+        return (
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+            [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(2)],
+        )
+
+    def test_selected_metrics_error_emits_full_5_key_shape(self, monkeypatch):
+        from giflab.metrics import calculate_selected_metrics
+
+        def _boom(*args, **kwargs):  # noqa: ANN001
+            raise RuntimeError("synthetic SSIMULACRA2 failure")
+
+        monkeypatch.setattr(
+            "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics",
+            _boom,
+        )
+
+        config = MetricsConfig()
+        config.ENABLE_SSIMULACRA2 = True
+
+        a, b = self._frames()
+        result = calculate_selected_metrics(
+            a, b, {"ssimulacra2": True}, config=config
+        )
+
+        for key in self._KEYS:
+            assert key in result, f"missing {key} on selected-metrics error path"
+        # Score keys NaN, bookkeeping keys 0.0.
+        assert math.isnan(result["ssimulacra2_mean"])
+        assert math.isnan(result["ssimulacra2_p95"])
+        assert math.isnan(result["ssimulacra2_min"])
+        assert result["ssimulacra2_frame_count"] == 0.0
+        assert result["ssimulacra2_triggered"] == 0.0
+
+
+class TestCompositeQualityLpipsNaNSafety:
+    """``calculate_composite_quality`` must NOT add LPIPS weight or inflate the
+    score when ``lpips_quality_mean`` is NaN. Without the guard,
+    ``max(0.0, min(1.0, 1.0 - nan))`` evaluates to 1.0 (full LPIPS weight as
+    perfect quality) and corrupts total_weight.
+    """
+
+    def _base_metrics(self):
+        # A realistic set of non-LPIPS metrics so total_weight is well-defined.
+        return {
+            "ssim_mean": 0.8,
+            "ms_ssim_mean": 0.8,
+            "psnr_mean": 0.8,
+            "mse_mean": 100.0,
+            "fsim_mean": 0.8,
+            "gmsd_mean": 0.1,
+            "chist_mean": 0.9,
+            "sharpness_similarity_mean": 0.8,
+            "texture_similarity_mean": 0.8,
+            "temporal_consistency_delta": 0.1,
+        }
+
+    def test_nan_lpips_does_not_inflate_composite(self):
+        metrics_with_nan = dict(self._base_metrics())
+        metrics_with_nan["lpips_quality_mean"] = float("nan")
+
+        metrics_without = dict(self._base_metrics())  # no lpips key at all
+
+        score_nan = calculate_composite_quality(metrics_with_nan)
+        score_without = calculate_composite_quality(metrics_without)
+
+        # A NaN LPIPS must be skipped exactly as if the key were absent —
+        # identical composite, finite, not pinned to a perfect 1.0.
+        assert not math.isnan(score_nan)
+        assert score_nan == pytest.approx(score_without)
+        assert 0.0 <= score_nan <= 1.0
+
+    def test_real_lpips_still_contributes(self):
+        """Guard must not accidentally drop a genuine (non-NaN) LPIPS score."""
+        metrics_low_lpips = dict(self._base_metrics())
+        metrics_low_lpips["lpips_quality_mean"] = 0.0  # identical -> best
+
+        metrics_high_lpips = dict(self._base_metrics())
+        metrics_high_lpips["lpips_quality_mean"] = 1.0  # very different -> worst
+
+        score_low = calculate_composite_quality(metrics_low_lpips)
+        score_high = calculate_composite_quality(metrics_high_lpips)
+
+        # Lower LPIPS (more similar) must yield a higher composite — proves the
+        # term is still wired in for finite values.
+        assert score_low > score_high
 
 
 # =============================================================================
