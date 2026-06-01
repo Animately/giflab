@@ -81,9 +81,12 @@ def read_gif_timing(path: Path) -> tuple[int, int | None]:
     the honest ``"unknown"`` class rather than mislabelling a broken file as
     benign dedup.
 
-    Mirrors the summing convention in ``giflab.metrics.extract_gif_frames``:
-    per-frame delay is ``img.info.get("duration", 100)`` (default 100ms), and
-    the total is the sum across every frame.
+    The total duration sums the per-frame delay (``img.info.get("duration",
+    100)``, default 100ms) across *every* frame, giving the GIF's true
+    playback duration — which is what :func:`classify_frame_reduction` needs.
+    (Note: ``giflab.metrics.extract_gif_frames`` uses the same per-frame
+    convention but, when frame subsampling kicks in, only sums over the
+    sampled ``frame_indices``; here we always sum over all frames.)
     """
     try:
         with Image.open(path) as img:

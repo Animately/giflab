@@ -148,13 +148,35 @@ class TestClassifyFrameReduction:
             "frame_loss",
         }
         for kwargs in (
-            dict(orig_frames=8, orig_duration_ms=1600, comp_frames=8, comp_duration_ms=1600),
-            dict(orig_frames=8, orig_duration_ms=1600, comp_frames=3, comp_duration_ms=1600),
-            dict(orig_frames=8, orig_duration_ms=1600, comp_frames=3, comp_duration_ms=600),
-            dict(orig_frames=8, orig_duration_ms=None, comp_frames=3, comp_duration_ms=1600),
+            {
+                "orig_frames": 8,
+                "orig_duration_ms": 1600,
+                "comp_frames": 8,
+                "comp_duration_ms": 1600,
+            },
+            {
+                "orig_frames": 8,
+                "orig_duration_ms": 1600,
+                "comp_frames": 3,
+                "comp_duration_ms": 1600,
+            },
+            {
+                "orig_frames": 8,
+                "orig_duration_ms": 1600,
+                "comp_frames": 3,
+                "comp_duration_ms": 600,
+            },
+            {
+                "orig_frames": 8,
+                "orig_duration_ms": None,
+                "comp_frames": 3,
+                "comp_duration_ms": 1600,
+            },
         ):
-            cls = _common.classify_frame_reduction(**kwargs)  # type: ignore[arg-type]
-            assert set(cls.keys()) == expected, f"key schema drift for {kwargs}: {cls.keys()}"
+            cls = _common.classify_frame_reduction(**kwargs)
+            assert (
+                set(cls.keys()) == expected
+            ), f"key schema drift for {kwargs}: {cls.keys()}"
 
 
 def _make_gif(path: Path, n_frames: int, per_frame_ms: int) -> None:

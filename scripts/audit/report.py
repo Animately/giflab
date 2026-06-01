@@ -134,7 +134,7 @@ def frame_reduction_summary(sweep_df: pd.DataFrame) -> list[str]:
         for _, r in flagged.iterrows():
             rows.append(
                 [
-                    Path(str(r["path"])).name[:48],
+                    Path(str(r["path"])).name[:48] if "path" in flagged.columns else "",
                     str(r["lossy"]) if "lossy" in flagged.columns else "",
                     str(r["frame_reduction_class"]),
                     str(r["frame_reduction"]) if "frame_reduction" in flagged.columns else "",
