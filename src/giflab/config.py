@@ -1,7 +1,13 @@
 """Configuration settings for GifLab."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from giflab.content_classifier import ContentClass
 
 
 @dataclass
@@ -246,6 +252,45 @@ class MetricsConfig:
         # Set default positional metrics if not provided
         if self.POSITIONAL_METRICS is None:
             self.POSITIONAL_METRICS = ["ssim", "mse", "fsim", "chist"]
+
+
+@dataclass
+class ClassifierConfig:
+    """Per-content-type lossy ceilings for the pre-compression classifier.
+
+    See ``src/giflab/content_classifier.py`` and the 2026-05-26 outlier
+    deep-dive. ``compress`` consults the classifier and clamps the requested
+    animately ``lossy_level`` DOWN to the per-class ceiling. The values are
+    animately-calibrated only — other engines skip the ceiling (see
+    ``content_classifier`` and ``docs/public-api.md``).
+    """
+
+    # Flat-colour categorical charts band at any lossy level → lossless ceiling.
+    # (Set to 10 if the acceptance note ever permits a small data-viz budget.)
+    MAX_LOSSY_DATA_VIZ: int = 0
+
+    # Near-256-colour photographic gradients posterise above a modest ceiling.
+    MAX_LOSSY_PHOTOGRAPHIC: int = 20
+
+    # Film grain tolerates slightly more lossy than smooth gradients.
+    MAX_LOSSY_FILM_GRAIN: int = 30
+
+    # Minimum blended confidence for a non-OTHER classification. Below this no
+    # ceiling is applied (the content is treated as OTHER).
+    MIN_CONFIDENCE: float = 0.55
+
+    def lossy_max_for(self, content_class: ContentClass) -> int | None:
+        """Return the ceiling for ``content_class``, or ``None`` for OTHER."""
+        # Imported here to avoid a config→content_classifier import cycle
+        # (content_classifier imports ClassifierConfig at module top).
+        from giflab.content_classifier import ContentClass
+
+        mapping = {
+            ContentClass.DATA_VIZ_ANIMATION: self.MAX_LOSSY_DATA_VIZ,
+            ContentClass.PHOTOGRAPHIC: self.MAX_LOSSY_PHOTOGRAPHIC,
+            ContentClass.FILM_GRAIN: self.MAX_LOSSY_FILM_GRAIN,
+        }
+        return mapping.get(content_class)
 
 
 # Frame cache configuration (added for performance optimization)

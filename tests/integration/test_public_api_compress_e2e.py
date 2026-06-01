@@ -98,3 +98,105 @@ def test_compress_overwrites_existing_output(tmp_path: Path, real_gif: Path) -> 
     # New file replaces the stale bytes; size will differ.
     assert result.output_bytes != stale_size
     assert result.output_path == out_path
+
+
+# ---------------------------------------------------------------------------
+# Content-aware lossy ceiling (audit-fix
+# [[giflab-content-classifier-lossy-ceiling]]) — real animately.
+# ---------------------------------------------------------------------------
+
+
+def _build_photographic_gradient_gif(
+    path: Path, frames: int = 8, size: tuple[int, int] = (300, 300)
+) -> None:
+    """Render a real smooth-gradient GIF (near-256 palette) that classifies
+    PHOTOGRAPHIC. Larger than the functional synthetics so the real engine and
+    the classifier both have meaningful structure to work with."""
+    from giflab.synthetic_gifs import SyntheticFrameGenerator
+
+    gen = SyntheticFrameGenerator()
+    images = [
+        gen.create_frame("gradient", size, frame=i, total_frames=frames)
+        for i in range(frames)
+    ]
+    images[0].save(path, save_all=True, append_images=images[1:], duration=120, loop=0)
+
+
+def _build_flat_chart_gif(
+    path: Path, frames: int = 8, size: tuple[int, int] = (300, 300)
+) -> None:
+    """Render a real flat-colour animated chart GIF that classifies
+    DATA_VIZ_ANIMATION."""
+    from giflab.synthetic_gifs import SyntheticFrameGenerator
+
+    gen = SyntheticFrameGenerator()
+    images = [
+        gen.create_frame("charts", size, frame=i, total_frames=frames)
+        for i in range(frames)
+    ]
+    images[0].save(path, save_all=True, append_images=images[1:], duration=120, loop=0)
+
+
+@pytest.mark.skipif(
+    not AnimatelyLossyCompressor.available(), reason="animately binary not on PATH"
+)
+def test_compress_photographic_gradient_respects_ceiling(tmp_path: Path) -> None:
+    """Acceptance: compress() on a photographic-gradient GIF clamps a high
+    requested lossy level down to the photographic ceiling and surfaces a
+    warning (real animately)."""
+    from giflab.config import ClassifierConfig
+
+    gif = tmp_path / "gradient_xlarge.gif"
+    _build_photographic_gradient_gif(gif)
+    out_path = tmp_path / "gradient_out.gif"
+
+    ceiling = ClassifierConfig().MAX_LOSSY_PHOTOGRAPHIC
+    result = compress(gif, out_path, engine="animately", params={"lossy_level": 80})
+
+    # The clamp is reflected on the result params and announced in warnings.
+    assert result.params["lossy_level"] == ceiling
+    assert any("clamp" in w.lower() for w in result.warnings)
+
+
+@pytest.mark.skipif(
+    not AnimatelyLossyCompressor.available(), reason="animately binary not on PATH"
+)
+def test_compress_flat_chart_not_destroyed_at_any_level(tmp_path: Path) -> None:
+    """Acceptance: a flat-colour animated chart is clamped to the data-viz
+    ceiling regardless of the requested lossy level, so its categorical hues are
+    never destroyed (real animately)."""
+    from giflab.config import ClassifierConfig
+
+    gif = tmp_path / "charts.gif"
+    _build_flat_chart_gif(gif)
+    out_path = tmp_path / "charts_out.gif"
+
+    ceiling = ClassifierConfig().MAX_LOSSY_DATA_VIZ
+    for requested in (40, 80, 120):
+        result = compress(
+            gif, out_path, engine="animately", params={"lossy_level": requested}
+        )
+        assert result.params["lossy_level"] == ceiling
+        assert any("clamp" in w.lower() for w in result.warnings)
+
+
+@pytest.mark.skipif(
+    not AnimatelyLossyCompressor.available(), reason="animately binary not on PATH"
+)
+def test_compress_ceiling_bypass_leaves_level_intact(tmp_path: Path) -> None:
+    """With apply_content_ceiling=False the requested level passes through to
+    real animately untouched and no warning is emitted — the audit path."""
+    gif = tmp_path / "gradient_bypass.gif"
+    _build_photographic_gradient_gif(gif)
+    out_path = tmp_path / "gradient_bypass_out.gif"
+
+    result = compress(
+        gif,
+        out_path,
+        engine="animately",
+        params={"lossy_level": 80},
+        apply_content_ceiling=False,
+    )
+
+    assert result.params["lossy_level"] == 80
+    assert result.warnings == ()
