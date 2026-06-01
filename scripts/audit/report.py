@@ -89,6 +89,63 @@ def _metric_direction(name: str) -> str:
     return "unknown"
 
 
+def frame_reduction_summary(sweep_df: pd.DataFrame) -> list[str]:
+    """Markdown lines summarising frame-reduction classification in the sweep.
+
+    Operators triaging sweep results need to separate benign temporal dedup
+    (fewer frames, total duration preserved — no quality concern) from
+    possible frame-loss bugs (fewer frames, duration NOT preserved).  The
+    sweep CSV carries a ``frame_reduction_class`` column for exactly this; this
+    helper rolls it up into counts and lists the frame-loss / unknown rows that
+    actually warrant investigation.
+
+    Returns an empty list when the column is absent (old CSVs) so the report
+    degrades gracefully.
+    """
+    if "frame_reduction_class" not in sweep_df.columns:
+        return []
+
+    md: list[str] = ["### Frame-reduction classification", ""]
+    cls = sweep_df["frame_reduction_class"].astype(str)
+    counts = cls.value_counts()
+    n_none = int(counts.get("none", 0))
+    n_dedup = int(counts.get("dedup", 0))
+    n_loss = int(counts.get("frame_loss", 0))
+    n_unknown = int(counts.get("unknown", 0))
+
+    md.append(
+        "Distinguishes benign temporal **dedup** (fewer frames, total "
+        "duration preserved) from possible **frame_loss** (duration not "
+        "preserved — needs investigation)."
+    )
+    md.append("")
+    md.append(f"- No reduction: {n_none}")
+    md.append(f"- Dedup (benign, duration preserved): {n_dedup}")
+    md.append(f"- Frame loss (possible bug): {n_loss}")
+    md.append(f"- Unknown (durations unreadable): {n_unknown}")
+    md.append("")
+
+    # List the rows that actually warrant attention.
+    flagged = sweep_df[cls.isin(["frame_loss", "unknown"])]
+    if not flagged.empty:
+        md.append("#### Rows needing investigation (frame_loss / unknown)")
+        md.append("")
+        rows = []
+        for _, r in flagged.iterrows():
+            rows.append(
+                [
+                    Path(str(r["path"])).name[:48],
+                    str(r["lossy"]) if "lossy" in flagged.columns else "",
+                    str(r["frame_reduction_class"]),
+                    str(r["frame_reduction"]) if "frame_reduction" in flagged.columns else "",
+                ]
+            )
+        md.append(md_table(rows, ["gif", "lossy", "class", "frames_removed"]))
+        md.append("")
+
+    return md
+
+
 # ---------------------------------------------------------------------------
 # Loaders
 # ---------------------------------------------------------------------------
@@ -448,6 +505,8 @@ def render_report(
         md.append(f"- Real GIFs: {n_real}")
         md.append(f"- Synthetic GIFs: {n_synth}")
     md.append("")
+
+    md.extend(frame_reduction_summary(sweep_df))
 
     if corr_fig is not None:
         md.append("### Cross-metric correlation")
