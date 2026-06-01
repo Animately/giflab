@@ -229,6 +229,74 @@ def test_frame_drop_warning_emitted(tmp_path: Path) -> None:
     assert any("frame" in w.lower() for w in result.warnings)
 
 
+def test_frame_drop_warning_skipped_when_frame_count_unreadable(
+    tmp_path: Path,
+) -> None:
+    """When the engine output is not a readable GIF, ``_safe_frame_count``
+    returns ``None`` and the frame-drop warning is silently skipped (best-effort
+    behaviour — an unreadable output must never block a legitimate compress).
+
+    Uses a non-photographic single-frame input so the content ceiling does not
+    fire either, isolating the frame-drop branch: the result must carry NO
+    warnings.
+    """
+    from giflab.public_api import _safe_frame_count
+
+    gif = _save_synthetic_gif(tmp_path / "gradient.gif", "gradient", frames=12)
+    out_path = tmp_path / "garbage_out.gif"
+    # out_frames=None → the mock writes opaque non-GIF bytes, so
+    # _safe_frame_count(out_path) cannot determine a frame count.
+    cls, _ = _mock_animately(out_path, out_size=512)
+    with patch("giflab.public_api.AnimatelyLossyCompressor", cls):
+        # lossy_level 10 is below the photographic ceiling → no clamp warning.
+        result = compress(gif, out_path, engine="animately", params={"lossy_level": 10})
+
+    # The output is unreadable, so the frame-count probe returns None and the
+    # frame-drop comparison is short-circuited — no frame-drop warning.
+    assert _safe_frame_count(out_path) is None, (
+        "test precondition: the opaque-bytes output must be unreadable as a GIF"
+    )
+    assert not any("frame" in w.lower() for w in result.warnings), (
+        "frame-drop warning must be suppressed when the output frame count "
+        f"cannot be determined; got warnings: {result.warnings}"
+    )
+
+
+def test_frame_drop_and_clamp_warnings_co_occur(tmp_path: Path) -> None:
+    """A single compress() can surface BOTH a content-ceiling clamp warning
+    and a frame-drop warning on the same result — they are independent and
+    must not suppress each other.
+
+    Photographic input (clamps from 60 → ceiling) + an output with fewer
+    frames than the input (frame drop) → two warnings.
+    """
+    from giflab.config import ClassifierConfig
+
+    ceiling = ClassifierConfig().MAX_LOSSY_PHOTOGRAPHIC
+    gif = _save_synthetic_gif(tmp_path / "gradient.gif", "gradient", frames=12)
+    out_path = tmp_path / "clamped_dropped.gif"
+    # Output has 4 frames vs 12 input frames → frame drop, AND it's a readable
+    # GIF so the frame-count probe succeeds.
+    cls, instance = _mock_animately(out_path, out_frames=4)
+    with patch("giflab.public_api.AnimatelyLossyCompressor", cls):
+        result = compress(gif, out_path, engine="animately", params={"lossy_level": 60})
+
+    # Clamp happened (photographic ceiling well below 60).
+    assert instance.apply.call_args.kwargs["params"]["lossy_level"] == ceiling
+    assert any("clamp" in w.lower() for w in result.warnings), (
+        f"expected a clamp warning; got: {result.warnings}"
+    )
+    # Frame drop also surfaced.
+    assert any("frame" in w.lower() for w in result.warnings), (
+        f"expected a frame-drop warning; got: {result.warnings}"
+    )
+    # Both warnings present simultaneously.
+    assert len(result.warnings) >= 2, (
+        f"expected both clamp and frame-drop warnings to co-occur; "
+        f"got: {result.warnings}"
+    )
+
+
 def test_ceiling_skipped_for_non_animately_engine(tmp_path: Path) -> None:
     """The ceiling is animately-calibrated only — other lossy engines skip
     classification entirely (no clamp, no warning)."""

@@ -297,7 +297,16 @@ class TestCoalesceIntegratedIntoRunSanity:
         # and produce byte-identical outputs that should be coalesced.
         call_counter = {"n": 0}
 
-        def _fake_compress(input_path, output_path, engine, params):
+        def _fake_compress(
+            input_path, output_path, engine, params, *, apply_content_ceiling=True
+        ):
+            # The lossy arm MUST bypass the content ceiling — otherwise the
+            # photographic bases in MONOTONICITY_BASES clamp and the curve
+            # degenerates. See test_lossy_arm_bypasses_content_ceiling below.
+            assert apply_content_ceiling is False, (
+                "run_sanity() lossy arm called compress without "
+                "apply_content_ceiling=False"
+            )
             call_counter["n"] += 1
             n = call_counter["n"]
             if n == 1:
@@ -353,7 +362,13 @@ class TestCoalesceIntegratedIntoRunSanity:
         """
         gl = _build_fake_gl(lambda: {"ssim": 0.5})
 
-        def _fake_compress(input_path, output_path, engine, params):
+        def _fake_compress(
+            input_path, output_path, engine, params, *, apply_content_ceiling=True
+        ):
+            assert apply_content_ceiling is False, (
+                "run_sanity() lossy arm called compress without "
+                "apply_content_ceiling=False"
+            )
             Path(output_path).write_bytes(b"saturated")
             return output_path
 
@@ -399,6 +414,160 @@ class TestCoalesceIntegratedIntoRunSanity:
             "proving run_sanity() uses the coalesced result, not the raw "
             f"per_metric_levels. Got: {captured['seen']}"
         )
+
+
+class TestAuditLossySweepBypassesContentCeiling:
+    """Lock the audit-bypass contract at the call sites, not just through the
+    public ``compress()`` API.
+
+    The content-aware lossy ceiling (PR #40 / [[giflab-content-classifier-lossy-ceiling]])
+    clamps photographic / data-viz inputs DOWN to a per-class ceiling. The
+    monotonicity sweep's whole job is to drive the requested lossy grid
+    (LOSSY_LEVELS spans well above those ceilings) and measure animately's
+    response — so it MUST pass ``apply_content_ceiling=False`` on EVERY
+    ``compress`` call. If a sweep call site forgot the kwarg, photographic
+    bases (smooth_gradient, photographic_noise) would clamp to 20/30 and
+    levels 60/100/160 would collapse into byte-identical outputs that
+    ``_coalesce_byte_identical_levels`` swallows — degenerating the curve to a
+    single point and silently misrepresenting animately's true lossy response.
+
+    The earlier ``test_audit_optout_bypasses_ceiling`` only proves the public
+    API *honours* the kwarg. These tests prove the audit *uses* it, capturing
+    the kwarg as forwarded from each lossy arm.
+    """
+
+    def _capturing_compress(self, captured_kwargs: list):
+        """A fake compress() that records the apply_content_ceiling kwarg of
+        every call and writes unique bytes per call (so coalescing keeps all
+        levels and every grid point produces a compress call)."""
+        counter = {"n": 0}
+
+        def _fake(
+            input_path, output_path, engine, params, *, apply_content_ceiling=True
+        ):
+            captured_kwargs.append(apply_content_ceiling)
+            counter["n"] += 1
+            Path(output_path).write_bytes(f"unique-{counter['n']}".encode())
+            return output_path
+
+        return _fake
+
+    def test_synthetic_lossy_arm_passes_bypass_kwarg(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The synthetic-bases (MONOTONICITY_BASES) lossy arm forwards
+        ``apply_content_ceiling=False`` on every grid point."""
+        gl = _build_fake_gl(lambda: {"ssim": 0.5})
+        captured: list[bool] = []
+        gl["compress"] = self._capturing_compress(captured)
+        monkeypatch.setattr(sanity, "_import_giflab", lambda: gl)
+
+        monkeypatch.setattr(sanity, "MONOTONICITY_BASES", ["base_under_test"])
+        monkeypatch.setattr(sanity, "IDENTITY_SAMPLE", ["base_under_test"])
+        monkeypatch.setattr(sanity, "NOISE_SIGMAS", [5])
+        monkeypatch.setattr(sanity, "BLUR_SIGMAS", [0.5])
+        monkeypatch.setattr(sanity, "QUANTIZE_COLORS", [64])
+        # Multiple levels spanning above the photographic ceiling (20).
+        monkeypatch.setattr(sanity, "LOSSY_LEVELS", [20, 60, 100, 160])
+        monkeypatch.setattr(sanity, "FIXTURE_MONOTONICITY_BASES", {})
+
+        sanity.run_sanity(tmp_path)
+
+        assert captured, "lossy arm produced no compress calls — test is inert"
+        assert all(v is False for v in captured), (
+            "synthetic-bases lossy sweep called compress with "
+            f"apply_content_ceiling != False: {captured}. Photographic/"
+            "data-viz bases would clamp and the monotonicity curve degenerates."
+        )
+        # One compress call per lossy level.
+        assert len(captured) == 4, (
+            f"expected 4 compress calls (one per LOSSY_LEVELS entry); got "
+            f"{len(captured)}"
+        )
+
+    def test_fixture_lossy_arm_passes_bypass_kwarg(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The fixture-bases (FIXTURE_MONOTONICITY_BASES) lossy arm forwards
+        ``apply_content_ceiling=False`` on every grid point."""
+        from PIL import Image
+
+        fixture_dir = tmp_path / "fixtures"
+        fixture_dir.mkdir()
+        fixture_path = fixture_dir / "guard.gif"
+        frames_list = [Image.new("P", (16, 16), color=i) for i in (100, 120)]
+        for fl in frames_list:
+            fl.putpalette([i % 256 for i in range(768)])
+        frames_list[0].save(
+            fixture_path,
+            save_all=True,
+            append_images=frames_list[1:],
+            duration=100,
+            loop=0,
+            optimize=False,
+        )
+
+        gl = _build_fake_gl(lambda: {"ssim": 0.5})
+        captured: list[bool] = []
+        gl["compress"] = self._capturing_compress(captured)
+        monkeypatch.setattr(sanity, "_import_giflab", lambda: gl)
+
+        # No synthetic bases — isolate the fixture lossy arm.
+        monkeypatch.setattr(sanity, "MONOTONICITY_BASES", [])
+        monkeypatch.setattr(sanity, "IDENTITY_SAMPLE", [])
+        monkeypatch.setattr(sanity, "NOISE_SIGMAS", [5])
+        monkeypatch.setattr(sanity, "BLUR_SIGMAS", [0.5])
+        monkeypatch.setattr(sanity, "QUANTIZE_COLORS", [64])
+        monkeypatch.setattr(sanity, "LOSSY_LEVELS", [20, 60, 100])
+        monkeypatch.setattr(
+            sanity, "FIXTURE_MONOTONICITY_BASES", {"guard": "guard.gif"}
+        )
+        monkeypatch.setattr(sanity, "_FIXTURES_DIR", fixture_dir)
+
+        sanity.run_sanity(tmp_path / "workdir")
+
+        assert captured, "fixture lossy arm produced no compress calls — test is inert"
+        assert all(v is False for v in captured), (
+            "fixture-bases lossy sweep called compress with "
+            f"apply_content_ceiling != False: {captured}."
+        )
+        assert len(captured) == 3, (
+            f"expected 3 compress calls (one per LOSSY_LEVELS entry); got "
+            f"{len(captured)}"
+        )
+
+    def test_common_compress_animately_forwards_bypass_kwarg(self) -> None:
+        """``_common.compress_animately`` — the helper that pilot.py and
+        sweep.py route through — forwards ``apply_content_ceiling=False`` to
+        the underlying ``compress``."""
+        import importlib.util
+
+        common_path = _SCRIPTS_AUDIT / "_common.py"
+        spec = importlib.util.spec_from_file_location("audit_common", common_path)
+        common = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(common)
+
+        captured: dict[str, object] = {}
+
+        def _fake_compress(
+            input_path, output_path, engine, params, *, apply_content_ceiling=True
+        ):
+            captured["apply_content_ceiling"] = apply_content_ceiling
+            captured["engine"] = engine
+            captured["params"] = dict(params)
+            return output_path
+
+        gl = {"compress": _fake_compress}
+        ok, err = common.compress_animately(
+            Path("in.gif"), Path("out.gif"), 100, gl
+        )
+
+        assert ok, f"compress_animately reported failure: {err}"
+        assert captured.get("apply_content_ceiling") is False, (
+            "compress_animately did not forward apply_content_ceiling=False — "
+            f"pilot.py / sweep.py lossy grids would be clamped. Got: {captured}"
+        )
+        assert captured["params"] == {"lossy_level": 100}
 
 
 # ---------------------------------------------------------------------------
