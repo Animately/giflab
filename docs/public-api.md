@@ -60,17 +60,18 @@ def compress(
 
 #### Content-aware lossy ceiling
 
-When the engine is `animately` and `params` carries a positive `lossy_level`, `compress()` classifies the input's **original** frames (data-viz / photographic / film-grain) and clamps the requested `lossy_level` **down** to a per-class maximum — it never raises the level. This protects content the 2026-05-26 outlier deep-dive identified as fragile: flat categorical charts band at any lossy level, and near-256-colour photographic / film-grain content posterises above modest levels.
+When the engine is `animately` and `params` carries a positive `lossy_level`, `compress()` classifies the input's **original** frames (data-viz / photographic / film-grain) and clamps the requested `lossy_level` **down** to a per-class maximum — it never raises the level. This protects content the 2026-05-26 outlier deep-dive identified as fragile: flat-colour animations band under heavy lossy, and near-256-colour photographic / film-grain content posterises above modest levels.
 
 | Content class | Ceiling | Config field (`giflab.config.ClassifierConfig`) |
 |---|---|---|
-| data-viz animation (flat categorical charts) | `0` (lossless) | `MAX_LOSSY_DATA_VIZ` |
+| data-viz / flat-colour animation | `40` (conservative; non-lossless) | `MAX_LOSSY_DATA_VIZ` |
 | photographic gradient/image | `20` | `MAX_LOSSY_PHOTOGRAPHIC` |
 | film grain / sensor noise | `30` | `MAX_LOSSY_FILM_GRAIN` |
 | other / unclassified | none | — |
 
 - When a clamp happens, a human-readable warning string is appended to `CompressResult.warnings`.
 - If the requested level is already at or below the ceiling, nothing is clamped and no warning is emitted.
+- **Data-viz scope & the conservative ceiling.** Pre-compression *single-frame* primitives cannot reliably isolate a categorical chart from a flat logo / cartoon / UI / line-art frame — they are numerically identical (a 4-colour synthetic chart equals a 4-colour flat cartoon). The classifier therefore treats `data-viz` as a broad "flat-colour animation" class. Forcing that whole population to lossless (the original `0` ceiling) silently defeated lossy compression for the single most common GIF category, so the data-viz ceiling is a **conservative `40`**: ordinary flat content at typical lossy levels (≤40) passes through untouched, and only genuinely extreme requests are clamped where flat-colour banding becomes severe. The detection score is a strict conjunction (geometric mean of flat-structure × limited-palette × low-grain × animation-length), so photographic and film-grain content can never trip it. Set `MAX_LOSSY_DATA_VIZ` lower only with a discriminating signal (e.g. a palette-histogram or pair-metric) that actually isolates categorical charts.
 - The ceilings are **animately-calibrated only**. Other lossy engines (`gifsicle`, etc.) skip classification entirely — `gifsicle`'s native lossy scale is a 3× multiple of the public scale and has not been calibrated. (TODO: calibrate per-engine ceilings.)
 - Classification is **fail-soft**: a corrupt or unreadable input is classified `other`, applies no ceiling, and never blocks the compress.
 - `compress()` also emits a frame-drop warning on `CompressResult.warnings` when the engine output has fewer frames than the input (a cheap input-vs-output frame-count comparison; it does not run the metrics pipeline).

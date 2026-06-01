@@ -265,9 +265,19 @@ class ClassifierConfig:
     ``content_classifier`` and ``docs/public-api.md``).
     """
 
-    # Flat-colour categorical charts band at any lossy level → lossless ceiling.
-    # (Set to 10 if the acceptance note ever permits a small data-viz budget.)
-    MAX_LOSSY_DATA_VIZ: int = 0
+    # Flat-colour content (categorical charts AND flat logos / cartoons / UI /
+    # line-art) — these are *not* separable from each other using
+    # pre-compression single-frame primitives (a 4-colour synthetic chart and a
+    # 4-colour flat cartoon are numerically identical; the real outlier-2
+    # GrowthLab chart had a *moderate* palette, but typical flat content does
+    # not). Forcing lossless on this whole population would defeat lossy
+    # compression for the single most common GIF category, so the ceiling is a
+    # CONSERVATIVE non-zero value: it leaves the common lossy range (<=40)
+    # untouched and only clamps genuinely extreme requests where flat-colour
+    # banding becomes severe. The previous value (0 / lossless) over-triggered
+    # catastrophically — see the round-3 review on PR #40. Set lower only with
+    # a discriminating signal that actually isolates categorical charts.
+    MAX_LOSSY_DATA_VIZ: int = 40
 
     # Near-256-colour photographic gradients posterise above a modest ceiling.
     MAX_LOSSY_PHOTOGRAPHIC: int = 20
@@ -276,8 +286,15 @@ class ClassifierConfig:
     MAX_LOSSY_FILM_GRAIN: int = 30
 
     # Minimum blended confidence for a non-OTHER classification. Below this no
-    # ceiling is applied (the content is treated as OTHER).
-    MIN_CONFIDENCE: float = 0.55
+    # ceiling is applied (the content is treated as OTHER). Raised from 0.55 to
+    # 0.80 in the PR #40 round-3 fix: with the conjunctive (geometric-mean)
+    # data-viz score and the palette-driven photographic/film-grain scores,
+    # genuine in-class content scores >=0.90 (flat content 0.93-1.00,
+    # photographic ~1.00, film grain 0.93-0.97) while borderline / ambiguous
+    # content (e.g. the high-contrast synthetic) tops out around 0.34. A 0.80
+    # floor therefore admits genuine classifications and rejects weak ones,
+    # rather than the old 0.55 floor that let near-everything through.
+    MIN_CONFIDENCE: float = 0.80
 
     def lossy_max_for(self, content_class: ContentClass) -> int | None:
         """Return the ceiling for ``content_class``, or ``None`` for OTHER."""

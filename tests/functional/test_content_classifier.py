@@ -11,6 +11,7 @@ Audit-fix [[giflab-content-classifier-lossy-ceiling]].
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +24,7 @@ from giflab.content_classifier import (
 )
 from giflab.metrics import extract_gif_frames
 from giflab.synthetic_gifs import SyntheticFrameGenerator
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # ---------------------------------------------------------------------------
 # Synthetic GIF builders
@@ -55,6 +56,57 @@ def _save_synthetic_gif(
 
 def _frames_of(path: Path) -> list:
     return extract_gif_frames(path).frames
+
+
+def _save_drawn_gif(
+    path: Path,
+    draw_frame: Callable[[ImageDraw.ImageDraw, int], None],
+    *,
+    background: tuple[int, int, int],
+    frames: int = 12,
+    size: tuple[int, int] = (200, 200),
+) -> Path:
+    """Render a full-size multi-frame GIF whose frames are drawn by a callback.
+
+    Used to build *realistic* non-chart limited-palette content (a solid fill, a
+    text/UI frame, a simple flat cartoon) at a meaningful size, so the classifier
+    actually reaches its scoring path instead of being short-circuited by the
+    ``_MIN_ANALYSABLE_DIM`` dimension guard (the blind spot the old 10x10
+    ``tiny_gif`` test hid — PR #40 round-3 review).
+    """
+    images = []
+    for i in range(frames):
+        img = Image.new("RGB", size, background)
+        draw_frame(ImageDraw.Draw(img), i)
+        images.append(img)
+    images[0].save(
+        path,
+        save_all=True,
+        append_images=images[1:],
+        duration=80,
+        loop=0,
+    )
+    return path
+
+
+def _draw_solid_fill(d: ImageDraw.ImageDraw, i: int) -> None:
+    """A single flat colour that shifts slightly per frame (animated solid)."""
+    d.rectangle([0, 0, 200, 200], fill=(40 + (i * 3) % 60, 120, 200))
+
+
+def _draw_text_ui(d: ImageDraw.ImageDraw, i: int) -> None:
+    """A text/UI-style frame: dark text bars on white + a coloured button."""
+    for y in range(20, 160, 14):
+        d.rectangle([20, y, 20 + (100 + (i * 3) % 40), y + 6], fill=(20, 20, 20))
+    d.rectangle([20, 170, 90, 190], fill=(0, 120, 220))
+
+
+def _draw_flat_cartoon(d: ImageDraw.ImageDraw, i: int) -> None:
+    """A simple flat-colour cartoon: a moving blob, ground, and sun."""
+    x = 40 + (i * 4) % 80
+    d.ellipse([x, 60, x + 70, 130], fill=(220, 60, 60))
+    d.rectangle([20, 150, 180, 180], fill=(60, 140, 80))
+    d.ellipse([130, 30, 170, 70], fill=(250, 240, 90))
 
 
 # ---------------------------------------------------------------------------
@@ -98,9 +150,17 @@ def _mock_animately(
 # ---------------------------------------------------------------------------
 
 
-def test_data_viz_chart_classified_and_ceiling_applied(tmp_path: Path) -> None:
-    """A flat-colour animated chart classifies DATA_VIZ_ANIMATION and the
-    data-viz ceiling clamps a high requested lossy level all the way down."""
+def test_data_viz_chart_classified_and_high_level_clamped(tmp_path: Path) -> None:
+    """A flat-colour animated chart classifies DATA_VIZ_ANIMATION; an extreme
+    requested lossy level (above the conservative data-viz ceiling) clamps DOWN
+    to that ceiling and surfaces a warning.
+
+    The ceiling is deliberately NON-lossless (``MAX_LOSSY_DATA_VIZ`` defaults to
+    40, not 0): single-frame primitives cannot isolate a categorical chart from
+    a flat logo / cartoon, so forcing lossless on the whole flat-content
+    population was withdrawn (PR #40 round-3 review). What survives is a
+    conservative guard against *extreme* lossy on flat content.
+    """
     gif = _save_synthetic_gif(tmp_path / "charts.gif", "charts", frames=16)
     classification = classify_content(_frames_of(gif))
 
@@ -108,15 +168,17 @@ def test_data_viz_chart_classified_and_ceiling_applied(tmp_path: Path) -> None:
     assert classification.content_class is ContentClass.DATA_VIZ_ANIMATION
     from giflab.config import ClassifierConfig
 
-    assert classification.lossy_max == ClassifierConfig().MAX_LOSSY_DATA_VIZ
+    ceiling = ClassifierConfig().MAX_LOSSY_DATA_VIZ
+    assert classification.lossy_max == ceiling
+    assert ceiling > 0, "data-viz ceiling must NOT force lossless (round-3 fix)"
 
+    # A request well above the ceiling clamps down to it.
     out_path = tmp_path / "charts_out.gif"
     cls, instance = _mock_animately(out_path)
     with patch("giflab.public_api.AnimatelyLossyCompressor", cls):
-        result = compress(gif, out_path, engine="animately", params={"lossy_level": 60})
+        result = compress(gif, out_path, engine="animately", params={"lossy_level": 80})
 
-    sent = instance.apply.call_args.kwargs["params"]["lossy_level"]
-    assert sent <= classification.lossy_max
+    assert instance.apply.call_args.kwargs["params"]["lossy_level"] == ceiling
     assert result.warnings  # ceiling-applied warning surfaced
 
 
@@ -197,6 +259,73 @@ def test_non_special_content_no_ceiling_no_warning(
     assert result.warnings == ()
 
 
+# ---------------------------------------------------------------------------
+# False-positive guards (PR #40 round-3 review).
+#
+# The BLOCKING bug was the data-viz scorer being dominated by "low palette", so
+# *any* limited-palette flat content (solid fills, text/UI, flat cartoons) was
+# classified DATA_VIZ_ANIMATION and forced to lossless (ceiling 0). These tests
+# pin the user-visible guarantee that ordinary full-size limited-palette content
+# at a TYPICAL lossy request is NOT forced lossless — i.e. a normal lossy
+# compression passes through untouched. They use full-size (200x200) multi-frame
+# content (not the 10x10 ``tiny_gif`` that tripped the dimension guard and never
+# reached the scorer — the exact blind spot the old suite hid).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("name", "background", "draw_fn"),
+    [
+        ("solid_fill", (40, 120, 200), _draw_solid_fill),
+        ("text_ui", (255, 255, 255), _draw_text_ui),
+        ("flat_cartoon", (245, 225, 150), _draw_flat_cartoon),
+    ],
+)
+def test_ordinary_flat_content_not_forced_lossless(
+    tmp_path: Path,
+    name: str,
+    background: tuple[int, int, int],
+    draw_fn: Callable[[ImageDraw.ImageDraw, int], None],
+) -> None:
+    """Full-size non-chart limited-palette content (solid fill / text-UI / flat
+    cartoon) at a typical lossy request is NEVER forced lossless: a request at
+    or below the conservative data-viz ceiling passes through to the engine
+    untouched, with no clamp warning.
+
+    This is the regression guard for the round-3 BLOCKING bug — these inputs were
+    previously clamped to ``lossy_level=0`` (lossless), silently defeating lossy
+    compression for the single most common GIF category.
+    """
+    from giflab.config import ClassifierConfig
+
+    ceiling = ClassifierConfig().MAX_LOSSY_DATA_VIZ
+    gif = _save_drawn_gif(
+        tmp_path / f"{name}.gif", draw_fn, background=background, frames=12
+    )
+
+    # A typical lossy request (at the ceiling) must pass through untouched: no
+    # clamp, no warning. (At the ceiling the clamp is a no-op by definition; the
+    # point is that the requested level is preserved, never driven to lossless.)
+    requested = ceiling
+    out_path = tmp_path / f"{name}_out.gif"
+    cls, instance = _mock_animately(out_path)
+    with patch("giflab.public_api.AnimatelyLossyCompressor", cls):
+        result = compress(
+            gif, out_path, engine="animately", params={"lossy_level": requested}
+        )
+
+    sent = instance.apply.call_args.kwargs["params"]["lossy_level"]
+    assert sent == requested, (
+        f"{name}: lossy_level {requested} must pass through untouched, "
+        f"not be driven down to {sent}"
+    )
+    assert sent > 0, f"{name}: must NEVER be forced lossless"
+    assert not any("clamp" in w.lower() for w in result.warnings), (
+        f"{name}: no clamp warning expected at or below the ceiling; "
+        f"got {result.warnings}"
+    )
+
+
 def test_audit_optout_bypasses_ceiling(tmp_path: Path) -> None:
     """With apply_content_ceiling=False, photographic content is NOT clamped
     and no warning is emitted — the audit monotonicity grid stays intact."""
@@ -253,9 +382,9 @@ def test_frame_drop_warning_skipped_when_frame_count_unreadable(
 
     # The output is unreadable, so the frame-count probe returns None and the
     # frame-drop comparison is short-circuited — no frame-drop warning.
-    assert _safe_frame_count(out_path) is None, (
-        "test precondition: the opaque-bytes output must be unreadable as a GIF"
-    )
+    assert (
+        _safe_frame_count(out_path) is None
+    ), "test precondition: the opaque-bytes output must be unreadable as a GIF"
     assert not any("frame" in w.lower() for w in result.warnings), (
         "frame-drop warning must be suppressed when the output frame count "
         f"cannot be determined; got warnings: {result.warnings}"
@@ -283,13 +412,13 @@ def test_frame_drop_and_clamp_warnings_co_occur(tmp_path: Path) -> None:
 
     # Clamp happened (photographic ceiling well below 60).
     assert instance.apply.call_args.kwargs["params"]["lossy_level"] == ceiling
-    assert any("clamp" in w.lower() for w in result.warnings), (
-        f"expected a clamp warning; got: {result.warnings}"
-    )
+    assert any(
+        "clamp" in w.lower() for w in result.warnings
+    ), f"expected a clamp warning; got: {result.warnings}"
     # Frame drop also surfaced.
-    assert any("frame" in w.lower() for w in result.warnings), (
-        f"expected a frame-drop warning; got: {result.warnings}"
-    )
+    assert any(
+        "frame" in w.lower() for w in result.warnings
+    ), f"expected a frame-drop warning; got: {result.warnings}"
     # Both warnings present simultaneously.
     assert len(result.warnings) >= 2, (
         f"expected both clamp and frame-drop warnings to co-occur; "

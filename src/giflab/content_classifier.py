@@ -14,11 +14,33 @@ Design constraints (see ``CLAUDE.md`` "Metric accuracy is load-bearing"):
 - **Continuous over discrete.** The classifier runs PRE-compression and can
   only read single-stream original-frame primitives — pair metrics like
   ``texture_similarity`` do not exist yet. The per-class SCORES blend several
-  fractional signals (flat-area fraction, gradient-area fraction,
-  palette-fullness, grain energy) into a smooth confidence so a GIF one pixel
-  either side of a boundary does not flip class. The ceiling *value* is
-  necessarily discrete (it is an engine parameter) — that discreteness is
-  unavoidable; the classification is not razor-edged.
+  fractional signals (flat-area fraction, palette-fullness, grain density) into
+  a smooth confidence so a GIF one pixel either side of a boundary does not flip
+  class. The ceiling *value* is necessarily discrete (it is an engine
+  parameter) — that discreteness is unavoidable; the classification is not
+  razor-edged.
+- **Conjunctive data-viz (no single dominant term).** ``_score_data_viz`` is a
+  geometric MEAN (a product) of all four required signals — flat structure,
+  limited palette, low grain, animation-length — so that *every* signal must be
+  present for the class to fire. The earlier weighted-arithmetic-mean version
+  was dominated by ``1 - palette_fullness`` and catastrophically over-triggered:
+  any low-palette content (solid fills, contrast frames, flat logos) scored as
+  data-viz and was forced lossless (PR #40 round-3 review). A product collapses
+  to ~0 the moment any signal is absent.
+- **Honest about inseparability.** Single-frame primitives *cannot* isolate a
+  categorical chart from a flat logo / cartoon / UI frame — they are
+  numerically identical (a 4-colour synthetic chart == a 4-colour flat cartoon).
+  Rather than pretend otherwise, ``DATA_VIZ_ANIMATION`` is treated as a broad
+  "flat-colour animation" class and given a CONSERVATIVE, non-lossless ceiling
+  (``MAX_LOSSY_DATA_VIZ`` defaults to 40, not 0) so ordinary flat GIFs at
+  typical lossy levels pass through untouched and only extreme requests are
+  clamped. See ``ClassifierConfig`` for the rationale.
+- **Palette-driven photographic detection.** ``_score_photographic`` is carried
+  by palette fullness + (low) grain density; the ``GradientBandingDetector``'s
+  ``detect_gradient_regions`` returns ~0 even on a true gradient at our patch
+  size (its ``variance < 100`` test rejects high-variance gradient patches), so
+  a gradient-region term would be inert and is deliberately NOT used. Photographic
+  content is reliably separated from flat content by its near-full palette alone.
 - **Fail soft.** A classification problem must never block a legitimate
   compress: frame-extraction failure / corrupt input returns ``OTHER`` with no
   ceiling, logged, never raised.
@@ -45,10 +67,7 @@ import cv2
 import numpy as np
 
 from giflab.config import ClassifierConfig
-from giflab.gradient_color_artifacts import (
-    DitherQualityAnalyzer,
-    GradientBandingDetector,
-)
+from giflab.gradient_color_artifacts import DitherQualityAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +98,17 @@ _HIGHPASS_PIXEL_THRESHOLD = 8.0
 # A frame smaller than this in BOTH dimensions carries too little structure to
 # classify (e.g. a 10x10 swatch) — treat as OTHER, no ceiling.
 _MIN_ANALYSABLE_DIM = _PATCH_SIZE
+
+# Flat-fraction at which the data-viz "flat structure present" signal saturates.
+# A categorical chart needs *some* detected flat regions (bars/segments), but it
+# is not 100% flat. We normalise the measured flat fraction by this value so a
+# modest amount of flat structure (0.2) already counts as fully present.
+_FLAT_STRUCTURE_SATURATION = 0.20
+
+# Frame count at which the data-viz "animation length" signal saturates. Outlier
+# 2 (GrowthLab) was a 219-frame animation; a single still chart is not the
+# target. The signal ramps from 0 at 1 frame to 1 at this many frames.
+_ANIMATION_LENGTH_SATURATION = 12
 
 
 class ContentClass(Enum):
@@ -180,7 +210,6 @@ class _Features:
     """Size-invariant, fractional frame features blended by the scorers."""
 
     flat_fraction: float  # mean fraction of patches that are flat
-    gradient_fraction: float  # mean fraction of patches that are gradients
     palette_fullness: float  # mean fraction of the 256-colour palette used
     grain_mean: float  # mean per-frame grain density (fraction of HF pixels)
     grain_std: float  # cross-frame std of grain density (noisy below ~6 frames)
@@ -188,16 +217,22 @@ class _Features:
 
 
 def _extract_features(frames: list[np.ndarray]) -> _Features:
-    """Compute blended features from a deterministic sample of ``frames``."""
+    """Compute blended features from a deterministic sample of ``frames``.
+
+    Note: a gradient-region fraction is deliberately NOT computed.
+    ``GradientBandingDetector.detect_gradient_regions`` rejects high-variance
+    gradient patches (its ``variance < 100`` smoothness test) and returns ~0
+    even on a genuine gradient at our patch size, so the term was inert; the
+    photographic score is carried by palette fullness instead (see the module
+    docstring and ``_score_photographic``).
+    """
     sample_size = min(_SAMPLE_SIZE, len(frames))
     indices = np.linspace(0, len(frames) - 1, sample_size, dtype=int)
     sampled = [frames[i] for i in indices]
 
-    banding = GradientBandingDetector(patch_size=_PATCH_SIZE)
     dither = DitherQualityAnalyzer(patch_size=_PATCH_SIZE)
 
     flat_fracs: list[float] = []
-    grad_fracs: list[float] = []
     palette_fracs: list[float] = []
     grain_densities: list[float] = []
 
@@ -205,13 +240,11 @@ def _extract_features(frames: list[np.ndarray]) -> _Features:
         rgb = _to_uint8_rgb(frame)
         denom = _patch_grid_count(rgb, _PATCH_SIZE)
         flat_fracs.append(min(1.0, len(dither.detect_flat_regions(rgb)) / denom))
-        grad_fracs.append(min(1.0, len(banding.detect_gradient_regions(rgb)) / denom))
         palette_fracs.append(_palette_fullness(rgb))
         grain_densities.append(_grain_density(rgb))
 
     return _Features(
         flat_fraction=float(np.mean(flat_fracs)),
-        gradient_fraction=float(np.mean(grad_fracs)),
         palette_fullness=float(np.mean(palette_fracs)),
         grain_mean=float(np.mean(grain_densities)),
         grain_std=float(np.std(grain_densities)) if len(grain_densities) > 1 else 0.0,
@@ -220,39 +253,61 @@ def _extract_features(frames: list[np.ndarray]) -> _Features:
 
 
 def _score_data_viz(f: _Features) -> float:
-    """Confidence that the content is a flat-colour categorical animation.
+    """Confidence that the content is a flat-colour animation.
 
-    The workhorse signal is a LIMITED categorical palette (charts use a handful
-    of fill colours, not a 256-colour photographic ramp). It is reinforced by
-    low grain (flat fills, not texture) and a large flat-area fraction. No
-    single razor-edge threshold — every term is a smooth fraction.
+    This is a CONJUNCTIVE score: the GEOMETRIC MEAN (a product) of four signals
+    that must *all* be present, so a single absent signal collapses the score to
+    near zero. This is the round-3 fix for the catastrophic over-trigger of the
+    previous weighted-arithmetic-mean version, which was dominated by
+    ``1 - palette_fullness`` and fired on *any* low-palette content (solid
+    fills, contrast frames) regardless of structure.
+
+    Required signals (each a smooth fraction in ``[0, 1]``):
+
+    1. **Flat structure** — detected flat regions normalised by
+       ``_FLAT_STRUCTURE_SATURATION``. A photographic gradient has ~0 flat
+       regions, collapsing the product. A pure solid colour saturates this, so
+       it is the *other* three signals that must also hold for the class to fire.
+    2. **Limited palette** — ``1 - palette_fullness``. A near-256 photographic
+       palette drives this to ~0.
+    3. **Low grain** — ``1 - grain_mean``. Film-grain / textured content drives
+       this to ~0.
+    4. **Animation length** — ramps with frame count. A single still is not the
+       target (Outlier 2 was a 219-frame animation).
+
+    NOTE on scope: single-frame primitives cannot distinguish a categorical
+    chart from a flat logo / cartoon / UI frame — they are numerically
+    identical. This score therefore identifies a broad "flat-colour animation"
+    class; the conservative non-lossless ``MAX_LOSSY_DATA_VIZ`` ceiling (see
+    ``ClassifierConfig``) is what keeps that breadth safe for ordinary GIFs.
     """
+    flat_structure = min(1.0, f.flat_fraction / _FLAT_STRUCTURE_SATURATION)
     limited_palette = 1.0 - f.palette_fullness
     low_grain = 1.0 - f.grain_mean
-    flat = f.flat_fraction
-    # Palette weighted highest — it is what separates data-viz from a smooth
-    # photographic gradient (both are low-grain).
-    return float(
-        np.average([limited_palette, low_grain, flat], weights=[2.0, 1.0, 1.0])
+    animation_length = min(
+        1.0, max(0, f.frame_count - 1) / max(1, _ANIMATION_LENGTH_SATURATION - 1)
     )
+    terms = [flat_structure, limited_palette, low_grain, animation_length]
+    # Geometric mean — any near-zero term collapses the whole score (conjunction).
+    product = float(np.prod(terms))
+    return float(product ** (1.0 / len(terms)))
 
 
 def _score_photographic(f: _Features) -> float:
     """Confidence that the content is a smooth photographic gradient/image.
 
-    The workhorse signal is a NEAR-FULL palette (photographic content spans the
-    colour space), reinforced by low-to-moderate grain (high grain belongs to
-    FILM_GRAIN) and the presence of detected gradient regions. Smooth fractions
-    throughout.
+    The workhorse — and only reliable — signal is a NEAR-FULL palette
+    (photographic content spans the colour space; flat content does not),
+    reinforced by low-to-moderate grain (high grain belongs to FILM_GRAIN). A
+    gradient-region term was dropped: ``detect_gradient_regions`` returns ~0 even
+    on a genuine gradient at our patch size (it rejects high-variance gradient
+    patches), so it was inert and overstated what the score measured (PR #40
+    round-3 review). Palette fullness alone cleanly separates photographic from
+    flat content, which is what this score exists to do.
     """
     full_palette = f.palette_fullness
     not_grainy = 1.0 - f.grain_mean
-    gradient = f.gradient_fraction
-    # Palette weighted highest — separates photographic from data-viz; gradient
-    # regions are a weak supporting signal (the detector is conservative).
-    return float(
-        np.average([full_palette, not_grainy, gradient], weights=[2.0, 1.0, 0.5])
-    )
+    return float(np.average([full_palette, not_grainy], weights=[2.0, 1.0]))
 
 
 def _score_film_grain(f: _Features) -> float:
@@ -329,8 +384,8 @@ def classify_content(frames: list[np.ndarray]) -> ContentClassification:
     lossy_max = cfg.lossy_max_for(winner)
     reason = (
         f"classified as {winner.value} (confidence {confidence:.2f}; "
-        f"flat={f.flat_fraction:.2f} gradient={f.gradient_fraction:.2f} "
-        f"palette={f.palette_fullness:.2f} grain={f.grain_mean:.2f}); "
+        f"flat={f.flat_fraction:.2f} palette={f.palette_fullness:.2f} "
+        f"grain={f.grain_mean:.2f} frames={f.frame_count}); "
         f"lossy ceiling {lossy_max}"
     )
     return ContentClassification(winner, lossy_max, reason, confidence)
