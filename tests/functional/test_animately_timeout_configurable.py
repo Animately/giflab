@@ -32,6 +32,24 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _stub_animately_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat the animately launcher as present for every test in this module.
+
+    These are hermetic unit tests for timeout *resolution logic* — they already
+    mock ``subprocess.run``, so they must not also depend on the real animately
+    binary being installed on disk. Without this stub, ``compress_with_animately``
+    short-circuits on its ``_is_executable(ANIMATELY_PATH)`` gate and raises
+    "Animately launcher not found" before any timeout logic runs — which is why
+    these passed locally (binary present) but failed on the Linux CI image
+    (binary absent). Stubbing the gate makes the tests run identically with or
+    without the binary. The pure-resolver tests don't touch the gate, so this is
+    a harmless no-op for them.
+    """
+    monkeypatch.setattr("giflab.lossy._is_executable", lambda _path: True)
+
+
 # ---------------------------------------------------------------------------
 # Resolver — the unit that decides what timeout to use
 # ---------------------------------------------------------------------------
@@ -275,9 +293,7 @@ def test_animately_wrapper_passes_timeout_s_to_lossy(
     out_path = tmp_path / "out.gif"
     out_path.write_bytes(b"GIF89a\x00\x00")
 
-    monkeypatch.setattr(
-        "giflab.tool_wrappers.compress_with_animately", fake_compress
-    )
+    monkeypatch.setattr("giflab.tool_wrappers.compress_with_animately", fake_compress)
 
     AnimatelyLossyCompressor().apply(
         tiny_gif, out_path, params={"lossy_level": 40, "timeout_s": 90}
