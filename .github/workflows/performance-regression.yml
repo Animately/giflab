@@ -188,7 +188,7 @@ with open('$REPORT_FILE') as f:
     
     - name: Upload performance artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: performance-reports-${{ github.sha }}
         path: |
@@ -238,10 +238,11 @@ with open('$REPORT_FILE') as f:
         poetry install --no-interaction
     
     - name: Download performance history
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: performance-reports-*
+        pattern: performance-reports-*
         path: ./performance-history/
+        merge-multiple: true
     
     - name: Generate trend report
       run: |
@@ -276,7 +277,7 @@ with open('$REPORT_FILE') as f:
           });
     
     - name: Upload trend reports
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: weekly-performance-trends-${{ github.run_id }}
         path: |

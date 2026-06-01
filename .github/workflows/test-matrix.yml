@@ -152,7 +152,7 @@ jobs:
         poetry run pytest tests/ --tb=short --durations=20 --maxfail=10 --timeout=1800
     
     - name: Upload test results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       if: always()
       with:
         name: test-results-full-matrix

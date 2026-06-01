@@ -92,6 +92,20 @@ class TestPerformanceMonitor:
             error_msg = f"❌ Tests timed out after {duration:.1f}s"
             return 1, duration, error_msg
 
+    def _effective_threshold(self, test_tier: str) -> float:
+        """Duration above which a run counts as a regression.
+
+        The ``thresholds`` value is the *target* time; ``regression_tolerance``
+        (default 1.0) sets how far past the target a run may drift before it is
+        flagged. Without this, a tier that legitimately sits right at its target
+        trips a false regression on sub-percent CI jitter — the ``fast`` tier at
+        ~10.0s against a 10s target is exactly that case. ``regression_tolerance``
+        was already in the config but was never applied; this wires it up.
+        """
+        target = self.config["thresholds"].get(test_tier, float("inf"))
+        tolerance = self.config.get("regression_tolerance", 1.0)
+        return target * tolerance
+
     def check_performance(self, test_tier: str, duration: float) -> bool:
         """Check if performance meets threshold requirements.
 
@@ -102,8 +116,7 @@ class TestPerformanceMonitor:
         Returns:
             True if performance is acceptable, False otherwise
         """
-        threshold = self.config["thresholds"].get(test_tier, float("inf"))
-        return duration <= threshold
+        return duration <= self._effective_threshold(test_tier)
 
     def record_performance(self, test_tier: str, duration: float, success: bool):
         """Record performance data to history file.
@@ -159,6 +172,7 @@ class TestPerformanceMonitor:
             output: Test output/logs
         """
         threshold = self.config["thresholds"].get(test_tier, float("inf"))
+        effective = self._effective_threshold(test_tier)
         performance_ok = self.check_performance(test_tier, duration)
         tests_passed = exit_code == 0
 
@@ -166,16 +180,16 @@ class TestPerformanceMonitor:
         print(f"📊 TEST PERFORMANCE REPORT - {test_tier.upper()} TIER")
         print("=" * 60)
         print(f"⏱️  Execution Time: {duration:.1f}s")
-        print(f"🎯 Threshold: ≤{threshold}s")
+        print(f"🎯 Target: ≤{threshold}s (regression above {effective:.0f}s)")
         print(f"✅ Performance Target: {'✅ MET' if performance_ok else '❌ EXCEEDED'}")
         print(f"🧪 Test Results: {'✅ PASSED' if tests_passed else '❌ FAILED'}")
 
         if not performance_ok:
             print("\n🚨 PERFORMANCE REGRESSION DETECTED!")
-            print(f"   Expected: ≤{threshold}s")
+            print(f"   Regression threshold: ≤{effective:.0f}s")
             print(f"   Actual: {duration:.1f}s")
             print(
-                f"   Overage: +{duration - threshold:.1f}s ({((duration/threshold - 1) * 100):.1f}% slower)"
+                f"   Overage: +{duration - effective:.1f}s ({((duration / effective - 1) * 100):.1f}% over)"
             )
             print("\n💡 RECOMMENDATIONS:")
             print("   • Review recent changes that might impact test performance")

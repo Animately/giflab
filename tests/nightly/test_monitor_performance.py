@@ -68,6 +68,36 @@ class TestMonitorPerformance:
         assert monitor.check_performance("integration", 400.0) is False
 
     @pytest.mark.fast
+    def test_check_performance_applies_regression_tolerance(self):
+        """regression_tolerance widens the pass band to target × tolerance.
+
+        Regression guard for the wired-up tolerance knob: the config carried a
+        regression_tolerance for ages but check_performance ignored it, leaving a
+        hard cliff that failed the fast tier on sub-percent CI jitter (~10.0s vs a
+        10s target).
+        """
+        monitor = TestPerformanceMonitor()
+        monitor.config["thresholds"] = {"fast": 10}
+        monitor.config["regression_tolerance"] = 1.5
+
+        # Within the tolerance band (10 < 12 ≤ 15) → acceptable, not a regression
+        assert monitor.check_performance("fast", 12.0) is True
+        # At the effective ceiling (10 × 1.5 = 15) → still acceptable
+        assert monitor.check_performance("fast", 15.0) is True
+        # Beyond the tolerance band → genuine regression
+        assert monitor.check_performance("fast", 15.1) is False
+
+    @pytest.mark.fast
+    def test_check_performance_defaults_to_strict_without_tolerance(self):
+        """With no regression_tolerance configured, the target is the hard limit."""
+        monitor = TestPerformanceMonitor()
+        monitor.config["thresholds"] = {"fast": 10}
+        monitor.config.pop("regression_tolerance", None)
+
+        assert monitor.check_performance("fast", 10.0) is True
+        assert monitor.check_performance("fast", 10.1) is False
+
+    @pytest.mark.fast
     def test_check_performance_unknown_tier(self):
         """Test performance check for unknown test tier."""
         monitor = TestPerformanceMonitor()
