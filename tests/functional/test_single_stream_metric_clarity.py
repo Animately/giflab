@@ -427,6 +427,33 @@ class TestSingleStreamMetricsDocumented:
             "(white↔black collision)"
         )
 
+    def test_texture_similarity_docstring_calls_out_colour_blindness(self) -> None:
+        """Colour-blindness deliverable (task
+        giflab-texture-similarity-composite-weight-review).
+
+        Outlier 1 (Christmas stocking) and Outlier 2 (gstatic data-viz) both
+        reported ``texture_similarity ≈ 0.999`` while every colour-sensitive
+        metric collapsed (ssim 0.11-0.23, deltae 25-66, ssimulacra2 0). LBP
+        runs on a GREYSCALE conversion, so a pure colour-quantisation failure
+        (palette reorganised, luminance pattern intact) leaves the LBP
+        histogram almost unchanged. The docstring must warn readers not to
+        treat texture_similarity as a standalone perceptual-quality proxy.
+        See docs/metrics-audit/outlier-deep-dive-2026-05-26.md.
+        """
+        from giflab.metrics import texture_similarity
+
+        doc = (texture_similarity.__doc__ or "").lower()
+        # Must state the metric operates on greyscale / is colour-blind.
+        assert "greyscale" in doc or "grayscale" in doc or "colour-blind" in doc, (
+            "texture_similarity docstring should state it operates on a "
+            "greyscale conversion (colour-blind)"
+        )
+        # Must warn against using it as a standalone perceptual-quality proxy.
+        assert "standalone" in doc or "proxy" in doc, (
+            "texture_similarity docstring should warn it is NOT a standalone "
+            "proxy for perceptual quality"
+        )
+
     def test_detect_banding_artifacts_docstring_calls_out_no_gradient_case(
         self,
     ) -> None:
@@ -440,4 +467,109 @@ class TestSingleStreamMetricsDocumented:
         ), (
             "detect_banding_artifacts docstring should explain the 0.0 = "
             "no-gradient-region-detected case"
+        )
+
+
+def _colour_failure_row(texture_value: float) -> dict[str, float]:
+    """Build a catastrophic-colour-failure metrics row, Outlier-1/2 shape.
+
+    Mirrors the dominant signature shared by Outlier 1 (Christmas stocking,
+    composite 0.412) and Outlier 2 (gstatic data-viz, composite 0.243) from
+    docs/metrics-audit/outlier-deep-dive-2026-05-26.md: every colour- and
+    luminance-sensitive metric has collapsed while ``texture_similarity``
+    survives near 1.0 because LBP is colour-blind. ``texture_value`` is the
+    only field that varies between the high/low comparison rows.
+
+    Convention (same as ``_outlier3_isolation_row``): ``_mean`` keys are fed
+    RAW (routed through ``normalize_metric``); ``lpips_quality_mean`` and
+    ``ssimulacra2_mean`` are pre-normalised and read directly. The temporal
+    delta is pinned to 0 so the temporal term is neutral and only the colour
+    collapse + texture survival drive the score.
+    """
+    return {
+        # Luminance / structure — collapsed (Outlier-1 lossy-40 values).
+        "ssim_mean": 0.116,
+        "ms_ssim_mean": 0.127,
+        "psnr_mean": 5.0,  # RAW dB; near the PSNR_MIN_DB floor → ~0.
+        "mse_mean": 30000.0,
+        "fsim_mean": 0.5,
+        "edge_similarity_mean": 0.213,
+        "gmsd_mean": 0.5,
+        # Colour — collapsed.
+        "chist_mean": 0.504,
+        "deltae_mean": 25.3,
+        "lpips_quality_mean": 0.445,  # high LPIPS → inverted to low quality.
+        "ssimulacra2_mean": 0.0,  # perceptual catastrophe.
+        "banding_score_mean": 10.0,
+        "sharpness_similarity_mean": 0.5,
+        # Texture — the colour-blind survivor under test.
+        "texture_similarity_mean": texture_value,
+        # Temporal — neutral (no animation impact from compression).
+        "temporal_consistency_pre": 0.5,
+        "temporal_consistency_post": 0.5,
+        "temporal_consistency_delta": 0.0,
+        "temporal_consistency": 0.5,
+    }
+
+
+class TestTextureSimilarityCannotMaskColourFailure:
+    """Weight-audit regression (task
+    giflab-texture-similarity-composite-weight-review).
+
+    ``texture_similarity`` is colour-blind: on a pure colour-quantisation
+    failure it survives near 1.0 while every colour/luminance metric
+    collapses (Outlier 1 & 2 in the deep-dive). This pins the property that
+    makes the current weighting SAFE: texture's whole contribution to
+    composite_quality is bounded by ``ENHANCED_TEXTURE_WEIGHT`` (a small
+    fraction of the normalised total), so a surviving texture score cannot
+    lift a catastrophic-colour-failure composite across any reasonable
+    acceptance threshold. If a future weighting change broke this, the audit
+    finding ("current weighting is NOT a false-acceptance risk") would no
+    longer hold and this test must fail.
+    """
+
+    def test_texture_swing_is_bounded_by_its_weight(self) -> None:
+        """The full swing from texture=0.0 to texture=0.999 on an otherwise
+        catastrophic row must be no larger than the texture weight as a
+        fraction of the present-weight total (every other contribution is
+        present here, so the present total is the full enhanced total = 1.0).
+        """
+        config = MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=True)
+
+        composite_survives = calculate_composite_quality(
+            _colour_failure_row(texture_value=0.999), config
+        )
+        composite_worst_texture = calculate_composite_quality(
+            _colour_failure_row(texture_value=0.0), config
+        )
+
+        swing = composite_survives - composite_worst_texture
+        assert swing > 0.0, "Higher texture should not lower composite (sanity)."
+        # Present-weight total on this fully-populated row is 1.0, so the
+        # ceiling on texture's swing is ENHANCED_TEXTURE_WEIGHT itself. Allow a
+        # tiny epsilon for float arithmetic.
+        assert swing <= config.ENHANCED_TEXTURE_WEIGHT + 1e-9, (
+            f"texture_similarity swing on composite ({swing:.4f}) exceeds its "
+            f"weight ({config.ENHANCED_TEXTURE_WEIGHT}). A surviving colour-blind "
+            f"texture score must not be able to move composite_quality by more "
+            f"than its assigned weight."
+        )
+
+    def test_surviving_texture_cannot_lift_composite_over_acceptance(self) -> None:
+        """Even with texture pinned at its colour-failure survival value
+        (0.999), the composite on an Outlier-1/2-shaped row stays far below a
+        conservative acceptance threshold (0.5). This is the concrete
+        statement of the audit finding: texture survival is NOT masking the
+        failure. Outlier 1's real composite was 0.412 and Outlier 2's 0.243 —
+        both well under threshold despite texture_similarity ≈ 0.999.
+        """
+        config = MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=True)
+
+        composite = calculate_composite_quality(
+            _colour_failure_row(texture_value=0.999), config
+        )
+        assert composite < 0.5, (
+            f"Catastrophic colour failure with surviving texture=0.999 produced "
+            f"composite={composite:.4f}; it must stay well below acceptance. If "
+            f"this rises above 0.5 the texture weight is masking a colour failure."
         )
