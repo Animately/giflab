@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from giflab.config import (
     DEFAULT_COMPRESSION_CONFIG,
     DEFAULT_ENGINE_CONFIG,
@@ -213,3 +214,38 @@ class TestMetricsConfig:
     def test_deep_perceptual_enabled_by_default(self):
         """Sibling invariant — same reasoning for the existing LPIPS gate."""
         assert MetricsConfig().ENABLE_DEEP_PERCEPTUAL is True
+
+    def test_alpha_background_default_is_white(self):
+        """Default compositing background is white (back-compat)."""
+        assert MetricsConfig().ALPHA_BACKGROUND == (255, 255, 255)
+
+    def test_alpha_background_validation(self):
+        """ALPHA_BACKGROUND arity / type / range are validated.
+
+        Arity is checked BEFORE element access, so a 2-tuple raises a clear
+        ValueError rather than an IndexError. Bool components are rejected
+        (int subclass that would otherwise slip through as 0/1).
+        """
+        # Valid backgrounds succeed.
+        assert MetricsConfig(ALPHA_BACKGROUND=(0, 0, 0)).ALPHA_BACKGROUND == (0, 0, 0)
+        assert MetricsConfig(ALPHA_BACKGROUND=(128, 128, 128)).ALPHA_BACKGROUND == (
+            128,
+            128,
+            128,
+        )
+
+        # Arity: 2-tuple -> ValueError (NOT IndexError).
+        with pytest.raises(ValueError):
+            MetricsConfig(ALPHA_BACKGROUND=(255, 255))
+
+        # Range: component > 255 -> ValueError.
+        with pytest.raises(ValueError):
+            MetricsConfig(ALPHA_BACKGROUND=(255, 255, 300))
+
+        # Type: non-int component -> ValueError.
+        with pytest.raises(ValueError):
+            MetricsConfig(ALPHA_BACKGROUND=(255, "x", 0))
+
+        # Bool rejected (would otherwise pass as int 0/1).
+        with pytest.raises(ValueError):
+            MetricsConfig(ALPHA_BACKGROUND=(True, 0, 0))

@@ -49,6 +49,13 @@ class FrameCacheEntry:
     file_path: str
     file_size: int
     file_mtime: float
+    # Whether the SOURCE GIF carried per-pixel transparency. The cached
+    # ``frames`` are already RGB-composited (alpha is gone by the time they
+    # reach the cache), so this flag is the ONLY way the dual-composite path
+    # can know — on a warm cache hit — that a black-background second pass is
+    # warranted. Defaults False so pre-existing pickles / disk rows that omit
+    # it deserialize as "opaque" (single white pass: safe, no crash).
+    has_alpha: bool = False
     created_at: float = field(default_factory=time.time)
     last_accessed: float = field(default_factory=time.time)
     access_count: int = 0
@@ -79,6 +86,7 @@ class FrameCacheEntry:
             "file_path": self.file_path,
             "file_size": self.file_size,
             "file_mtime": self.file_mtime,
+            "has_alpha": self.has_alpha,
             "created_at": self.created_at,
             "last_accessed": self.last_accessed,
             "access_count": self.access_count,
@@ -108,6 +116,10 @@ class FrameCacheEntry:
             file_path=obj["file_path"],
             file_size=obj["file_size"],
             file_mtime=obj["file_mtime"],
+            # ``.get`` with default False so pickled blobs that predate the
+            # has_alpha field load as opaque (single white pass) rather than
+            # KeyError-ing.
+            has_alpha=obj.get("has_alpha", False),
             created_at=obj["created_at"],
             last_accessed=obj["last_accessed"],
             access_count=obj["access_count"],
@@ -179,10 +191,24 @@ class FrameCache:
                     created_at REAL NOT NULL,
                     last_accessed REAL NOT NULL,
                     access_count INTEGER NOT NULL,
-                    data_size INTEGER NOT NULL
+                    data_size INTEGER NOT NULL,
+                    has_alpha INTEGER NOT NULL DEFAULT 0
                 )
             """
             )
+
+            # Idempotent migration for pre-existing databases created before
+            # the has_alpha column existed: add it without wiping the cache.
+            # SQLite raises OperationalError("duplicate column name") if the
+            # column already exists (fresh DBs created by the CREATE TABLE
+            # above), so swallow that one case.
+            try:
+                conn.execute(
+                    "ALTER TABLE frame_cache "
+                    "ADD COLUMN has_alpha INTEGER NOT NULL DEFAULT 0"
+                )
+            except sqlite3.OperationalError:
+                pass
 
             # Create indices for efficient queries
             conn.execute(
@@ -199,11 +225,23 @@ class FrameCache:
             )
             conn.commit()
 
-    def generate_cache_key(self, file_path: Path) -> str:
+    def generate_cache_key(
+        self,
+        file_path: Path,
+        alpha_background: tuple[int, int, int] | None = None,
+    ) -> str:
         """Generate stable cache key from file metadata.
 
         Args:
             file_path: Path to the GIF file
+            alpha_background: RGB background used to composite transparent
+                pixels during extraction. When ``None`` or white
+                ``(255, 255, 255)`` the key is byte-identical to the historical
+                key (no background suffix) so the dominant white path does NOT
+                churn the existing disk cache. A non-white background (e.g. the
+                black ``(0, 0, 0)`` dual-composite pass) folds ``:bg=r,g,b``
+                into the hashed string, producing a DISTINCT key that cannot
+                collide with the white entry for the same file.
 
         Returns:
             Hexadecimal cache key string
@@ -211,27 +249,44 @@ class FrameCache:
         try:
             stat = file_path.stat()
             key_data = f"{file_path.absolute()}:{stat.st_mtime}:{stat.st_size}"
+            if alpha_background is not None and tuple(alpha_background) != (
+                255,
+                255,
+                255,
+            ):
+                a, b, c = alpha_background
+                key_data += f":bg={a},{b},{c}"
             return hashlib.sha256(key_data.encode()).hexdigest()[:32]
         except OSError as e:
             logger.warning(f"Failed to generate cache key for {file_path}: {e}")
             return ""
 
     def get(
-        self, file_path: Path, max_frames: int | None = None
-    ) -> tuple[list[np.ndarray], int, tuple[int, int], int] | None:
+        self,
+        file_path: Path,
+        max_frames: int | None = None,
+        alpha_background: tuple[int, int, int] | None = None,
+    ) -> tuple[list[np.ndarray], int, tuple[int, int], int, bool] | None:
         """Get frames from cache if available.
 
         Args:
             file_path: Path to the GIF file
             max_frames: Maximum frames requested (must match cached value)
+            alpha_background: RGB compositing background (see
+                ``generate_cache_key``). White / None resolve to the historical
+                key; a non-white background resolves to that background's own
+                cache slot.
 
         Returns:
-            Tuple of (frames, frame_count, dimensions, duration_ms) or None
+            Tuple of (frames, frame_count, dimensions, duration_ms, has_alpha)
+            or None. ``has_alpha`` records whether the source GIF carried
+            transparency and survives the cache round-trip so the warm-cache
+            dual-composite path can still trigger the black pass.
         """
         if not self.enabled:
             return None
 
-        cache_key = self.generate_cache_key(file_path)
+        cache_key = self.generate_cache_key(file_path, alpha_background)
         if not cache_key:
             return None
 
@@ -268,6 +323,7 @@ class FrameCache:
                     entry.frame_count,
                     entry.dimensions,
                     entry.duration_ms,
+                    entry.has_alpha,
                 )
 
             # Check disk cache
@@ -311,6 +367,7 @@ class FrameCache:
                     entry.frame_count,
                     entry.dimensions,
                     entry.duration_ms,
+                    entry.has_alpha,
                 )
 
             self._stats.misses += 1
@@ -323,6 +380,8 @@ class FrameCache:
         frame_count: int,
         dimensions: tuple[int, int],
         duration_ms: int,
+        alpha_background: tuple[int, int, int] | None = None,
+        has_alpha: bool = False,
     ) -> None:
         """Store frames in cache.
 
@@ -332,11 +391,17 @@ class FrameCache:
             frame_count: Total frame count in original GIF
             dimensions: Frame dimensions (width, height)
             duration_ms: Total animation duration
+            alpha_background: RGB compositing background (see
+                ``generate_cache_key``). White / None store under the historical
+                key; a non-white background stores under that background's slot.
+            has_alpha: Whether the source GIF carried transparency. Persisted on
+                the entry so a later warm cache hit can still trigger the black
+                dual-composite pass.
         """
         if not self.enabled:
             return
 
-        cache_key = self.generate_cache_key(file_path)
+        cache_key = self.generate_cache_key(file_path, alpha_background)
         if not cache_key:
             return
 
@@ -355,6 +420,7 @@ class FrameCache:
             file_path=str(file_path.absolute()),
             file_size=stat.st_size,
             file_mtime=stat.st_mtime,
+            has_alpha=has_alpha,
         )
 
         with self._lock:
@@ -407,8 +473,9 @@ class FrameCache:
                     """
                     INSERT OR REPLACE INTO frame_cache
                     (cache_key, data, file_path, file_size, file_mtime,
-                     created_at, last_accessed, access_count, data_size)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     created_at, last_accessed, access_count, data_size,
+                     has_alpha)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         entry.cache_key,
@@ -420,6 +487,7 @@ class FrameCache:
                         entry.last_accessed,
                         entry.access_count,
                         data_size,
+                        int(entry.has_alpha),
                     ),
                 )
                 conn.commit()
@@ -533,25 +601,38 @@ class FrameCache:
     def invalidate(self, file_path: Path) -> None:
         """Invalidate cache entry for a specific file.
 
+        Invalidation must be TOTAL: if the file changed on disk, every
+        composite of it (white AND the dual-composite black pass) is stale.
+        The white and black passes live under DIFFERENT cache keys (background
+        folded into the key for non-white), so we evict both keys here. Without
+        this, ``invalidate`` would evict only the white entry and orphan a
+        stale black-keyed entry for the same file.
+
         Args:
             file_path: Path to the file to invalidate
         """
         if not self.enabled:
             return
 
-        cache_key = self.generate_cache_key(file_path)
-        if not cache_key:
-            return
+        # White (default/historical) key plus the black dual-composite key.
+        cache_keys = [
+            self.generate_cache_key(file_path),
+            self.generate_cache_key(file_path, alpha_background=(0, 0, 0)),
+        ]
 
         with self._lock:
-            # Remove from memory cache
-            if cache_key in self._memory_cache:
-                entry = self._memory_cache.pop(cache_key)
-                self._memory_bytes -= entry.memory_size()
-                self._stats.memory_bytes = self._memory_bytes
+            for cache_key in cache_keys:
+                if not cache_key:
+                    continue
 
-            # Remove from disk cache
-            self._invalidate_disk_entry(cache_key)
+                # Remove from memory cache
+                if cache_key in self._memory_cache:
+                    entry = self._memory_cache.pop(cache_key)
+                    self._memory_bytes -= entry.memory_size()
+                    self._stats.memory_bytes = self._memory_bytes
+
+                # Remove from disk cache
+                self._invalidate_disk_entry(cache_key)
 
             logger.debug(f"Invalidated cache for {file_path.name}")
 
@@ -598,12 +679,25 @@ class FrameCache:
 
             return stats
 
-    def warm_cache(self, file_paths: list[Path], max_frames: int | None = None) -> None:
+    def warm_cache(
+        self,
+        file_paths: list[Path],
+        max_frames: int | None = None,
+        alpha_background: tuple[int, int, int] | None = None,
+    ) -> None:
         """Pre-load files into cache for better performance.
 
         Args:
             file_paths: List of GIF files to pre-cache
             max_frames: Maximum frames to extract for each file
+            alpha_background: RGB compositing background (default white). NOTE:
+                warm_cache only pre-loads the WHITE entry — it calls
+                ``extract_gif_frames`` with the default white background. The
+                black dual-composite entry is produced lazily on the first
+                transparent metrics call; warm_cache is a perf pre-load, not a
+                correctness path, so it intentionally does not warm the black
+                slot. The param exists for forward-compat / explicit-key
+                membership checks only.
         """
         if not self.enabled:
             return
@@ -614,7 +708,7 @@ class FrameCache:
             if not file_path.exists():
                 continue
 
-            cache_key = self.generate_cache_key(file_path)
+            cache_key = self.generate_cache_key(file_path, alpha_background)
             if cache_key in self._memory_cache:
                 continue  # Already cached
 

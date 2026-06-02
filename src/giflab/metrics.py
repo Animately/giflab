@@ -226,6 +226,12 @@ class FrameExtractResult:
     frame_count: int
     dimensions: tuple[int, int]  # (width, height)
     duration_ms: int
+    # Whether the source GIF carried per-pixel transparency. Defaults False so
+    # the 7+ non-metrics callers of ``extract_gif_frames`` simply ignore it.
+    # The dual-composite path in ``calculate_comprehensive_metrics`` reads it to
+    # decide whether a black-background second pass is warranted (opaque GIFs
+    # short-circuit to a single white pass at zero added cost).
+    has_alpha: bool = False
 
 
 def _frame_to_rgb_composited(
@@ -256,17 +262,50 @@ def _frame_to_rgb_composited(
     return np.array(composited)
 
 
+def _frame_has_transparency(img: Image.Image) -> bool:
+    """Return True if *img* carries per-pixel transparency.
+
+    Detection mirrors what ``_frame_to_rgb_composited`` would composite away:
+    a palette GIF with a ``transparency`` index, or any mode with a real alpha
+    channel whose minimum alpha is below fully-opaque. This must be computed on
+    the SOURCE frame BEFORE compositing — once composited to RGB the alpha is
+    gone, which is exactly why the warm-cache path has to persist the flag (it
+    can never be recomputed from the cached RGB frames).
+    """
+    if "transparency" in img.info:
+        return True
+    if img.mode in ("RGBA", "LA", "PA"):
+        rgba = img.convert("RGBA")
+        alpha = rgba.getchannel("A")
+        # getextrema returns (min, max); any pixel below 255 means transparency.
+        return alpha.getextrema()[0] < 255
+    if img.mode == "P":
+        # Palette image without a declared transparency index has no alpha.
+        return False
+    return False
+
+
 def extract_gif_frames(
-    gif_path: Path, max_frames: int | None = None
+    gif_path: Path,
+    max_frames: int | None = None,
+    alpha_background: tuple[int, int, int] | None = None,
 ) -> FrameExtractResult:
     """Extract frames from a GIF file.
 
     Args:
         gif_path: Path to GIF file
         max_frames: Maximum number of frames to extract (None for all)
+        alpha_background: RGB background used to composite transparent pixels.
+            ``None`` (the default) uses ``DEFAULT_METRICS_CONFIG.ALPHA_BACKGROUND``
+            (white) — preserving the single-white behaviour every existing
+            caller relies on. The dual-composite path passes an explicit
+            ``(0, 0, 0)`` for the black second pass; a diagnostic override hatch
+            (e.g. ``(128, 128, 128)``) is available for one-off debugging.
 
     Returns:
-        FrameExtractResult with extracted frames and metadata
+        FrameExtractResult with extracted frames and metadata. ``has_alpha`` is
+        set True when the source GIF carried transparency (so the file-level
+        dual-composite path knows a black second pass is warranted).
 
     Raises:
         IOError: If GIF cannot be read
@@ -297,40 +336,49 @@ def extract_gif_frames(
 
     use_cache = caching_available and runtime_enabled
 
-    # Try to get from cache first (only if caching is enabled)
-
-    if use_cache:
-        frame_cache = get_frame_cache()
-        cached = frame_cache.get(gif_path, max_frames)
-
-        if cached is not None:
-            frames, frame_count, dimensions, duration_ms = cached
-            return FrameExtractResult(
-                frames=frames,
-                frame_count=frame_count,
-                dimensions=dimensions,
-                duration_ms=duration_ms,
-            )
-
     # Audit-fix: composite RGBA onto a fixed background before returning RGB
     # frames. PIL's `.convert('RGB')` on palette+transparency GIFs resolves
     # transparent pixels via the file's background palette colour, which is
     # unstable across re-encoding (palette gets reordered). White is the
     # conventional choice for email/marketing content. See
-    # _frame_to_rgb_composited for the full rationale.
-    background = DEFAULT_METRICS_CONFIG.ALPHA_BACKGROUND
+    # _frame_to_rgb_composited for the full rationale. ``alpha_background``
+    # lets the file-level dual-composite path request the black second pass.
+    if alpha_background is None:
+        background = DEFAULT_METRICS_CONFIG.ALPHA_BACKGROUND
+    else:
+        background = alpha_background
+
+    # Try to get from cache first (only if caching is enabled). The background
+    # is folded into the cache key for non-white passes, so the white and black
+    # passes never collide.
+    if use_cache:
+        frame_cache = get_frame_cache()
+        cached = frame_cache.get(gif_path, max_frames, alpha_background=background)
+
+        if cached is not None:
+            frames, frame_count, dimensions, duration_ms, has_alpha = cached
+            return FrameExtractResult(
+                frames=frames,
+                frame_count=frame_count,
+                dimensions=dimensions,
+                duration_ms=duration_ms,
+                has_alpha=has_alpha,
+            )
 
     # Not in cache, extract frames
     try:
         with Image.open(gif_path) as img:
             if not hasattr(img, "n_frames") or img.n_frames == 1:
-                # Single frame image (PNG, JPEG, etc.) or single-frame GIF
+                # Single frame image (PNG, JPEG, etc.) or single-frame GIF.
+                # Detect transparency BEFORE compositing (alpha is gone after).
+                has_alpha = _frame_has_transparency(img)
                 frame = _frame_to_rgb_composited(img, background)
                 result = FrameExtractResult(
                     frames=[frame],
                     frame_count=1,
                     dimensions=(img.width, img.height),
                     duration_ms=0,
+                    has_alpha=has_alpha,
                 )
 
                 # Cache the result (only if caching is enabled)
@@ -341,45 +389,32 @@ def extract_gif_frames(
                         result.frame_count,
                         result.dimensions,
                         result.duration_ms,
+                        alpha_background=background,
+                        has_alpha=result.has_alpha,
                     )
 
                 return result
 
             total_frames = img.n_frames
 
-            # Memory protection: limit frame extraction for very large GIFs
-            memory_limit_frames = 500  # Reasonable limit to prevent memory issues
-            if max_frames is None:
-                frames_to_extract = min(total_frames, memory_limit_frames)
-            else:
-                frames_to_extract = min(total_frames, max_frames, memory_limit_frames)
-
             # Additional memory check based on image dimensions
             width, height = img.size
-            pixels_per_frame = width * height * 3  # RGB
-            estimated_memory_mb = (frames_to_extract * pixels_per_frame) / (1024 * 1024)
-
-            # Limit memory usage to ~500MB for frame extraction
-            if estimated_memory_mb > 500:
-                max_safe_frames = int(500 * 1024 * 1024 / pixels_per_frame)
-                frames_to_extract = min(frames_to_extract, max(1, max_safe_frames))
+            frame_indices = _compute_frame_indices(
+                total_frames, width, height, max_frames
+            )
 
             frames = []
             total_duration = 0
-
-            # Use even frame sampling across entire animation for better quality assessment
-            if frames_to_extract >= total_frames:
-                # Use all frames if we're not hitting the limit
-                frame_indices = list(range(total_frames))
-            else:
-                # Sample evenly across the entire animation to capture quality issues
-                # that may appear later in the animation
-                frame_indices = np.linspace(
-                    0, total_frames - 1, frames_to_extract, dtype=int
-                ).tolist()
+            has_alpha = False
 
             for i in frame_indices:
                 img.seek(i)
+                # Track transparency across the sampled frames. A GIF whose
+                # transparency appears only on a later frame still warrants the
+                # black dual-composite pass, so OR across the walk. Free: the
+                # frame is already decoded here for compositing.
+                if not has_alpha:
+                    has_alpha = _frame_has_transparency(img)
                 frame = _frame_to_rgb_composited(img, background)
                 frames.append(frame)
 
@@ -392,6 +427,7 @@ def extract_gif_frames(
                 frame_count=total_frames,  # Store the actual total frame count
                 dimensions=(img.width, img.height),
                 duration_ms=total_duration,
+                has_alpha=has_alpha,
             )
 
             # Cache the result (only if caching is enabled)
@@ -402,12 +438,52 @@ def extract_gif_frames(
                     result.frame_count,
                     result.dimensions,
                     result.duration_ms,
+                    alpha_background=background,
+                    has_alpha=result.has_alpha,
                 )
 
             return result
 
     except Exception as e:
         raise OSError(f"Failed to extract frames from {gif_path}: {e}") from e
+
+
+def _compute_frame_indices(
+    total_frames: int,
+    width: int,
+    height: int,
+    max_frames: int | None,
+) -> list[int]:
+    """Compute the set of frame indices to sample from an animation.
+
+    Single-sources the sampling logic so the standard and any future fast
+    path stay in lockstep. Applies the same two memory guards as before:
+    a hard 500-frame cap and a ~500MB RGB-frame-buffer cap, then samples
+    evenly across the whole animation (so quality issues that appear only
+    late are still captured).
+    """
+    # Memory protection: limit frame extraction for very large GIFs
+    memory_limit_frames = 500  # Reasonable limit to prevent memory issues
+    if max_frames is None:
+        frames_to_extract = min(total_frames, memory_limit_frames)
+    else:
+        frames_to_extract = min(total_frames, max_frames, memory_limit_frames)
+
+    pixels_per_frame = width * height * 3  # RGB
+    estimated_memory_mb = (frames_to_extract * pixels_per_frame) / (1024 * 1024)
+
+    # Limit memory usage to ~500MB for frame extraction
+    if estimated_memory_mb > 500:
+        max_safe_frames = int(500 * 1024 * 1024 / pixels_per_frame)
+        frames_to_extract = min(frames_to_extract, max(1, max_safe_frames))
+
+    # Use even frame sampling across entire animation for better quality assessment
+    if frames_to_extract >= total_frames:
+        # Use all frames if we're not hitting the limit
+        return list(range(total_frames))
+    # Sample evenly across the entire animation to capture quality issues
+    # that may appear later in the animation
+    return np.linspace(0, total_frames - 1, frames_to_extract, dtype=int).tolist()
 
 
 def resize_to_common_dimensions(
@@ -1915,16 +1991,13 @@ def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
         0.0,
         min(
             1.0,
-            (_TEXTURE_NEAR_FLAT_PTP_CEILING - ptp_max)
-            / _TEXTURE_NEAR_FLAT_PTP_CEILING,
+            (_TEXTURE_NEAR_FLAT_PTP_CEILING - ptp_max) / _TEXTURE_NEAR_FLAT_PTP_CEILING,
         ),
     )
     if near_flat_weight <= 0.0:
         return lbp_score
 
-    colour_score = _flat_colour_degradation(
-        f1, f2, identity_value=1.0, worst_value=0.0
-    )
+    colour_score = _flat_colour_degradation(f1, f2, identity_value=1.0, worst_value=0.0)
     return (1.0 - near_flat_weight) * lbp_score + near_flat_weight * colour_score
 
 
@@ -2331,7 +2404,10 @@ def calculate_selected_metrics(
             # that downstream read as normalised [0, 1].
             results.update(_default_ssimulacra2_fallback())
 
-    if selected_metrics.get("temporal_artifacts", False) and config.ENABLE_TEMPORAL_ARTIFACTS:
+    if (
+        selected_metrics.get("temporal_artifacts", False)
+        and config.ENABLE_TEMPORAL_ARTIFACTS
+    ):
         try:
             from .temporal_artifacts import calculate_enhanced_temporal_metrics
 
@@ -3104,9 +3180,7 @@ def calculate_comprehensive_metrics_from_frames(
                     original_frames_resized, compressed_frames_resized, device=None
                 )
             except ImportError as e:
-                logger.warning(
-                    f"Enhanced temporal artifacts module not available: {e}"
-                )
+                logger.warning(f"Enhanced temporal artifacts module not available: {e}")
                 enhanced_temporal_metrics = dict(_temporal_fallback)
             except Exception as e:
                 logger.error(f"Enhanced temporal artifacts calculation failed: {e}")
@@ -3726,6 +3800,208 @@ def calculate_comprehensive_metrics_from_frames(
         raise ValueError(f"Metrics calculation failed: {e}") from e
 
 
+# Sentinel raw values used to probe each composite-input metric's polarity.
+# Each pair is (low_raw, high_raw) chosen STRICTLY INSIDE the metric's
+# documented monotonic range so the composite's response is monotone over the
+# pair. See ``normalize_metric`` / ``calculate_composite_quality`` for the
+# per-metric transforms these exercise end-to-end.
+_POLARITY_PROBE_SENTINELS: dict[str, tuple[float, float]] = {
+    "ssim_mean": (0.1, 0.9),
+    "ms_ssim_mean": (0.1, 0.9),
+    "fsim_mean": (0.1, 0.9),
+    "edge_similarity_mean": (0.1, 0.9),
+    "chist_mean": (0.1, 0.9),
+    "sharpness_similarity_mean": (0.1, 0.9),
+    "texture_similarity_mean": (0.1, 0.9),
+    "ssimulacra2_mean": (0.1, 0.9),
+    "psnr_mean": (5.0, 45.0),
+    "mse_mean": (1.0, 10000.0),
+    "gmsd_mean": (0.05, 0.45),
+    "banding_score_mean": (0.1, 0.9),
+    "deltae_mean": (1.0, 9.0),
+    "lpips_quality_mean": (0.1, 0.9),
+    "temporal_consistency_delta": (0.1, 0.9),
+    "temporal_consistency": (0.1, 0.9),
+}
+
+# Per-stem sibling-statistic suffixes copied alongside the chosen ``_mean`` /
+# delta value so the aggregate invariant ``X_min <= X_mean <= X_max`` holds for
+# whichever pass won that stem.
+_SIBLING_SUFFIXES = ("_std", "_min", "_max", "_raw")
+
+
+def _composite_metric_polarity(config: MetricsConfig) -> dict[str, int]:
+    """Derive each composite-input metric's polarity by probing the END-TO-END
+    composite, not ``normalize_metric``.
+
+    For each composite-input ``_mean`` / delta key the active config consumes,
+    build a minimal metrics dict containing ONLY that key (plus nothing else),
+    evaluate ``calculate_composite_quality`` at a low and a high raw sentinel,
+    and read off the direction:
+
+    * composite(high) > composite(low)  -> higher RAW improves quality
+      -> polarity ``+1`` (the WORST value is the MINIMUM raw).
+    * composite(high) < composite(low)  -> higher RAW degrades quality
+      -> polarity ``-1`` (the WORST value is the MAXIMUM raw).
+
+    Because only the probed key is present, weight redistribution makes the
+    composite a monotone function of that single metric's normalized
+    contribution, so the composite's sign of change equals the per-metric
+    transform's sign — captured through WHATEVER path (inline block or
+    ``normalize_metric``) the composite actually uses. This is invariant to
+    where the transform lives, which is why probing the end-to-end composite is
+    correct for ``lpips_quality_mean`` / ``ssimulacra2_mean`` /
+    ``temporal_consistency_delta`` (none of which have a ``normalize_metric``
+    branch) where probing ``normalize_metric`` directly would derive the
+    OPPOSITE direction.
+
+    Returns:
+        Mapping of composite-input key -> polarity (+1 worst=MIN, -1 worst=MAX),
+        limited to the keys the composite consumes in the active config mode
+        (the temporal key follows ``USE_TEMPORAL_DELTA_FOR_COMPOSITE``).
+    """
+    from .enhanced_metrics import calculate_composite_quality
+
+    use_temporal_delta = getattr(config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True)
+
+    # The keys the composite actually reads in the active config mode.
+    candidate_keys = [
+        "ssim_mean",
+        "ms_ssim_mean",
+        "psnr_mean",
+        "mse_mean",
+        "fsim_mean",
+        "edge_similarity_mean",
+        "gmsd_mean",
+        "chist_mean",
+        "sharpness_similarity_mean",
+        "texture_similarity_mean",
+        "lpips_quality_mean",
+        "ssimulacra2_mean",
+        "banding_score_mean",
+        "deltae_mean",
+    ]
+    # Temporal: True -> delta (worst=MAX); False -> bare temporal_consistency
+    # (higher-better via the standard branch, worst=MIN).
+    candidate_keys.append(
+        "temporal_consistency_delta" if use_temporal_delta else "temporal_consistency"
+    )
+
+    polarity: dict[str, int] = {}
+    for key in candidate_keys:
+        low_raw, high_raw = _POLARITY_PROBE_SENTINELS[key]
+        composite_low = calculate_composite_quality({key: low_raw}, config)
+        composite_high = calculate_composite_quality({key: high_raw}, config)
+        # Both finite by construction (single present metric, valid sentinels).
+        if composite_high >= composite_low:
+            polarity[key] = 1  # higher raw better -> worst is the minimum
+        else:
+            polarity[key] = -1  # higher raw worse -> worst is the maximum
+    return polarity
+
+
+def _worst_of(value_a: float, value_b: float, polarity: int) -> tuple[float, bool]:
+    """Return (worst_value, chose_b) for two raw values under *polarity*.
+
+    NaN-aware with nanmin / nanmax semantics: one finite + one NaN -> the
+    finite value (a real measurement beats a non-measurement); both NaN ->
+    NaN (honest propagation, never coerced to 0/1). ``chose_b`` reports whether
+    the BLACK (second) pass supplied the chosen value, so the caller can copy
+    that pass's sibling statistics.
+    """
+    a_nan = isinstance(value_a, float) and math.isnan(value_a)
+    b_nan = isinstance(value_b, float) and math.isnan(value_b)
+
+    if a_nan and b_nan:
+        return float("nan"), False
+    if a_nan:
+        return value_b, True
+    if b_nan:
+        return value_a, False
+
+    if polarity == 1:
+        # worst = minimum raw
+        return (value_b, True) if value_b < value_a else (value_a, False)
+    # polarity == -1: worst = maximum raw
+    return (value_b, True) if value_b > value_a else (value_a, False)
+
+
+def _merge_worst_of_dual_composite(
+    white: dict[str, float | str],
+    black: dict[str, float | str],
+    config: MetricsConfig,
+) -> dict[str, float | str]:
+    """Merge white- and black-composite metric dicts via per-metric worst-of.
+
+    Strategy A: for every composite-input ``_mean`` / delta key the composite
+    consumes, pick the value that is WORSE for quality (direction derived from
+    the live end-to-end composite via ``_composite_metric_polarity``). When the
+    worst value comes from the BLACK pass, also copy that stem's
+    ``_std`` / ``_min`` / ``_max`` / ``_raw`` siblings from BLACK so the
+    aggregate invariant ``X_min <= X_mean <= X_max`` holds; otherwise the white
+    siblings (already in the base) are kept.
+
+    The base is the WHITE dict, so every non-``_mean`` key (frame counts,
+    kilobytes, compression_ratio, string keys) is authoritative from white —
+    these are identical across passes (same files/metadata). ``render_ms``,
+    ``composite_quality`` and ``efficiency`` are intentionally NOT finalised
+    here: the caller overwrites render_ms at the file level and re-runs
+    ``process_metrics_with_enhanced_quality`` to recompute composite_quality
+    AND efficiency from the merged worst-of values.
+
+    NaN-aware throughout (see ``_worst_of``): a missing measurement never
+    coerces to a fabricated best/worst case.
+    """
+    merged: dict[str, float | str] = dict(white)
+
+    polarity = _composite_metric_polarity(config)
+
+    for key, pol in polarity.items():
+        white_present = key in white
+        black_present = key in black
+
+        if not white_present and not black_present:
+            continue
+
+        stem = key[: -len("_mean")] if key.endswith("_mean") else key
+
+        if white_present and not black_present:
+            # Present only on white — already in base; nothing to overwrite.
+            continue
+        if black_present and not white_present:
+            # Present only on black — take it plus its siblings (no white
+            # sibling exists to keep the invariant otherwise).
+            merged[key] = black[key]
+            for suffix in _SIBLING_SUFFIXES:
+                sib = f"{stem}{suffix}"
+                if sib in black:
+                    merged[sib] = black[sib]
+            continue
+
+        # Present on both: worst-of. frame_count provenance can differ between
+        # backgrounds (content-based alignment yields different pair counts),
+        # but the _mean values are still comparable; warn rather than crash.
+        white_val = white[key]
+        black_val = black[key]
+        if not isinstance(white_val, int | float) or not isinstance(
+            black_val, int | float
+        ):
+            # Non-numeric (shouldn't happen for these keys) — keep white.
+            continue
+
+        worst_value, chose_black = _worst_of(float(white_val), float(black_val), pol)
+        merged[key] = worst_value
+        if chose_black:
+            # Copy the chosen pass's sibling stats so X_min <= X_mean <= X_max
+            # holds for the value we kept.
+            for suffix in _SIBLING_SUFFIXES:
+                sib = f"{stem}{suffix}"
+                if sib in black:
+                    merged[sib] = black[sib]
+
+    return merged
+
+
 def calculate_comprehensive_metrics(
     original_path: Path,
     compressed_path: Path,
@@ -3761,9 +4037,19 @@ def calculate_comprehensive_metrics(
         config = DEFAULT_METRICS_CONFIG
 
     try:
-        # Extract frames from both GIFs
-        original_result = extract_gif_frames(original_path, config.SSIM_MAX_FRAMES)
-        compressed_result = extract_gif_frames(compressed_path, config.SSIM_MAX_FRAMES)
+        # File-level wall-clock timer for render_ms. This wraps the probe +
+        # both extractions + both from_frames passes + merge, so on a
+        # transparent GIF the reported render_ms genuinely ~doubles (matches
+        # the documented dual-pass cost). On an opaque GIF only one pass runs,
+        # so render_ms tracks the single-pass total.
+        start_time = time.perf_counter()
+
+        # WHITE pass first (default background). On opaque GIFs this is the
+        # ONLY extraction — zero added cost. has_alpha survives a warm cache
+        # hit (persisted through the cache), so the dual pass still triggers on
+        # transparent GIFs even when the white entry was already cached.
+        white_original = extract_gif_frames(original_path, config.SSIM_MAX_FRAMES)
+        white_compressed = extract_gif_frames(compressed_path, config.SSIM_MAX_FRAMES)
 
         # Extract metadata for file-specific operations
         try:
@@ -3775,10 +4061,12 @@ def calculate_comprehensive_metrics(
             compressed_frame_count = compressed_metadata.orig_frames
         except Exception:
             # Fallback to extracted frames count
-            original_frame_count = len(original_result.frames)
-            compressed_frame_count = len(compressed_result.frames)
+            original_frame_count = len(white_original.frames)
+            compressed_frame_count = len(white_compressed.frames)
 
-        # Prepare file metadata for the frame-based function
+        # Prepare file metadata for the frame-based function. The file sizes
+        # (and therefore compression_ratio / kilobytes) do NOT depend on the
+        # compositing background, so both passes share the same metadata.
         file_metadata = {
             "original_path": original_path,
             "compressed_path": compressed_path,
@@ -3788,17 +4076,67 @@ def calculate_comprehensive_metrics(
             "compressed_size_bytes": compressed_path.stat().st_size,
         }
 
-        # Delegate to frame-based function
-        result = calculate_comprehensive_metrics_from_frames(
-            original_result.frames,
-            compressed_result.frames,
+        # Either GIF carrying transparency triggers the dual-composite path:
+        # white-only compositing biases every pixel metric in favour of
+        # dark-content GIFs (the difference is swamped against white). A black
+        # second pass surfaces that difference; worst-of merging stops a
+        # compressor from gaming the score by picking a friendly background.
+        needs_dual = white_original.has_alpha or white_compressed.has_alpha
+
+        white_result = calculate_comprehensive_metrics_from_frames(
+            white_original.frames,
+            white_compressed.frames,
             config=config,
             frame_reduction_context=frame_reduction_context,
             file_metadata=file_metadata,
             force_all_metrics=force_all_metrics,
         )
 
-        return result
+        if not needs_dual:
+            # Opaque GIF: single white pass, exactly as before. Re-time at the
+            # file level so render_ms is consistent with the dual path's
+            # file-level timing (negligible wrapper overhead over from_frames).
+            white_result["render_ms"] = min(
+                int((time.perf_counter() - start_time) * 1000), 86400000
+            )
+            return white_result
+
+        # Transparent GIF: also composite onto BLACK and merge worst-of.
+        black_original = extract_gif_frames(
+            original_path, config.SSIM_MAX_FRAMES, alpha_background=(0, 0, 0)
+        )
+        black_compressed = extract_gif_frames(
+            compressed_path, config.SSIM_MAX_FRAMES, alpha_background=(0, 0, 0)
+        )
+
+        black_result = calculate_comprehensive_metrics_from_frames(
+            black_original.frames,
+            black_compressed.frames,
+            config=config,
+            frame_reduction_context=frame_reduction_context,
+            file_metadata=file_metadata,
+            force_all_metrics=force_all_metrics,
+        )
+
+        merged = _merge_worst_of_dual_composite(white_result, black_result, config)
+
+        # Re-run the enhanced-quality processor on the MERGED dict so
+        # composite_quality AND efficiency are recomputed from the
+        # pessimistic per-metric worst-of values (not carried from either
+        # pass). compression_ratio is identical across passes (file-size
+        # derived), so efficiency is consistent and reflects the lower
+        # composite.
+        from .enhanced_metrics import process_metrics_with_enhanced_quality
+
+        merged = process_metrics_with_enhanced_quality(merged, config)
+
+        # File-level wall-clock total (probe + both extractions + both
+        # from_frames + merge).
+        merged["render_ms"] = min(
+            int((time.perf_counter() - start_time) * 1000), 86400000
+        )
+
+        return merged
 
     except Exception as e:
         logger.error(f"Failed to calculate comprehensive metrics: {e}")

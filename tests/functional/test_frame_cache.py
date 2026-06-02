@@ -146,6 +146,58 @@ class TestFrameCacheEntry:
         ):
             np.testing.assert_array_equal(orig_frame, restored_frame)
 
+    def test_entry_has_alpha_round_trips(self, sample_frames):
+        """has_alpha survives to_bytes/from_bytes (blob carries the flag)."""
+        entry = FrameCacheEntry(
+            cache_key="k",
+            frames=sample_frames,
+            dimensions=(100, 100),
+            duration_ms=500,
+            frame_count=5,
+            file_path="/p.gif",
+            file_size=1000,
+            file_mtime=1.0,
+            has_alpha=True,
+        )
+        restored = FrameCacheEntry.from_bytes(entry.to_bytes())
+        assert restored.has_alpha is True
+
+    def test_entry_from_bytes_defaults_has_alpha_false_for_old_blob(
+        self, sample_frames
+    ):
+        """A pickled blob that predates has_alpha deserializes as False."""
+        import pickle
+        import zlib
+
+        # Build an OLD-format blob (no has_alpha key).
+        frames_data = []
+        for frame in sample_frames:
+            frames_data.append(
+                {
+                    "data": zlib.compress(frame.tobytes(), level=6),
+                    "shape": frame.shape,
+                    "dtype": str(frame.dtype),
+                }
+            )
+        old_blob = pickle.dumps(
+            {
+                "cache_key": "k",
+                "frames_data": frames_data,
+                "dimensions": (100, 100),
+                "duration_ms": 500,
+                "frame_count": 5,
+                "file_path": "/p.gif",
+                "file_size": 1000,
+                "file_mtime": 1.0,
+                "created_at": 1.0,
+                "last_accessed": 1.0,
+                "access_count": 0,
+            },
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+        restored = FrameCacheEntry.from_bytes(old_blob)
+        assert restored.has_alpha is False
+
     def test_entry_memory_size(self, sample_frames):
         """Test memory size calculation."""
         entry = FrameCacheEntry(
@@ -229,11 +281,12 @@ class TestFrameCache:
         result = frame_cache.get(sample_gif, max_frames=None)
 
         assert result is not None
-        frames, frame_count, dimensions, duration_ms = result
+        frames, frame_count, dimensions, duration_ms, has_alpha = result
         assert len(frames) == len(sample_frames)
         assert frame_count == 10
         assert dimensions == (100, 100)
         assert duration_ms == 1000
+        assert has_alpha is False  # default when put without has_alpha
 
         # Check frames match
         for orig_frame, cached_frame in zip(sample_frames, frames, strict=True):
@@ -401,6 +454,171 @@ class TestFrameCache:
         # Should miss
         result = frame_cache.get(sample_gif, max_frames=None)
         assert result is None
+
+    def test_cache_key_distinguishes_background(self, frame_cache, sample_gif):
+        """Test 9: white and black keys for the same file differ, white key
+        is byte-identical to the historical (no-background) key."""
+        white_key = frame_cache.generate_cache_key(sample_gif)
+        white_key_explicit = frame_cache.generate_cache_key(
+            sample_gif, alpha_background=(255, 255, 255)
+        )
+        black_key = frame_cache.generate_cache_key(
+            sample_gif, alpha_background=(0, 0, 0)
+        )
+
+        # White (None) and explicit-white resolve to the SAME historical key.
+        assert white_key == white_key_explicit
+        # Black is a distinct slot.
+        assert black_key != white_key
+
+    def test_white_and_black_entries_dont_return_each_other(
+        self, frame_cache, sample_frames, sample_gif
+    ):
+        """White and black passes occupy independent cache slots."""
+        white_frames = sample_frames
+        black_frames = [f + 1 for f in sample_frames]  # distinct content
+
+        frame_cache.put(
+            sample_gif,
+            white_frames,
+            frame_count=5,
+            dimensions=(100, 100),
+            duration_ms=500,
+            alpha_background=(255, 255, 255),
+            has_alpha=True,
+        )
+        frame_cache.put(
+            sample_gif,
+            black_frames,
+            frame_count=5,
+            dimensions=(100, 100),
+            duration_ms=500,
+            alpha_background=(0, 0, 0),
+            has_alpha=True,
+        )
+
+        white_res = frame_cache.get(
+            sample_gif, max_frames=None, alpha_background=(255, 255, 255)
+        )
+        black_res = frame_cache.get(
+            sample_gif, max_frames=None, alpha_background=(0, 0, 0)
+        )
+        assert white_res is not None and black_res is not None
+        # Each slot returns its own frames; has_alpha survives the round-trip.
+        np.testing.assert_array_equal(white_res[0][0], white_frames[0])
+        np.testing.assert_array_equal(black_res[0][0], black_frames[0])
+        assert white_res[4] is True
+        assert black_res[4] is True
+
+    def test_invalidate_evicts_both_backgrounds(
+        self, frame_cache, sample_frames, sample_gif
+    ):
+        """Test 13: invalidate evicts BOTH the white and black keys."""
+        frame_cache.put(
+            sample_gif,
+            sample_frames,
+            frame_count=5,
+            dimensions=(100, 100),
+            duration_ms=500,
+            alpha_background=(255, 255, 255),
+            has_alpha=True,
+        )
+        frame_cache.put(
+            sample_gif,
+            [f + 1 for f in sample_frames],
+            frame_count=5,
+            dimensions=(100, 100),
+            duration_ms=500,
+            alpha_background=(0, 0, 0),
+            has_alpha=True,
+        )
+
+        # Both present.
+        assert frame_cache.get(sample_gif, alpha_background=(255, 255, 255)) is not None
+        assert frame_cache.get(sample_gif, alpha_background=(0, 0, 0)) is not None
+
+        frame_cache.invalidate(sample_gif)
+
+        # Neither resolves after a total invalidation.
+        assert frame_cache.get(sample_gif, alpha_background=(255, 255, 255)) is None
+        assert frame_cache.get(sample_gif, alpha_background=(0, 0, 0)) is None
+
+    def test_has_alpha_survives_disk_round_trip(
+        self, temp_cache_dir, sample_frames, sample_gif
+    ):
+        """has_alpha persists across cache instances (disk blob authoritative)."""
+        cache1 = FrameCache(
+            memory_limit_mb=10,
+            disk_path=temp_cache_dir / "alpha_persist.db",
+            enabled=True,
+        )
+        cache1.put(
+            sample_gif,
+            sample_frames,
+            frame_count=5,
+            dimensions=(100, 100),
+            duration_ms=500,
+            has_alpha=True,
+        )
+
+        cache2 = FrameCache(
+            memory_limit_mb=10,
+            disk_path=temp_cache_dir / "alpha_persist.db",
+            enabled=True,
+        )
+        result = cache2.get(sample_gif, max_frames=None)
+        assert result is not None
+        assert result[4] is True  # has_alpha survived the disk round-trip
+
+    def test_pre_migration_db_gains_has_alpha_column_without_wipe(self, temp_cache_dir):
+        """An old-schema DB (no has_alpha column) is migrated in place.
+
+        Simulates a disk cache created before the has_alpha column existed:
+        the idempotent ALTER TABLE migration in _init_database must add the
+        column without wiping existing rows.
+        """
+        import sqlite3
+        import time
+
+        db_path = temp_cache_dir / "old_schema.db"
+        now = time.time()
+        # Create the OLD schema (no has_alpha column) with one row.
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE frame_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    data BLOB NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    file_mtime REAL NOT NULL,
+                    created_at REAL NOT NULL,
+                    last_accessed REAL NOT NULL,
+                    access_count INTEGER NOT NULL,
+                    data_size INTEGER NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO frame_cache (cache_key, data, file_path, file_size, "
+                "file_mtime, created_at, last_accessed, access_count, data_size) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                ("k", b"x", "/p.gif", 1, 1.0, now, now, 0, 1),
+            )
+            conn.commit()
+
+        # Opening a FrameCache on this path runs _init_database (migration).
+        FrameCache(memory_limit_mb=10, disk_path=db_path, enabled=True)
+
+        with sqlite3.connect(str(db_path)) as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(frame_cache)")}
+            assert "has_alpha" in cols
+            # Existing row survived (not wiped) and defaulted to 0.
+            row = conn.execute(
+                "SELECT has_alpha FROM frame_cache WHERE cache_key = 'k'"
+            ).fetchone()
+            assert row is not None
+            assert row[0] == 0
 
     def test_cache_clear(self, frame_cache, sample_frames, sample_gif):
         """Test clearing the cache."""

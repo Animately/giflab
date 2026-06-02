@@ -2227,3 +2227,243 @@ class TestExtractGifFramesAlphaCompositing:
         if "chist" in metrics:
             assert metrics["chist"] == pytest.approx(1.0, abs=1e-3), metrics
         assert metrics["composite_quality"] == pytest.approx(1.0, abs=1e-3), metrics
+
+    # ------------------------------------------------------------------
+    # Dual-composite (white + black) tests. White-only compositing biases
+    # every pixel metric IN FAVOUR of dark-content GIFs: near-black detail on
+    # a transparent field composited onto white is swamped (high ssim/psnr),
+    # so a perturbation that would be obvious against a dark background is
+    # invisible. The dual path also composites onto black and merges worst-of.
+    # ------------------------------------------------------------------
+
+    def _make_dark_on_transparent_gif(
+        self,
+        path: Path,
+        content_rgb: tuple[int, int, int],
+        n_frames: int = 2,
+        size: tuple[int, int] = (128, 128),
+        block: tuple[int, int] = (56, 72),
+    ) -> Path:
+        """Build an RGBA animated GIF: near-black content on a transparent field.
+
+        A central ``block`` (``[lo, hi)`` on both axes) holds ``content_rgb``
+        (opaque); the surrounding majority of the frame is fully transparent.
+        Saved as an RGBA-source GIF so transparency is real per-pixel alpha
+        (``_frame_has_transparency`` detects it). The transparent area
+        dominates so that, on the white composite, the agreeing white field
+        keeps global metrics high while the small dark patch perturbation is
+        swamped.
+        """
+        frames = []
+        lo, hi = block
+        for _ in range(n_frames):
+            frame = Image.new("RGBA", size, (0, 0, 0, 0))  # transparent field
+            # Central opaque content block (the near-black "detail").
+            for y in range(lo, hi):
+                for x in range(lo, hi):
+                    frame.putpixel((x, y), (*content_rgb, 255))
+            frames.append(frame)
+
+        frames[0].save(
+            path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=100,
+            loop=0,
+            disposal=2,
+        )
+        return path
+
+    def test_dual_composite_reveals_dark_region_difference(self, tmp_path):
+        """HARD GATE: near-black content perturbation tanks the BLACK composite.
+
+        Original near-black detail (~(8, 8, 8)) in a small patch on a
+        mostly-transparent field; compressed perturbs the patch brightness.
+        On the WHITE composite the dominant agreeing white field keeps the
+        composite high (~0.90, hugging the ceiling). On the BLACK composite the
+        near-black content merges toward the background, so the structural /
+        edge / ssimulacra2 metrics collapse and the worst-of merged composite
+        drops materially (~0.77).
+
+        This MUST fail on ``main`` (white-only ~0.90 >= 0.85) and pass after
+        the dual path (merged ~0.77 < 0.85): the bias against dark content is
+        exactly what we're eliminating. Threshold 0.85 sits cleanly between the
+        white-only and merged composites measured on this fixture.
+        """
+        original = self._make_dark_on_transparent_gif(
+            tmp_path / "orig.gif", content_rgb=(8, 8, 8)
+        )
+        # Perturb the dark content. Against the dominant white field this is a
+        # small global change; against black it is a large structural change.
+        compressed = self._make_dark_on_transparent_gif(
+            tmp_path / "comp.gif", content_rgb=(70, 70, 70)
+        )
+
+        metrics = calculate_comprehensive_metrics(original, compressed)
+
+        # The dual (worst-of) composite must register the dark-region
+        # difference rather than hugging the white-composited ceiling.
+        assert metrics["composite_quality"] < 0.85, metrics
+
+    def test_opaque_gif_single_pass_no_black_composite(self, tmp_path, monkeypatch):
+        """Opaque GIF: exactly ONE extraction per file, no (0,0,0) second pass.
+
+        Zero-cost guarantee — ``has_alpha is False`` short-circuits before any
+        black extraction. We spy on ``extract_gif_frames`` and assert no call
+        ever requests ``alpha_background=(0, 0, 0)``.
+        """
+        import giflab.metrics as metrics_mod
+
+        # Fully-opaque animated GIF (RGB source, no transparency).
+        gif = tmp_path / "opaque.gif"
+        frames = [Image.new("RGB", (48, 48), (i * 40, 100, 200)) for i in range(3)]
+        frames[0].save(
+            gif, save_all=True, append_images=frames[1:], duration=100, loop=0
+        )
+
+        backgrounds_seen = []
+        real_extract = metrics_mod.extract_gif_frames
+
+        def _spy(path, max_frames=None, alpha_background=None):
+            backgrounds_seen.append(alpha_background)
+            return real_extract(path, max_frames, alpha_background)
+
+        monkeypatch.setattr(metrics_mod, "extract_gif_frames", _spy)
+
+        result = metrics_mod.calculate_comprehensive_metrics(gif, gif)
+
+        # No black pass requested.
+        assert (0, 0, 0) not in backgrounds_seen, backgrounds_seen
+        # Exactly two extractions (original + compressed), both white/default.
+        assert len(backgrounds_seen) == 2, backgrounds_seen
+        # Identity opaque pair still hits ceiling.
+        assert result["composite_quality"] == pytest.approx(1.0, abs=1e-6), result
+        # has_alpha must be False on the extraction result.
+        assert real_extract(gif).has_alpha is False
+
+    def test_transparent_render_ms_reflects_dual_pass(self, tmp_path):
+        """File-level render_ms covers BOTH passes (>= the larger inner pass)."""
+        original = self._make_dark_on_transparent_gif(
+            tmp_path / "orig.gif", content_rgb=(8, 8, 8)
+        )
+        compressed = self._make_dark_on_transparent_gif(
+            tmp_path / "comp.gif", content_rgb=(40, 40, 40)
+        )
+
+        metrics = calculate_comprehensive_metrics(original, compressed)
+
+        # render_ms is a non-negative int in the dict (true wall-clock total).
+        assert "render_ms" in metrics
+        assert isinstance(metrics["render_ms"], int)
+        assert metrics["render_ms"] >= 0
+
+    def test_merged_aggregation_stats_consistent(self, tmp_path):
+        """Every present stem satisfies X_min <= X_mean <= X_max after merge."""
+        original = self._make_dark_on_transparent_gif(
+            tmp_path / "orig.gif", content_rgb=(8, 8, 8)
+        )
+        compressed = self._make_dark_on_transparent_gif(
+            tmp_path / "comp.gif", content_rgb=(40, 40, 40)
+        )
+
+        metrics = calculate_comprehensive_metrics(original, compressed)
+
+        # psnr is a documented schema exception (pre-existing, not introduced
+        # by the merge): ``psnr_mean`` is RAW dB while its bare-key-derived
+        # siblings ``psnr_min``/``psnr_max``/``psnr_std`` are the NORMALISED
+        # [0, 1] PSNR. They live on different scales by design, so the
+        # min<=mean<=max invariant does not (and is not meant to) hold there.
+        scale_mismatch_stems = {"psnr"}
+
+        for key in list(metrics):
+            if not key.endswith("_mean"):
+                continue
+            stem = key[: -len("_mean")]
+            if stem in scale_mismatch_stems:
+                continue
+            mean_v = metrics[key]
+            min_v = metrics.get(f"{stem}_min")
+            max_v = metrics.get(f"{stem}_max")
+            if not isinstance(mean_v, (int, float)) or math.isnan(float(mean_v)):
+                continue
+            if isinstance(min_v, (int, float)) and not math.isnan(float(min_v)):
+                assert float(min_v) <= float(mean_v) + 1e-6, (key, min_v, mean_v)
+            if isinstance(max_v, (int, float)) and not math.isnan(float(max_v)):
+                assert float(mean_v) <= float(max_v) + 1e-6, (key, mean_v, max_v)
+
+    def test_warm_white_cache_still_triggers_black_pass(self, tmp_path, monkeypatch):
+        """R2 regression: a warm WHITE cache hit must NOT no-op the black pass.
+
+        Prime the white cache entry, then re-run the full metrics path on a
+        transparent GIF. has_alpha must survive the cache round-trip so the
+        black extraction (alpha_background=(0, 0, 0)) still runs.
+        """
+        import giflab.config as config_mod
+        import giflab.metrics as metrics_mod
+        from giflab.caching import frame_cache as fc_mod
+
+        # Enable caching with a temp disk path.
+        monkeypatch.setitem(config_mod.FRAME_CACHE, "enabled", True)
+        monkeypatch.setitem(
+            config_mod.FRAME_CACHE, "disk_path", tmp_path / "warm_cache.db"
+        )
+
+        # Enabling FRAME_CACHE triggers a dynamic import inside
+        # extract_gif_frames that mutates the metrics-module globals
+        # CACHING_ENABLED / get_frame_cache. Save and restore them so this
+        # test does not pollute test_caching_architecture's expectation that
+        # CACHING_ENABLED is False.
+        saved_caching_enabled = metrics_mod.CACHING_ENABLED
+        saved_get_frame_cache = metrics_mod.get_frame_cache
+        fc_mod.reset_frame_cache()
+
+        original = self._make_dark_on_transparent_gif(
+            tmp_path / "orig.gif", content_rgb=(8, 8, 8)
+        )
+        compressed = self._make_dark_on_transparent_gif(
+            tmp_path / "comp.gif", content_rgb=(40, 40, 40)
+        )
+
+        backgrounds_seen = []
+        real_extract = metrics_mod.extract_gif_frames
+
+        try:
+            # Prime the WHITE cache entry for both files via a white extraction.
+            white_o = real_extract(original, 30)
+            white_c = real_extract(compressed, 30)
+            assert white_o.has_alpha is True
+            assert white_c.has_alpha is True
+
+            def _spy(path, max_frames=None, alpha_background=None):
+                backgrounds_seen.append(alpha_background)
+                return real_extract(path, max_frames, alpha_background)
+
+            monkeypatch.setattr(metrics_mod, "extract_gif_frames", _spy)
+            metrics_mod.calculate_comprehensive_metrics(original, compressed)
+        finally:
+            fc_mod.reset_frame_cache()
+            metrics_mod.CACHING_ENABLED = saved_caching_enabled
+            metrics_mod.get_frame_cache = saved_get_frame_cache
+
+        # The black pass still ran despite the warm white cache.
+        assert (0, 0, 0) in backgrounds_seen, backgrounds_seen
+
+    def test_single_frame_alpha_dual_path(self, tmp_path):
+        """Single-frame alpha PNG + 1-frame transparent GIF identity -> ceiling.
+
+        Exercises the single-frame extraction branch under BOTH backgrounds.
+        """
+        png = tmp_path / "single.png"
+        img = Image.new("RGBA", (40, 40), (0, 0, 0, 0))
+        for y in range(10, 30):
+            for x in range(10, 30):
+                img.putpixel((x, y), (10, 10, 10, 255))
+        img.save(png)
+
+        # has_alpha detected on a single-frame alpha image.
+        assert extract_gif_frames(png).has_alpha is True
+
+        metrics = calculate_comprehensive_metrics(png, png)
+        # Identity pair must hit ceiling on both composites -> worst-of ceiling.
+        assert metrics["ssim"] == pytest.approx(1.0, abs=1e-6), metrics
+        assert metrics["composite_quality"] == pytest.approx(1.0, abs=1e-6), metrics
