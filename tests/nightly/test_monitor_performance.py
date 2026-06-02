@@ -9,7 +9,7 @@ import time
 import pytest
 
 sys.path.append("scripts")
-from monitor_test_performance import TestPerformanceMonitor
+from monitor_test_performance import DEFAULT_PYTEST_ARGS, TestPerformanceMonitor
 
 
 class TestMonitorPerformance:
@@ -216,3 +216,71 @@ class TestMonitorPerformance:
 
         assert monitor.config["thresholds"]["fast"] == 10
         assert monitor.config["alert_on_regression"] is True
+
+    @pytest.mark.fast
+    def test_hang_guard_timeout_exceeds_regression_threshold(self):
+        """The subprocess kill-timeout must be decoupled from the regression target.
+
+        Regression guard for the bug that turned the perf check red: the monitor
+        passed ``thresholds[tier]`` straight into ``subprocess.run(timeout=...)``,
+        so a fast suite that legitimately ran to ~its target was *killed* mid-run
+        with TimeoutExpired and reported as a failure — the kill-timeout WAS the
+        regression threshold. The hang guard exists only to reap a genuinely
+        deadlocked pytest, so it must sit comfortably above the regression band,
+        never coincide with it.
+        """
+        monitor = TestPerformanceMonitor()
+
+        for tier in ("fast", "integration", "full"):
+            hang_guard = monitor._hang_guard_timeout(tier)
+            regression = monitor._effective_threshold(tier)
+            assert hang_guard > regression, (
+                f"{tier}: hang-guard {hang_guard}s must exceed regression "
+                f"threshold {regression}s so a slow-but-healthy run is never killed"
+            )
+
+    @pytest.mark.fast
+    def test_hang_guard_timeout_respects_floor(self):
+        """A tiny configured threshold must not shrink the hang guard below the floor.
+
+        With a very small target (e.g. a 1s fast tier), ``effective × 3`` would be
+        only a few seconds — enough that a slow-but-healthy CI runner gets killed.
+        The floor guarantees a genuinely hung process is still reaped while a
+        healthy-but-slow run survives.
+        """
+        monitor = TestPerformanceMonitor()
+        monitor.config["thresholds"] = {"fast": 1}
+        monitor.config["regression_tolerance"] = 1.5
+
+        # effective = 1 × 1.5 = 1.5; × 3 = 4.5 → far below the floor
+        assert monitor._hang_guard_timeout("fast") >= 120
+
+    @pytest.mark.fast
+    def test_default_fast_args_scoped_to_smoke_functional(self):
+        """The fast tier must collect the SAME set as the canonical Fast Tests gate.
+
+        Regression guard for the mis-scoped tier: the monitor (and test-matrix
+        Lightning) ran ``-m fast tests/``, an explicit path that overrides the
+        pyproject ``testpaths`` and swept ~65 fast-marked integration/nightly
+        tests — including the flaky LPIPS-memory and overhead-ratio tests — into a
+        tier meant to mirror ``ci.yml``'s bare ``-m fast`` (smoke+functional only).
+        Lock the scope to smoke+functional and forbid a bare ``tests/`` token.
+        """
+        fast_args = DEFAULT_PYTEST_ARGS["fast"]
+
+        assert "tests/smoke" in fast_args
+        assert "tests/functional" in fast_args
+        # A bare ``tests/`` token re-introduces the integration/nightly sweep.
+        assert "tests/" not in fast_args
+
+    @pytest.mark.fast
+    def test_default_integration_args_scoped_to_test_ci_boundary(self):
+        """The integration tier must mirror ``make test-ci`` (no nightly sweep)."""
+        integration_args = DEFAULT_PYTEST_ARGS["integration"]
+
+        assert "tests/smoke" in integration_args
+        assert "tests/functional" in integration_args
+        assert "tests/integration" in integration_args
+        # Must not pull in nightly via a bare ``tests/`` token.
+        assert "tests/" not in integration_args
+        assert "tests/nightly" not in integration_args

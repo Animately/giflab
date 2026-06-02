@@ -14,6 +14,46 @@ import time
 from pathlib import Path
 from typing import Optional
 
+# Default pytest arguments for each tier.
+#
+# These are scoped to EXACTLY the testpaths each tier is meant to cover, never a
+# bare ``tests/``. A bare ``tests/`` overrides the pyproject ``testpaths`` and
+# sweeps fast-/not-slow-marked integration *and* nightly tests into the tier —
+# including the flaky LPIPS-memory and overhead-ratio benchmarks — which is what
+# turned the performance check red. The reference is ci.yml's canonical gates:
+#   * fast        → bare ``-m fast`` (pyproject testpaths = smoke + functional)
+#   * integration → ``make test-ci`` (smoke + functional + integration)
+# We name the paths explicitly here because the monitor runs pytest from a
+# subprocess that may not inherit the same testpaths defaulting.
+DEFAULT_PYTEST_ARGS = {
+    "fast": [
+        "-m",
+        "fast",
+        "tests/smoke",
+        "tests/functional",
+        "-n",
+        "auto",
+        "--tb=short",
+    ],
+    "integration": [
+        "-m",
+        "not slow",
+        "tests/smoke",
+        "tests/functional",
+        "tests/integration",
+        "-n",
+        "4",
+        "--tb=short",
+        "--durations=10",
+    ],
+    "full": ["tests/", "--tb=short", "--durations=20", "--maxfail=10"],
+}
+
+# Lower bound for the subprocess hang guard (seconds). Ensures a genuinely
+# deadlocked pytest is still reaped while a slow-but-healthy run on a small CI
+# runner is never killed, even when a tier's configured target is tiny.
+HANG_GUARD_FLOOR_SECONDS = 120
+
 
 class TestPerformanceMonitor:
     """Monitor and validate test performance against defined thresholds."""
@@ -71,14 +111,16 @@ class TestPerformanceMonitor:
         start_time = time.time()
 
         try:
-            # Run pytest with timing
+            # Run pytest with timing. The subprocess timeout is a *hang guard*
+            # (reaps a deadlocked pytest), deliberately decoupled from the
+            # regression threshold — see _hang_guard_timeout. Using the
+            # regression threshold here would kill a slow-but-healthy run and
+            # report it as a failure instead of a (recoverable) regression.
             result = subprocess.run(
                 ["poetry", "run", "pytest"] + pytest_args,
                 capture_output=True,
                 text=True,
-                timeout=self.config["thresholds"].get(
-                    test_tier, 3600
-                ),  # Default 1 hour timeout
+                timeout=self._hang_guard_timeout(test_tier),
             )
 
             end_time = time.time()
@@ -105,6 +147,30 @@ class TestPerformanceMonitor:
         target = self.config["thresholds"].get(test_tier, float("inf"))
         tolerance = self.config.get("regression_tolerance", 1.0)
         return target * tolerance
+
+    def _hang_guard_timeout(self, test_tier: str) -> float:
+        """Wall-clock ceiling for killing a *deadlocked* pytest subprocess.
+
+        This is intentionally NOT the regression threshold. The regression
+        threshold (``_effective_threshold``) decides whether a *completed* run
+        was too slow; this guard only exists to reap a pytest that has hung and
+        will never finish. Coupling the two — as the original code did by passing
+        ``thresholds[tier]`` straight into ``subprocess.run(timeout=...)`` — meant
+        a suite that ran right up to its target was killed mid-run with
+        TimeoutExpired and reported as a hard failure rather than a recoverable
+        regression. That is the bug that turned the performance check red.
+
+        We sit the guard at ``effective × 3`` (plenty of headroom for CI runners
+        with fewer ``-n auto`` workers than a dev box) but never below a fixed
+        floor, so a tier with a tiny configured target still tolerates a
+        slow-but-healthy run while a genuine deadlock is still reaped.
+        """
+        effective = self._effective_threshold(test_tier)
+        if effective == float("inf"):
+            # Unknown tier: no meaningful target. Fall back to a generous,
+            # finite hang guard rather than blocking forever.
+            return 3600.0
+        return max(effective * 3, float(HANG_GUARD_FLOOR_SECONDS))
 
     def check_performance(self, test_tier: str, duration: float) -> bool:
         """Check if performance meets threshold requirements.
@@ -279,22 +345,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Default pytest arguments for each tier
-    default_args = {
-        "fast": ["-m", "fast", "tests/", "-n", "auto", "--tb=short"],
-        "integration": [
-            "-m",
-            "not slow",
-            "tests/",
-            "-n",
-            "4",
-            "--tb=short",
-            "--durations=10",
-        ],
-        "full": ["tests/", "--tb=short", "--durations=20", "--maxfail=10"],
-    }
-
-    pytest_args = args.pytest_args or default_args.get(args.tier, [])
+    pytest_args = args.pytest_args or DEFAULT_PYTEST_ARGS.get(args.tier, [])
 
     # Set environment variables for test tier
     env_vars = {

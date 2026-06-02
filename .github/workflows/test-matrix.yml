@@ -51,7 +51,7 @@ jobs:
         export GIFLAB_ULTRA_FAST=1
         export GIFLAB_MAX_PIPES=3
         export GIFLAB_MOCK_ALL_ENGINES=1
-        poetry run pytest -m "fast" tests/ -n auto --tb=short --cov=src/giflab --cov-report=xml
+        poetry run pytest -m "fast" tests/smoke tests/functional -n auto --tb=short --cov=src/giflab --cov-report=xml
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -102,7 +102,7 @@ jobs:
     - name: Run Integration Tests
       run: |
         export GIFLAB_MAX_PIPES=10
-        poetry run pytest -m "not slow" tests/ -n 4 --tb=short --durations=10 --maxfail=5
+        poetry run pytest -m "not slow" tests/smoke tests/functional tests/integration -n 4 --tb=short --durations=10 --maxfail=5
 
   full-matrix-tests:
     name: Full Matrix Tests (🔍 <30min)

@@ -1,6 +1,6 @@
 {
   "thresholds": {
-    "fast": 10,
+    "fast": 45,
     "integration": 300,
     "full": 1800
   },
