@@ -1770,6 +1770,43 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         assert result["edge_similarity_min"] == pytest.approx(0.0, abs=1e-6)
         assert result["edge_similarity_max"] == pytest.approx(1.0, abs=1e-6)
 
+    def test_aggregate_metric_uses_median_for_texture_similarity(self):
+        """_aggregate_metric must use median (not mean) for ``texture_similarity``.
+
+        Same rationale as edge_similarity: LBP-histogram correlation is
+        heavy-tailed toward 1.0 on flat / near-flat frames (intensity-inversion
+        invariance), so a handful of 1.0 outliers drag the mean upward and make
+        the exported score non-monotonic under palette reduction. Median ignores
+        the outliers and reflects the typical frame quality.
+
+        FAILS before the fix (texture_similarity uses mean), PASSES after.
+        """
+        from giflab.metrics import _aggregate_metric
+
+        # Most frames near-zero; a couple return the LBP-identity outlier 1.0.
+        scores = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0]
+
+        result = _aggregate_metric(scores, "texture_similarity")
+
+        expected_median = float(np.median(scores))  # 0.0
+        expected_mean = float(np.mean(scores))  # 0.25
+
+        assert result["texture_similarity"] == pytest.approx(
+            expected_median, abs=1e-6
+        ), (
+            f"texture_similarity primary key should be median "
+            f"({expected_median:.4f}) but got {result['texture_similarity']:.4f} "
+            f"(mean would be {expected_mean:.4f})."
+        )
+        assert result["texture_similarity_min"] == pytest.approx(0.0, abs=1e-6)
+        assert result["texture_similarity_max"] == pytest.approx(1.0, abs=1e-6)
+
+    def test_texture_similarity_is_median_aggregated(self):
+        """texture_similarity must be a member of _MEDIAN_AGGREGATED_METRICS."""
+        from giflab.metrics import _MEDIAN_AGGREGATED_METRICS
+
+        assert "texture_similarity" in _MEDIAN_AGGREGATED_METRICS
+
     def test_aggregate_metric_preserves_mean_for_non_edge_metrics(self):
         """Changing edge_similarity to median must NOT affect other metric keys.
 
