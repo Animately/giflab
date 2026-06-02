@@ -451,9 +451,7 @@ class TestSsimulacra2NaNOnEdgeCases:
         validator = Ssimulacra2Validator()
         config = MetricsConfig()
         rng = np.random.default_rng(7)
-        frames = [
-            rng.integers(0, 255, (32, 32, 3), dtype=np.uint8) for _ in range(3)
-        ]
+        frames = [rng.integers(0, 255, (32, 32, 3), dtype=np.uint8) for _ in range(3)]
 
         with patch.object(validator, "normalize_score", side_effect=[0.75, 0.70]):
             result = validator.calculate_ssimulacra2_metrics(frames, frames, config)

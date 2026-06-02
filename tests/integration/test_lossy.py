@@ -50,13 +50,14 @@ class TestValidateLossyLevel:
 class TestCompressWithGifsicle:
     """Tests for compress_with_gifsicle function."""
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.get_gifsicle_version")
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
     def test_successful_compression_lossless(
-        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version
+        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version, _mock_exec
     ):
         """Test successful gifsicle compression with lossless setting."""
         # Mock time progression
@@ -108,13 +109,14 @@ class TestCompressWithGifsicle:
         assert result["original_frames"] == 10
         assert result["command"] == " ".join(expected_cmd)
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.get_gifsicle_version")
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
     def test_successful_compression_lossy(
-        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version
+        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version, _mock_exec
     ):
         """Test successful gifsicle compression with lossy setting."""
         mock_time.side_effect = [1000.0, 1001.0]  # 1000ms execution
@@ -160,6 +162,7 @@ class TestCompressWithGifsicle:
         assert result["frame_keep_ratio"] == 1.0
         assert result["original_frames"] == 20
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.get_gifsicle_version")
     @patch("giflab.lossy._select_optimal_disposal_method")
     @patch("giflab.lossy.build_gifsicle_frame_args")
@@ -176,6 +179,7 @@ class TestCompressWithGifsicle:
         mock_frame_args,
         mock_disposal,
         mock_version,
+        _mock_exec,
     ):
         """Test gifsicle compression with frame reduction."""
         mock_time.side_effect = [1000.0, 1000.8]  # 800ms execution
@@ -232,9 +236,10 @@ class TestCompressWithGifsicle:
         assert result["frame_keep_ratio"] == 0.8
         assert result["original_frames"] == 10
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
-    def test_subprocess_error(self, mock_run, mock_metadata):
+    def test_subprocess_error(self, mock_run, mock_metadata, _mock_exec):
         """Test handling of subprocess errors."""
         # Mock metadata extraction
         mock_meta = MagicMock()
@@ -249,9 +254,10 @@ class TestCompressWithGifsicle:
         with pytest.raises(RuntimeError, match="Gifsicle failed with exit code 1"):
             compress_with_gifsicle(Path("input.gif"), Path("output.gif"), 0, 1.0)
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
-    def test_timeout_error(self, mock_run, mock_metadata):
+    def test_timeout_error(self, mock_run, mock_metadata, _mock_exec):
         """Test handling of subprocess timeout."""
         # Mock metadata extraction
         mock_meta = MagicMock()
@@ -264,11 +270,14 @@ class TestCompressWithGifsicle:
         with pytest.raises(RuntimeError, match="Gifsicle timed out"):
             compress_with_gifsicle(Path("input.gif"), Path("output.gif"), 0, 1.0)
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
-    def test_missing_output_file(self, mock_time, mock_exists, mock_run, mock_metadata):
+    def test_missing_output_file(
+        self, mock_time, mock_exists, mock_run, mock_metadata, _mock_exec
+    ):
         """Test error when output file is not created."""
         mock_time.side_effect = [1000.0, 1000.1]
 
@@ -288,13 +297,14 @@ class TestCompressWithGifsicle:
 class TestCompressWithAnimately:
     """Tests for compress_with_animately function."""
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.get_animately_version")
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
     def test_successful_compression_lossless(
-        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version
+        self, mock_time, mock_exists, mock_run, mock_metadata, mock_version, _mock_exec
     ):
         """Test successful animately compression with lossless setting."""
         mock_time.side_effect = [1000.0, 1000.3]  # 300ms execution
@@ -344,12 +354,13 @@ class TestCompressWithAnimately:
         assert result["frame_keep_ratio"] == 1.0
         assert result["original_frames"] == 15
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
     def test_successful_compression_lossy(
-        self, mock_time, mock_exists, mock_run, mock_metadata
+        self, mock_time, mock_exists, mock_run, mock_metadata, _mock_exec
     ):
         """Test successful animately compression with lossy setting."""
         mock_time.side_effect = [1000.0, 1002.0]  # 2000ms execution
@@ -384,10 +395,11 @@ class TestCompressWithAnimately:
         with pytest.raises(RuntimeError, match="Animately launcher not found"):
             compress_with_animately(Path("input.gif"), Path("output.gif"), 0, 1.0)
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
-    def test_subprocess_error(self, mock_exists, mock_run, mock_metadata):
+    def test_subprocess_error(self, mock_exists, mock_run, mock_metadata, _mock_exec):
         """Test handling of subprocess errors."""
         mock_exists.return_value = True  # Launcher exists
 
@@ -489,6 +501,7 @@ class TestApplyCompressionWithAllParams:
 class TestColorIntegration:
     """Tests for color reduction integration in compression functions."""
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.get_gifsicle_version")
     @patch("giflab.lossy.build_gifsicle_color_args")
     @patch("giflab.lossy.extract_gif_metadata")
@@ -503,6 +516,7 @@ class TestColorIntegration:
         mock_metadata,
         mock_color_args,
         mock_version,
+        _mock_exec,
     ):
         """Test gifsicle compression with color reduction."""
         mock_time.side_effect = [1000.0, 1000.5]  # 500ms execution
@@ -554,13 +568,20 @@ class TestColorIntegration:
         assert result["color_keep_count"] == 64
         assert result["original_colors"] == 256
 
+    @patch("giflab.lossy._is_executable", return_value=True)
     @patch("giflab.lossy.build_animately_color_args")
     @patch("giflab.lossy.extract_gif_metadata")
     @patch("subprocess.run")
     @patch("pathlib.Path.exists")
     @patch("time.time")
     def test_animately_with_color_reduction(
-        self, mock_time, mock_exists, mock_run, mock_metadata, mock_color_args
+        self,
+        mock_time,
+        mock_exists,
+        mock_run,
+        mock_metadata,
+        mock_color_args,
+        _mock_exec,
     ):
         """Test animately compression with color reduction."""
         mock_time.side_effect = [1000.0, 1001.0]  # 1000ms execution

@@ -385,9 +385,7 @@ class GifLabStorage:
             # Populate param presets
             self._populate_param_presets(conn)
 
-    def _migrate_transparency_ratio_nullable(
-        self, conn: sqlite3.Connection
-    ) -> None:
+    def _migrate_transparency_ratio_nullable(self, conn: sqlite3.Connection) -> None:
         """Drop the NOT NULL constraint on gif_features.transparency_ratio.
 
         PR #19 review: the Pydantic field changed to ``float | None`` so the
@@ -412,9 +410,7 @@ class GifLabStorage:
         if transparency_col["notnull"] == 0:
             return  # already nullable, nothing to migrate
 
-        self.logger.info(
-            "Migrating gif_features.transparency_ratio: dropping NOT NULL"
-        )
+        self.logger.info("Migrating gif_features.transparency_ratio: dropping NOT NULL")
         # Rebuild table preserving all data. The new column list matches the
         # CREATE TABLE above EXCEPT for `transparency_ratio REAL` (no NOT NULL).
         conn.executescript(

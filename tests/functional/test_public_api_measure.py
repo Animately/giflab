@@ -11,7 +11,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from giflab import (
     SUPPORTED_METRICS,
     MeasureResult,
@@ -265,9 +264,9 @@ def test_measure_disables_temporal_artifacts_for_every_public_metric(
     _, kwargs = mock_calc.call_args
     config = kwargs.get("config")
     assert config is not None
-    assert config.ENABLE_TEMPORAL_ARTIFACTS is False, (
-        f"Requesting {metric!r} unexpectedly enabled temporal_artifacts"
-    )
+    assert (
+        config.ENABLE_TEMPORAL_ARTIFACTS is False
+    ), f"Requesting {metric!r} unexpectedly enabled temporal_artifacts"
 
 
 def test_measure_lpips_reads_quality_mean_key(two_gifs: tuple[Path, Path]) -> None:

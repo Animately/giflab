@@ -2090,7 +2090,6 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         aggregation therefore can't discriminate between light and heavy
         quantization on sparse-edge content.
         """
-        rng = np.random.default_rng(seed=42)
         frame = self._make_smooth_gradient_frame()
 
         # Collect per-frame edge_similarity scores for two levels of quantization.
@@ -2334,7 +2333,7 @@ class TestExtractGifFramesAlphaCompositing:
         frames_b = extract_gif_frames(gif_b).frames
 
         assert len(frames_a) == len(frames_b)
-        for fa, fb in zip(frames_a, frames_b):
+        for fa, fb in zip(frames_a, frames_b, strict=False):
             # Frames must be byte-identical: same content, transparent
             # region composited onto the same background colour.
             assert np.array_equal(fa, fb), (
@@ -2556,11 +2555,11 @@ class TestExtractGifFramesAlphaCompositing:
             mean_v = metrics[key]
             min_v = metrics.get(f"{stem}_min")
             max_v = metrics.get(f"{stem}_max")
-            if not isinstance(mean_v, (int, float)) or math.isnan(float(mean_v)):
+            if not isinstance(mean_v, int | float) or math.isnan(float(mean_v)):
                 continue
-            if isinstance(min_v, (int, float)) and not math.isnan(float(min_v)):
+            if isinstance(min_v, int | float) and not math.isnan(float(min_v)):
                 assert float(min_v) <= float(mean_v) + 1e-6, (key, min_v, mean_v)
-            if isinstance(max_v, (int, float)) and not math.isnan(float(max_v)):
+            if isinstance(max_v, int | float) and not math.isnan(float(max_v)):
                 assert float(mean_v) <= float(max_v) + 1e-6, (key, mean_v, max_v)
 
     def test_warm_white_cache_still_triggers_black_pass(self, tmp_path, monkeypatch):

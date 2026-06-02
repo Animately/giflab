@@ -41,7 +41,6 @@ import numpy as np
 import pytest
 from giflab.optimized_metrics import calculate_optimized_comprehensive_metrics
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -144,9 +143,9 @@ class TestPhase6SchemaContract:
         comp = _gradient_frames(4)
         result = self._run(orig, comp)
         missing = PHASE6_REQUIRED_KEYS - result.keys()
-        assert not missing, (
-            f"Phase 6 result is missing required keys: {sorted(missing)}"
-        )
+        assert (
+            not missing
+        ), f"Phase 6 result is missing required keys: {sorted(missing)}"
 
     def test_optimization_flag_is_true(self):
         """The _optimization_applied sentinel must be True."""

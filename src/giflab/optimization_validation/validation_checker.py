@@ -25,6 +25,7 @@ def _is_missing(v: object) -> bool:
     """
     return v is None or (isinstance(v, float) and math.isnan(v))
 
+
 from ..meta import GifMetadata
 from .config import load_validation_config
 from .data_structures import (
@@ -515,7 +516,10 @@ class ValidationChecker:
         if (
             disposal_pre < artifact_threshold
             or disposal_post < artifact_threshold
-            or (not _is_missing(disposal_delta) and abs(disposal_delta) > delta_threshold)
+            or (
+                not _is_missing(disposal_delta)
+                and abs(disposal_delta) > delta_threshold
+            )
         ):
             result.issues.append(
                 ValidationIssue(
@@ -708,7 +712,13 @@ class ValidationChecker:
         lpips_t_mean = compression_metrics.get("lpips_t_mean_compressed")
 
         if all(
-            _is_missing(v) for v in (flicker_excess, flat_flicker_ratio, temporal_pumping, lpips_t_mean)
+            _is_missing(v)
+            for v in (
+                flicker_excess,
+                flat_flicker_ratio,
+                temporal_pumping,
+                lpips_t_mean,
+            )
         ):
             result.warnings.append(
                 ValidationWarning(
@@ -795,14 +805,16 @@ class ValidationChecker:
         )
 
         all_lpips_missing = all(
-            _is_missing(v) for v in (lpips_quality_mean, lpips_quality_p95, lpips_quality_max)
+            _is_missing(v)
+            for v in (lpips_quality_mean, lpips_quality_p95, lpips_quality_max)
         )
         if all_lpips_missing or not deep_perceptual_used:
             if not deep_perceptual_used:
                 # Deep perceptual not attempted — only warn for borderline quality.
                 composite_quality = compression_metrics.get("composite_quality")
                 if (
-                    not _is_missing(composite_quality) and 0.3 <= composite_quality <= 0.7
+                    not _is_missing(composite_quality)
+                    and 0.3 <= composite_quality <= 0.7
                 ):  # Borderline quality
                     result.warnings.append(
                         ValidationWarning(

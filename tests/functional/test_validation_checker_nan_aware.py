@@ -20,9 +20,8 @@ from unittest.mock import patch
 
 import pytest
 from giflab.meta import GifMetadata
-from giflab.optimization_validation.validation_checker import ValidationChecker
 from giflab.optimization_validation.data_structures import ValidationStatus
-
+from giflab.optimization_validation.validation_checker import ValidationChecker
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -71,22 +70,32 @@ def _base_metrics() -> dict:
 # _is_missing helper (tested directly once implemented)
 # ---------------------------------------------------------------------------
 
+
 class TestIsMissingHelper:
     """The fix must expose (or inline) a consistent _is_missing predicate."""
 
     def test_none_is_missing(self):
         """None values must be considered missing."""
-        from giflab.optimization_validation.validation_checker import _is_missing  # noqa: F401
+        from giflab.optimization_validation.validation_checker import (
+            _is_missing,  # noqa: F401
+        )
+
         assert _is_missing(None) is True
 
     def test_nan_is_missing(self):
         """NaN float values must be considered missing."""
-        from giflab.optimization_validation.validation_checker import _is_missing  # noqa: F401
+        from giflab.optimization_validation.validation_checker import (
+            _is_missing,  # noqa: F401
+        )
+
         assert _is_missing(float("nan")) is True
 
     def test_valid_float_is_not_missing(self):
         """Real floats (including 0.0 and negative) must NOT be missing."""
-        from giflab.optimization_validation.validation_checker import _is_missing  # noqa: F401
+        from giflab.optimization_validation.validation_checker import (
+            _is_missing,  # noqa: F401
+        )
+
         assert _is_missing(0.0) is False
         assert _is_missing(0.5) is False
         assert _is_missing(-1.0) is False
@@ -94,13 +103,17 @@ class TestIsMissingHelper:
 
     def test_zero_float_is_not_missing(self):
         """0.0 is a valid measurement — must not be treated as missing."""
-        from giflab.optimization_validation.validation_checker import _is_missing  # noqa: F401
+        from giflab.optimization_validation.validation_checker import (
+            _is_missing,  # noqa: F401
+        )
+
         assert _is_missing(0.0) is False
 
 
 # ---------------------------------------------------------------------------
 # Core bug: SSIMULACRA2 all-NaN silent PASS
 # ---------------------------------------------------------------------------
+
 
 class TestSsimulacra2AllNanSilentPass:
     """
@@ -186,9 +199,9 @@ class TestSsimulacra2AllNanSilentPass:
         all_categories = [w.category for w in result.warnings] + [
             i.category for i in result.issues
         ]
-        assert "ssimulacra2_unavailable" in all_categories, (
-            f"Expected ssimulacra2_unavailable; got status={result.status}"
-        )
+        assert (
+            "ssimulacra2_unavailable" in all_categories
+        ), f"Expected ssimulacra2_unavailable; got status={result.status}"
 
     def test_mixed_nan_none_with_triggered_one_is_not_silent_pass(self):
         """Mixed NaN/None in scores is also all-missing and must not silent PASS."""
@@ -218,10 +231,12 @@ class TestSsimulacra2AllNanSilentPass:
             }
         )
         # Good scores → no ssimulacra2 issues
-        ssim2_categories = [i.category for i in result.issues if "ssimulacra2" in i.category]
-        assert ssim2_categories == [], (
-            f"Unexpected SSIMULACRA2 issues for valid scores: {ssim2_categories}"
-        )
+        ssim2_categories = [
+            i.category for i in result.issues if "ssimulacra2" in i.category
+        ]
+        assert (
+            ssim2_categories == []
+        ), f"Unexpected SSIMULACRA2 issues for valid scores: {ssim2_categories}"
 
     def test_partial_nan_still_flags_available_bad_scores(self):
         """
@@ -230,22 +245,23 @@ class TestSsimulacra2AllNanSilentPass:
         """
         result = self._run(
             {
-                "ssimulacra2_mean": 0.1,   # valid and poor → should flag
-                "ssimulacra2_p95": NAN,    # missing
-                "ssimulacra2_min": NAN,    # missing
+                "ssimulacra2_mean": 0.1,  # valid and poor → should flag
+                "ssimulacra2_p95": NAN,  # missing
+                "ssimulacra2_min": NAN,  # missing
                 "ssimulacra2_triggered": 1.0,
                 "composite_quality": 0.75,
             }
         )
         issue_categories = [i.category for i in result.issues]
-        assert "ssimulacra2_poor_quality" in issue_categories, (
-            f"Expected ssimulacra2_poor_quality issue; got issues={issue_categories}"
-        )
+        assert (
+            "ssimulacra2_poor_quality" in issue_categories
+        ), f"Expected ssimulacra2_poor_quality issue; got issues={issue_categories}"
 
 
 # ---------------------------------------------------------------------------
 # Deep-perceptual guard: same any([...]) pattern
 # ---------------------------------------------------------------------------
+
 
 class TestDeepPerceptualAllNanSilentPass:
     """
@@ -278,7 +294,7 @@ class TestDeepPerceptualAllNanSilentPass:
                 "lpips_quality_mean": NAN,
                 "lpips_quality_p95": NAN,
                 "lpips_quality_max": NAN,
-                "deep_perceptual_device": "cpu",   # not 'fallback' → used=True
+                "deep_perceptual_device": "cpu",  # not 'fallback' → used=True
                 "composite_quality": 0.75,
             }
         )
@@ -286,7 +302,9 @@ class TestDeepPerceptualAllNanSilentPass:
         all_categories = [w.category for w in result.warnings] + [
             i.category for i in result.issues
         ]
-        perceptual_categories = [c for c in all_categories if "perceptual" in c or "lpips" in c]
+        perceptual_categories = [
+            c for c in all_categories if "perceptual" in c or "lpips" in c
+        ]
         assert perceptual_categories, (
             f"Expected a perceptual/lpips warning when all scores NaN + device='cpu'; "
             f"got status={result.status}, warnings={[w.category for w in result.warnings]}, "
@@ -297,7 +315,7 @@ class TestDeepPerceptualAllNanSilentPass:
         """Positive control: valid high LPIPS mean must still flag the issue."""
         result = self._run(
             {
-                "lpips_quality_mean": 0.45,   # above lpips_quality_threshold (0.3)
+                "lpips_quality_mean": 0.45,  # above lpips_quality_threshold (0.3)
                 "lpips_quality_p95": 0.4,
                 "lpips_quality_max": 0.5,
                 "deep_perceptual_device": "cpu",
@@ -305,14 +323,15 @@ class TestDeepPerceptualAllNanSilentPass:
             }
         )
         issue_categories = [i.category for i in result.issues]
-        assert "perceptual_quality_degradation" in issue_categories, (
-            f"Expected perceptual_quality_degradation; got {issue_categories}"
-        )
+        assert (
+            "perceptual_quality_degradation" in issue_categories
+        ), f"Expected perceptual_quality_degradation; got {issue_categories}"
 
 
 # ---------------------------------------------------------------------------
 # Temporal-artifact guard: same any([...]) NaN-truthy bug
 # ---------------------------------------------------------------------------
+
 
 class TestTemporalArtifactAllNanSilentPass:
     """
@@ -378,9 +397,9 @@ class TestTemporalArtifactAllNanSilentPass:
             }
         )
         issue_categories = [i.category for i in result.issues]
-        assert "flicker_excess" in issue_categories, (
-            f"Expected flicker_excess issue; got {issue_categories}"
-        )
+        assert (
+            "flicker_excess" in issue_categories
+        ), f"Expected flicker_excess issue; got {issue_categories}"
 
 
 # ---------------------------------------------------------------------------

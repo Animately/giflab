@@ -424,7 +424,10 @@ class TestSingleStreamMetricAliases:
             ("flat_flicker_ratio", "flat_flicker_ratio_compressed"),
             ("flat_region_count", "flat_region_count_compressed"),
             ("temporal_pumping_score", "temporal_pumping_score_compressed"),
-            ("quality_oscillation_frequency", "quality_oscillation_frequency_compressed"),
+            (
+                "quality_oscillation_frequency",
+                "quality_oscillation_frequency_compressed",
+            ),
             ("lpips_t_mean", "lpips_t_mean_compressed"),
             ("lpips_t_p95", "lpips_t_p95_compressed"),
         ]:
