@@ -243,17 +243,23 @@ class TestTimingGridValidator:
 
     @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
     def test_extract_frame_durations_duration_validation(self, mock_image_open):
-        """Test frame duration validation and capping."""
+        """Test frame duration validation and capping.
+
+        An explicit per-frame delay of 0 is *authored intent* ("render as fast
+        as possible") and must be preserved as 0, not fabricated up to 100ms.
+        Only the absurd upper bound (>10s) is capped; negative values — which
+        are nonsensical, not authored — are clamped to 0.
+        """
         validator = TimingGridValidator()
 
         # Mock GIF with extreme durations
         mock_img = Mock()
         mock_img.__enter__ = Mock(return_value=mock_img)
         mock_img.__exit__ = Mock(return_value=None)
-        mock_img.n_frames = 3
+        mock_img.n_frames = 4
 
-        # Mock extreme durations
-        extreme_durations = [0, 15000, 50]  # Too small, too large, normal
+        # Mock extreme durations: explicit zero, huge, normal, negative
+        extreme_durations = [0, 15000, 50, -5]
         call_count = 0
 
         def get_duration(key, default):
@@ -272,8 +278,8 @@ class TestTimingGridValidator:
         path = Path("/fake/extreme.gif")
         durations = validator.extract_frame_durations(path)
 
-        # Should be: [100, 10000, 50] (capped and defaulted)
-        assert durations == [100, 10000, 50]
+        # Explicit 0 preserved, 15000 capped to 10000, 50 unchanged, -5 clamped to 0
+        assert durations == [0, 10000, 50, 0]
 
     @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
     def test_extract_frame_durations_file_error(self, mock_image_open):
@@ -462,3 +468,106 @@ class TestHelperFunctions:
         }
 
         assert csv_metrics == expected
+
+
+class TestZeroDelayGifs:
+    """Regression tests for zero-delay ("render as fast as possible") GIFs.
+
+    Some GIFs are authored with every per-frame delay set to 0ms. Previously
+    the validator substituted a synthetic 100ms per frame whenever a delay was
+    ``< 1``, which fabricated a non-zero total duration. When the original and
+    compressed copies had different frame counts (common after lossy
+    compression drops near-duplicate frames), the fabricated totals differed
+    and produced a phantom ``duration_diff_ms`` that had nothing to do with
+    real timing loss. See
+    ``[[giflab-timing-validation-zero-delay-fallback]]``.
+    """
+
+    @staticmethod
+    def _mock_zero_delay_gif(mock_image_open, n_frames: int):
+        """Configure ``Image.open`` to return an n-frame GIF, every delay 0ms."""
+        mock_img = Mock()
+        mock_img.__enter__ = Mock(return_value=mock_img)
+        mock_img.__exit__ = Mock(return_value=None)
+        mock_img.n_frames = n_frames
+
+        def get_duration(key, default):
+            # Real-world zero-delay GIFs return an explicit 0 here, NOT a
+            # missing key (PIL's info.get default only fires when the key is
+            # absent). Mirror that: explicit 0 must survive extraction.
+            return 0 if key == "duration" else default
+
+        mock_info = Mock()
+        mock_info.get = get_duration
+        mock_img.info = mock_info
+        mock_image_open.return_value = mock_img
+        return mock_img
+
+    @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
+    def test_zero_delay_durations_preserved_not_fabricated(self, mock_image_open):
+        """A multi-frame 0-delay GIF yields all-zero durations, not [100, ...]."""
+        validator = TimingGridValidator()
+        self._mock_zero_delay_gif(mock_image_open, n_frames=5)
+
+        durations = validator.extract_frame_durations(Path("/fake/zero.gif"))
+
+        assert durations == [0, 0, 0, 0, 0]
+        assert sum(durations) == 0  # real total duration is genuinely 0ms
+
+    @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
+    def test_zero_delay_mismatched_frame_counts_no_phantom_diff(
+        self, mock_image_open
+    ):
+        """The worked example: 55-frame source vs 43-frame compressed, all 0ms.
+
+        Real timing: 0ms == 0ms == preserved. The reported duration_diff_ms
+        must be 0, not the old artefact of (55 - 43) * 100 == 1200ms.
+        """
+        validator = TimingGridValidator()
+
+        # First extract() -> 55-frame original, second -> 43-frame compressed.
+        original = self._mock_zero_delay_gif(mock_image_open, n_frames=55)
+        # Build two distinct mock images so side_effect returns the right one.
+        mock_original = Mock()
+        mock_original.__enter__ = Mock(return_value=mock_original)
+        mock_original.__exit__ = Mock(return_value=None)
+        mock_original.n_frames = 55
+        mock_original.info = original.info
+
+        mock_compressed = Mock()
+        mock_compressed.__enter__ = Mock(return_value=mock_compressed)
+        mock_compressed.__exit__ = Mock(return_value=None)
+        mock_compressed.n_frames = 43
+        mock_compressed.info = original.info
+
+        mock_image_open.side_effect = [mock_original, mock_compressed]
+
+        result = validator.validate_timing_integrity(
+            Path("/fake/original.gif"), Path("/fake/compressed.gif")
+        )
+
+        assert result.actual["total_duration_diff_ms"] == 0
+        assert result.actual["max_timing_drift_ms"] == 0
+        # Both streams genuinely preserved -> alignment is perfect.
+        assert result.actual["alignment_accuracy"] == 1.0
+
+        csv_metrics = extract_timing_metrics_for_csv(result)
+        assert csv_metrics["duration_diff_ms"] == 0
+
+    @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
+    def test_single_frame_zero_delay_does_not_crash(self, mock_image_open):
+        """Single-frame edge case still returns the [100] sentinel and is safe.
+
+        A single static frame has no inter-frame timing, so the existing
+        single-frame default (100ms) is retained — the regression must not
+        change that path.
+        """
+        validator = TimingGridValidator()
+        mock_img = Mock()
+        mock_img.__enter__ = Mock(return_value=mock_img)
+        mock_img.__exit__ = Mock(return_value=None)
+        mock_img.n_frames = 1
+        mock_image_open.return_value = mock_img
+
+        durations = validator.extract_frame_durations(Path("/fake/single.gif"))
+        assert durations == [100]

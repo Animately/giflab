@@ -455,12 +455,15 @@ class DeepPerceptualValidator:
             )
 
             if not lpips_scores:
-                # Fallback case
+                # Fallback case: no scores could be computed. NaN ("not
+                # measured"), not a 0.5 midpoint sentinel — a fabricated score
+                # silently inflates composite_quality (1.0 - 0.5 = 0.5 of full
+                # LPIPS weight) and corpus aggregates.
                 logger.warning("No LPIPS scores obtained, using fallback values")
                 return DeepPerceptualMetrics(
-                    lpips_quality_mean=0.5,  # Neutral score
-                    lpips_quality_p95=0.5,
-                    lpips_quality_max=0.5,
+                    lpips_quality_mean=float("nan"),
+                    lpips_quality_p95=float("nan"),
+                    lpips_quality_max=float("nan"),
                     frame_count=len(original_frames),
                     downscaled=will_downscale,
                     device_used="fallback",
@@ -482,11 +485,12 @@ class DeepPerceptualValidator:
 
         except Exception as e:
             logger.error(f"Error calculating deep perceptual metrics: {e}")
-            # Return fallback metrics
+            # Return fallback metrics with NaN score keys ("not measured"),
+            # not a 0.5 midpoint sentinel. See the no-scores branch above.
             return DeepPerceptualMetrics(
-                lpips_quality_mean=0.5,
-                lpips_quality_p95=0.5,
-                lpips_quality_max=0.5,
+                lpips_quality_mean=float("nan"),
+                lpips_quality_p95=float("nan"),
+                lpips_quality_max=float("nan"),
                 frame_count=len(original_frames),
                 downscaled=will_downscale,
                 device_used="fallback" if self.force_fallback else self.device,
@@ -515,7 +519,15 @@ class DeepPerceptualValidator:
         )
 
         # Quality is acceptable if mean LPIPS is below threshold
-        # (lower LPIPS = more similar = better quality)
+        # (lower LPIPS = more similar = better quality).
+        #
+        # NaN handling: when LPIPS couldn't be measured, lpips_quality_mean is
+        # NaN. ``nan <= threshold`` is False in Python, so quality_acceptable
+        # is False — i.e. an unmeasurable LPIPS is treated as "not acceptable"
+        # (cannot confirm acceptable), which is the conservative, honest
+        # outcome. This coincidentally matches the previous 0.5-sentinel
+        # behaviour (0.5 > 0.3 threshold -> also False) but now reflects
+        # "unassessable" rather than a fabricated mid-quality score.
         quality_acceptable = metrics.lpips_quality_mean <= quality_threshold
 
         return PerceptualValidationResult(
@@ -655,10 +667,12 @@ def calculate_deep_perceptual_quality_metrics(
 
     except Exception as e:
         logger.error(f"Deep perceptual metrics calculation failed: {e}")
+        # Score keys NaN ("not measured"), not a 0.5 midpoint sentinel; the
+        # midpoint silently inflated composite_quality and corpus aggregates.
         return {
-            "lpips_quality_mean": 0.5,
-            "lpips_quality_p95": 0.5,
-            "lpips_quality_max": 0.5,
+            "lpips_quality_mean": float("nan"),
+            "lpips_quality_p95": float("nan"),
+            "lpips_quality_max": float("nan"),
             "deep_perceptual_frame_count": float(len(original_frames)),
             "deep_perceptual_downscaled": 0.0,
             "deep_perceptual_device": "fallback",

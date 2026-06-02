@@ -658,9 +658,12 @@ def calculate_ms_ssim(
             scale_ssim = ssim(current_frame1, current_frame2, data_range=255.0)
             ssim_values.append(scale_ssim)
         except (ValueError, RuntimeError) as e:
-            # If SSIM calculation fails due to invalid data or computation error, use a default value
+            # If SSIM at this scale can't be computed, record NaN (not 0.0).
+            # np.average below is NaN-aware so a single failed scale doesn't
+            # drag the whole MS-SSIM toward zero; a 0.0 here would be a
+            # fabricated "perfectly dissimilar" scale weight.
             logger.warning(f"SSIM calculation failed at scale {scale}: {e}")
-            ssim_values.append(0.0)
+            ssim_values.append(float("nan"))
 
         # Downsample for next scale (if not the last scale)
         if scale < max_possible_scales - 1:
@@ -690,21 +693,34 @@ def calculate_ms_ssim(
             ):
                 break
 
-    # Weighted average of SSIM values across scales
+    # Weighted average of SSIM values across scales.
+    #
+    # NaN-aware: a scale whose SSIM couldn't be computed is NaN; drop those
+    # scales (and their weights) before averaging rather than letting NaN
+    # propagate through the whole MS-SSIM. If *every* scale is NaN, the
+    # metric genuinely couldn't be computed -> NaN, not 0.0.
     if ssim_values:
+        scores = np.array(ssim_values, dtype=float)
         weight_list = [0.4, 0.25, 0.15, 0.1, 0.1][: len(ssim_values)]
         weights = np.array(weight_list)
+
+        valid = ~np.isnan(scores)
+        if not bool(np.any(valid)):
+            return float("nan")
+        scores = scores[valid]
+        weights = weights[valid]
 
         # Protect against division by zero in weight normalization
         weights_sum = np.sum(weights)
         if weights_sum > 0:
             weights = weights / weights_sum  # Normalize weights
-            return float(np.average(ssim_values, weights=weights))
+            return float(np.average(scores, weights=weights))
         else:
             # If all weights are zero, use uniform weighting
-            return float(np.mean(ssim_values))
+            return float(np.mean(scores))
     else:
-        return 0.0
+        # No scales computed at all — not measured.
+        return float("nan")
 
 
 def calculate_temporal_consistency(frames: list[np.ndarray]) -> float:
@@ -1876,6 +1892,45 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
 _MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(["edge_similarity"])
 
 
+def _nan_fallback_dict(keys: list[str]) -> dict[str, float]:
+    """Build a "no measurement" fallback dict mapping every key to NaN.
+
+    Single source of truth for the sentinel-free error paths. Per
+    CLAUDE.md "NaN over fabricated values", a metric that genuinely could
+    not be computed must report ``float("nan")`` so downstream aggregators
+    (``np.nanmean`` / composite_quality / validators) skip it honestly
+    rather than mistaking a fabricated 0.5 / 50.0 for a real score.
+    """
+    return {key: float("nan") for key in keys}
+
+
+# Canonical 5-key SSIMULACRA2 error/disabled-path result. Score keys are NaN
+# ("not computed" on the normalised [0, 1] scale); ``_frame_count`` and
+# ``_triggered`` are real bookkeeping values, not scores, so they stay 0.0.
+# Mirrors Ssimulacra2Validator._nan_result() — both must emit the same shape.
+def _default_ssimulacra2_fallback() -> dict[str, float]:
+    """Return a fresh copy of the canonical SSIMULACRA2 fallback dict.
+
+    Returns a new dict each call so callers can safely mutate / cast in place.
+    """
+    fallback = _nan_fallback_dict(
+        ["ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min"]
+    )
+    fallback["ssimulacra2_frame_count"] = 0.0
+    fallback["ssimulacra2_triggered"] = 0.0
+    return fallback
+
+
+# Canonical LPIPS fallback dict (score keys NaN; count/downscaled/device are
+# bookkeeping). ``deep_perceptual_frame_count`` and ``deep_perceptual_device``
+# are filled in by the caller because they depend on the actual frame list.
+def _default_lpips_score_keys() -> dict[str, float]:
+    """Return the three LPIPS score keys set to NaN ("not measured")."""
+    return _nan_fallback_dict(
+        ["lpips_quality_mean", "lpips_quality_p95", "lpips_quality_max"]
+    )
+
+
 def _aggregate_metric(
     values: list[float],
     metric_name: str,
@@ -1889,41 +1944,54 @@ def _aggregate_metric(
         primary_agg: Callable that reduces a 1-D np.ndarray to a scalar.
             When ``None`` (default), the function resolves the aggregation
             automatically: metrics listed in ``_MEDIAN_AGGREGATED_METRICS``
-            (currently just ``edge_similarity``) use ``np.median``; all
-            others use ``np.mean``.
+            (currently just ``edge_similarity``) use ``np.nanmedian``; all
+            others use ``np.nanmean``.
 
     Returns:
         Dictionary with primary (median or mean), std, min, max for the metric.
         The primary key equals ``metric_name``; sub-keys are always the
         full min/max/std regardless of the primary aggregation function.
+
+    NaN handling (audit-fix, NaN-over-sentinels): per-frame ``except`` blocks
+    now append ``float("nan")`` when a frame's metric can't be computed, so
+    ``values`` may contain NaN. Aggregation is NaN-aware (``np.nanmean`` etc.)
+    so surviving frames carry the score honestly instead of being dragged
+    toward a fabricated 0.0. When *every* frame is NaN (or the list is empty),
+    the primary/min/max keys are NaN — "not measured" — rather than 0.0, which
+    would silently look like a real worst-case score downstream.
     """
     if primary_agg is None:
-        primary_agg = np.median if metric_name in _MEDIAN_AGGREGATED_METRICS else np.mean
+        primary_agg = (
+            np.nanmedian if metric_name in _MEDIAN_AGGREGATED_METRICS else np.nanmean
+        )
 
-    if not values:
+    # Empty list OR all-NaN: nothing was measured. Return NaN (not 0.0) and
+    # short-circuit before calling np.nanmean/nanmin (which would emit a
+    # noisy "Mean of empty slice" RuntimeWarning on an all-NaN array).
+    values_array = np.array(values, dtype=float)
+    if values_array.size == 0 or bool(np.all(np.isnan(values_array))):
+        nan = float("nan")
         return {
-            metric_name: 0.0,
-            f"{metric_name}_std": 0.0,
-            f"{metric_name}_min": 0.0,
-            f"{metric_name}_max": 0.0,
+            metric_name: nan,
+            f"{metric_name}_std": nan,
+            f"{metric_name}_min": nan,
+            f"{metric_name}_max": nan,
         }
 
-    values_array = np.array(values)
-
-    # Handle edge case of single frame
+    # Handle edge case of single (non-NaN, given the all-NaN guard above) frame
     if len(values) == 1:
         return {
-            metric_name: float(values[0]),
+            metric_name: float(values_array[0]),
             f"{metric_name}_std": 0.0,
-            f"{metric_name}_min": float(values[0]),
-            f"{metric_name}_max": float(values[0]),
+            f"{metric_name}_min": float(values_array[0]),
+            f"{metric_name}_max": float(values_array[0]),
         }
 
     return {
         metric_name: float(primary_agg(values_array)),
-        f"{metric_name}_std": float(np.std(values_array)),
-        f"{metric_name}_min": float(np.min(values_array)),
-        f"{metric_name}_max": float(np.max(values_array)),
+        f"{metric_name}_std": float(np.nanstd(values_array)),
+        f"{metric_name}_min": float(np.nanmin(values_array)),
+        f"{metric_name}_max": float(np.nanmax(values_array)),
     }
 
 
@@ -2035,7 +2103,7 @@ def calculate_selected_metrics(
                 metric_values["mse"].append(frame_mse)
             except Exception as e:
                 logger.warning(f"MSE calculation failed: {e}")
-                metric_values["mse"].append(0.0)
+                metric_values["mse"].append(float("nan"))
 
     if selected_metrics.get("psnr", False):
         metric_values["psnr"] = []
@@ -2047,7 +2115,7 @@ def calculate_selected_metrics(
                 metric_values["psnr"].append(frame_psnr)
             except Exception as e:
                 logger.warning(f"PSNR calculation failed: {e}")
-                metric_values["psnr"].append(0.0)
+                metric_values["psnr"].append(float("nan"))
 
     if selected_metrics.get("ssim", False):
         metric_values["ssim"] = []
@@ -2075,7 +2143,7 @@ def calculate_selected_metrics(
                 metric_values["ssim"].append(max(0.0, min(1.0, frame_ssim)))
             except Exception as e:
                 logger.warning(f"SSIM calculation failed: {e}")
-                metric_values["ssim"].append(0.0)
+                metric_values["ssim"].append(float("nan"))
 
     # Calculate advanced metrics (conditional)
     if selected_metrics.get("fsim", False):
@@ -2086,7 +2154,7 @@ def calculate_selected_metrics(
                 metric_values["fsim"].append(frame_fsim)
             except Exception as e:
                 logger.warning(f"FSIM calculation failed: {e}")
-                metric_values["fsim"].append(0.0)
+                metric_values["fsim"].append(float("nan"))
 
     if selected_metrics.get("edge_similarity", False):
         metric_values["edge_similarity"] = []
@@ -2101,7 +2169,7 @@ def calculate_selected_metrics(
                 metric_values["edge_similarity"].append(frame_edge)
             except Exception as e:
                 logger.warning(f"Edge similarity calculation failed: {e}")
-                metric_values["edge_similarity"].append(0.0)
+                metric_values["edge_similarity"].append(float("nan"))
 
     if selected_metrics.get("texture_similarity", False):
         metric_values["texture_similarity"] = []
@@ -2111,7 +2179,7 @@ def calculate_selected_metrics(
                 metric_values["texture_similarity"].append(frame_texture)
             except Exception as e:
                 logger.warning(f"Texture similarity calculation failed: {e}")
-                metric_values["texture_similarity"].append(0.0)
+                metric_values["texture_similarity"].append(float("nan"))
 
     # Calculate expensive deep metrics conditionally
     results: dict[str, Any] = {}
@@ -2135,7 +2203,9 @@ def calculate_selected_metrics(
             results.update(deep_metrics)
         except Exception as e:
             logger.warning(f"LPIPS calculation failed: {e}")
-            results["lpips_quality_mean"] = 0.5
+            # NaN, not 0.5 — a fabricated midpoint silently inflates
+            # composite_quality and corpus aggregates. See _nan_fallback_dict.
+            results.update(_default_lpips_score_keys())
 
     if selected_metrics.get("ssimulacra2", False) and getattr(
         config, "ENABLE_SSIMULACRA2", True
@@ -2149,9 +2219,11 @@ def calculate_selected_metrics(
             results.update(ssim2_metrics)
         except Exception as e:
             logger.warning(f"SSIMULACRA2 calculation failed: {e}")
-            # NaN, not 50.0 — that value is on the raw 0-100 scale, but
-            # downstream consumers read this key as normalised [0, 1].
-            results["ssimulacra2_mean"] = float("nan")
+            # Emit the full 5-key shape (not just _mean) so this error path
+            # matches the main path and downstream consumers always see the
+            # same schema. NaN = not computed; 50.0 was a raw-scale sentinel
+            # that downstream read as normalised [0, 1].
+            results.update(_default_ssimulacra2_fallback())
 
     if selected_metrics.get("temporal_artifacts", False) and config.ENABLE_TEMPORAL_ARTIFACTS:
         try:
@@ -2539,13 +2611,9 @@ def calculate_comprehensive_metrics_from_frames(
                                 optimized_results[text_ui_key] = str(text_ui_value)
 
                     # Calculate SSIMULACRA2 metrics (always needed for Phase 3 tests)
-                    # Default fallback metrics
+                    # Default fallback metrics (canonical 5-key NaN shape).
                     default_ssimulacra2_metrics: dict[str, float | str] = {
-                        "ssimulacra2_mean": float("nan"),
-                        "ssimulacra2_p95": float("nan"),
-                        "ssimulacra2_min": float("nan"),
-                        "ssimulacra2_frame_count": 0.0,
-                        "ssimulacra2_triggered": 0.0,
+                        **_default_ssimulacra2_fallback()
                     }
 
                     # Check if SSIMULACRA2 metrics should be calculated
@@ -2739,9 +2807,16 @@ def calculate_comprehensive_metrics_from_frames(
                 # Extract raw PSNR values before normalization
                 if "psnr" in metric_values:
                     raw_metric_values["psnr"] = metric_values["psnr"].copy()
-                    # Normalize PSNR values
+                    # Normalize PSNR values. A failed frame is NaN ("not
+                    # measured") in the parallel path; preserve it rather than
+                    # passing it through ``max(0.0, min(nan, 1.0))``, which in
+                    # Python's scalar min/max collapses NaN to 0.0 and would
+                    # silently fabricate a worst-case score, defeating the
+                    # NaN-aware aggregation in _aggregate_metric.
                     metric_values["psnr"] = [
-                        max(0.0, min(value / float(config.PSNR_MAX_DB), 1.0))
+                        value
+                        if (isinstance(value, float) and math.isnan(value))
+                        else max(0.0, min(value / float(config.PSNR_MAX_DB), 1.0))
                         for value in metric_values["psnr"]
                     ]
 
@@ -2797,7 +2872,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["ssim"].append(max(0.0, min(1.0, frame_ssim)))
                 except Exception as e:
                     logger.warning(f"SSIM calculation failed for frame: {e}")
-                    metric_values["ssim"].append(0.0)
+                    metric_values["ssim"].append(float("nan"))
 
                 # MS-SSIM calculation
                 try:
@@ -2805,7 +2880,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["ms_ssim"].append(frame_ms_ssim)
                 except Exception as e:
                     logger.warning(f"MS-SSIM calculation failed for frame: {e}")
-                    metric_values["ms_ssim"].append(0.0)
+                    metric_values["ms_ssim"].append(float("nan"))
 
                 # PSNR calculation
                 try:
@@ -2818,8 +2893,8 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["psnr"].append(max(0.0, normalized_psnr))
                 except Exception as e:
                     logger.warning(f"PSNR calculation failed for frame: {e}")
-                    metric_values["psnr"].append(0.0)
-                    raw_metric_values["psnr"].append(0.0)
+                    metric_values["psnr"].append(float("nan"))
+                    raw_metric_values["psnr"].append(float("nan"))
 
                 # New metrics - MSE and RMSE
                 try:
@@ -2830,8 +2905,8 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["rmse"].append(frame_rmse)
                 except Exception as e:
                     logger.warning(f"MSE/RMSE calculation failed for frame: {e}")
-                    metric_values["mse"].append(0.0)
-                    metric_values["rmse"].append(0.0)
+                    metric_values["mse"].append(float("nan"))
+                    metric_values["rmse"].append(float("nan"))
 
                 # FSIM calculation
                 try:
@@ -2839,7 +2914,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["fsim"].append(frame_fsim)
                 except Exception as e:
                     logger.warning(f"FSIM calculation failed for frame: {e}")
-                    metric_values["fsim"].append(0.0)
+                    metric_values["fsim"].append(float("nan"))
 
                 # GMSD calculation
                 try:
@@ -2847,7 +2922,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["gmsd"].append(frame_gmsd)
                 except Exception as e:
                     logger.warning(f"GMSD calculation failed for frame: {e}")
-                    metric_values["gmsd"].append(0.0)
+                    metric_values["gmsd"].append(float("nan"))
 
                 # Color histogram correlation
                 try:
@@ -2855,7 +2930,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["chist"].append(frame_chist)
                 except Exception as e:
                     logger.warning(f"Color histogram calculation failed for frame: {e}")
-                    metric_values["chist"].append(0.0)
+                    metric_values["chist"].append(float("nan"))
 
                 # Edge similarity
                 try:
@@ -2868,7 +2943,7 @@ def calculate_comprehensive_metrics_from_frames(
                     metric_values["edge_similarity"].append(frame_edge)
                 except Exception as e:
                     logger.warning(f"Edge similarity calculation failed for frame: {e}")
-                    metric_values["edge_similarity"].append(0.0)
+                    metric_values["edge_similarity"].append(float("nan"))
 
                 # Texture similarity
                 try:
@@ -2878,7 +2953,7 @@ def calculate_comprehensive_metrics_from_frames(
                     logger.warning(
                         f"Texture similarity calculation failed for frame: {e}"
                     )
-                    metric_values["texture_similarity"].append(0.0)
+                    metric_values["texture_similarity"].append(float("nan"))
 
                 # Sharpness similarity
                 try:
@@ -2888,7 +2963,7 @@ def calculate_comprehensive_metrics_from_frames(
                     logger.warning(
                         f"Sharpness similarity calculation failed for frame: {e}"
                     )
-                    metric_values["sharpness_similarity"].append(0.0)
+                    metric_values["sharpness_similarity"].append(float("nan"))
 
         # Calculate temporal consistency for original and compressed frames
         temporal_pre = 0.0
@@ -2989,11 +3064,11 @@ def calculate_comprehensive_metrics_from_frames(
         # Calculate deep perceptual metrics (Task 2.2)
         deep_perceptual_metrics: dict[str, float | str] = {}
 
-        # Default fallback metrics
+        # Default fallback metrics. Score keys are NaN ("not measured"); a 0.5
+        # midpoint sentinel silently inflated composite_quality and corpus
+        # aggregates. See _default_lpips_score_keys / _nan_fallback_dict.
         default_deep_perceptual_metrics: dict[str, float | str] = {
-            "lpips_quality_mean": 0.5,
-            "lpips_quality_p95": 0.5,
-            "lpips_quality_max": 0.5,
+            **_default_lpips_score_keys(),
             "deep_perceptual_frame_count": float(len(compressed_frames_resized)),
             "deep_perceptual_downscaled": 0.0,
             "deep_perceptual_device": "fallback",
@@ -3099,70 +3174,34 @@ def calculate_comprehensive_metrics_from_frames(
                     logger.debug(
                         "SSIMULACRA2 metrics skipped based on conditional logic"
                     )
-                    ssimulacra2_metrics = {
-                        "ssimulacra2_mean": float("nan"),
-                        "ssimulacra2_p95": float("nan"),
-                        "ssimulacra2_min": float("nan"),
-                        "ssimulacra2_frame_count": 0.0,
-                        "ssimulacra2_triggered": 0.0,
-                    }
+                    ssimulacra2_metrics = _default_ssimulacra2_fallback()
 
             except ImportError as e:
                 logger.info(
                     f"SSIMULACRA2 metrics module not available: {e}. Using fallback values."
                 )
-                ssimulacra2_metrics = {
-                    "ssimulacra2_mean": float("nan"),
-                    "ssimulacra2_p95": float("nan"),
-                    "ssimulacra2_min": float("nan"),
-                    "ssimulacra2_frame_count": 0.0,
-                    "ssimulacra2_triggered": 0.0,
-                }
+                ssimulacra2_metrics = _default_ssimulacra2_fallback()
 
             except AttributeError as e:
                 logger.warning(
                     f"SSIMULACRA2 metrics function not found: {e}. Module may be incomplete."
                 )
-                ssimulacra2_metrics = {
-                    "ssimulacra2_mean": float("nan"),
-                    "ssimulacra2_p95": float("nan"),
-                    "ssimulacra2_min": float("nan"),
-                    "ssimulacra2_frame_count": 0.0,
-                    "ssimulacra2_triggered": 0.0,
-                }
+                ssimulacra2_metrics = _default_ssimulacra2_fallback()
 
             except (ValueError, TypeError, RuntimeError) as e:
                 logger.error(
                     f"Error calculating SSIMULACRA2 metrics: {e}. Using fallback values."
                 )
-                ssimulacra2_metrics = {
-                    "ssimulacra2_mean": float("nan"),
-                    "ssimulacra2_p95": float("nan"),
-                    "ssimulacra2_min": float("nan"),
-                    "ssimulacra2_frame_count": 0.0,
-                    "ssimulacra2_triggered": 0.0,
-                }
+                ssimulacra2_metrics = _default_ssimulacra2_fallback()
 
             except Exception as e:
                 logger.error(
                     f"Unexpected error in SSIMULACRA2 metrics calculation: {e}. Using fallback values."
                 )
-                ssimulacra2_metrics = {
-                    "ssimulacra2_mean": float("nan"),
-                    "ssimulacra2_p95": float("nan"),
-                    "ssimulacra2_min": float("nan"),
-                    "ssimulacra2_frame_count": 0.0,
-                    "ssimulacra2_triggered": 0.0,
-                }
+                ssimulacra2_metrics = _default_ssimulacra2_fallback()
         else:
             logger.debug("SSIMULACRA2 metrics calculation disabled")
-            ssimulacra2_metrics = {
-                "ssimulacra2_mean": float("nan"),
-                "ssimulacra2_p95": float("nan"),
-                "ssimulacra2_min": float("nan"),
-                "ssimulacra2_frame_count": 0.0,
-                "ssimulacra2_triggered": 0.0,
-            }
+            ssimulacra2_metrics = _default_ssimulacra2_fallback()
 
         # Calculate text/UI validation metrics (Phase 3.1)
         text_ui_metrics: dict[str, float | str] = {}
@@ -3488,11 +3527,14 @@ def calculate_comprehensive_metrics_from_frames(
             for metric_name in raw_equivalent_metrics:
                 result[f"{metric_name}_raw"] = result[metric_name]
 
-            # Handle PSNR separately: use un-scaled mean value
-            if raw_metric_values["psnr"]:
-                result["psnr_raw"] = float(np.mean(raw_metric_values["psnr"]))
+            # Handle PSNR separately: use un-scaled mean value. NaN-aware so a
+            # frame whose PSNR failed (now appended as NaN) doesn't drag the
+            # raw mean toward 0; empty / all-NaN -> NaN ("not measured").
+            psnr_raw_vals = np.array(raw_metric_values["psnr"], dtype=float)
+            if psnr_raw_vals.size > 0 and not bool(np.all(np.isnan(psnr_raw_vals))):
+                result["psnr_raw"] = float(np.nanmean(psnr_raw_vals))
             else:
-                result["psnr_raw"] = 0.0
+                result["psnr_raw"] = float("nan")
 
             # Raw copies for temporal consistency variants
             result["temporal_consistency_pre_raw"] = result["temporal_consistency_pre"]

@@ -7,6 +7,18 @@ import time
 from pathlib import Path
 from typing import Any
 
+from PIL import Image
+
+# Per-frame GIF delays are stored in centiseconds (10ms granularity).  When a
+# lossy pass merges N duplicate frames, the merged frame carries the summed
+# delay, but each merge can introduce up to one centisecond of rounding drift
+# in the recomputed total.  We therefore tolerate up to this many ms of total
+# duration difference per merged frame before calling a reduction "frame_loss"
+# instead of benign "dedup".
+_CENTISECOND_MS = 10
+# Floor so even a single-frame reduction tolerates one centisecond of rounding.
+_DURATION_TOL_FLOOR_MS = 10
+
 
 def import_giflab() -> dict[str, Any]:
     """Lazy import of giflab internals. Returns a dict of named handles."""
@@ -68,6 +80,96 @@ def measure_pair(
     t0 = time.perf_counter()
     metrics = run_metrics(original, compressed, gl)
     return metrics, time.perf_counter() - t0
+
+
+def read_gif_timing(path: Path) -> tuple[int, int | None]:
+    """Read a GIF's frame count and total playback duration (ms) via PIL.
+
+    Returns ``(frame_count, total_duration_ms)``.  On any read error the
+    caller cannot trust the durations, so we return ``(0, None)`` — never a
+    fabricated duration — so :func:`classify_frame_reduction` falls through to
+    the honest ``"unknown"`` class rather than mislabelling a broken file as
+    benign dedup.
+
+    The total duration sums the per-frame delay (``img.info.get("duration",
+    100)``, default 100ms) across *every* frame, giving the GIF's true
+    playback duration — which is what :func:`classify_frame_reduction` needs.
+    (Note: ``giflab.metrics.extract_gif_frames`` uses the same per-frame
+    convention but, when frame subsampling kicks in, only sums over the
+    sampled ``frame_indices``; here we always sum over all frames.)
+    """
+    try:
+        with Image.open(path) as img:
+            n_frames = getattr(img, "n_frames", 1)
+            total_duration = 0
+            for i in range(n_frames):
+                img.seek(i)
+                total_duration += int(img.info.get("duration", 100))
+        return int(n_frames), int(total_duration)
+    except Exception:
+        return 0, None
+
+
+def classify_frame_reduction(
+    *,
+    orig_frames: int,
+    orig_duration_ms: int | None,
+    comp_frames: int,
+    comp_duration_ms: int | None,
+) -> dict[str, Any]:
+    """Classify a frame-count change between original and compressed GIFs.
+
+    Distinguishes benign temporal **deduplication** (fewer frames, total
+    playback duration preserved) from a possible **frame_loss** bug (fewer
+    frames, duration NOT preserved).  This lets sweep reports filter dedup
+    events (no quality concern) from frame-loss events (needs investigation)
+    instead of treating every frame-count mismatch as a failure.
+
+    The duration comparison uses a tolerance that scales with the number of
+    frames merged away — each merge can introduce up to one centisecond
+    (10ms) of rounding drift in the recomputed total — with a floor so a
+    single-frame reduction still tolerates one centisecond.
+
+    Returns a dict with a stable key schema (every branch emits all keys):
+
+    - ``frame_reduction``      ``orig_frames - comp_frames``, clamped at 0.
+    - ``frame_reduction_class`` one of ``none`` / ``dedup`` / ``frame_loss`` /
+      ``unknown``.
+    - ``frames_deduplicated``  frames merged away when class is ``dedup``,
+      else 0.
+    - ``frame_dedup``          ``True`` only for the ``dedup`` class.
+    - ``frame_loss``           ``True`` only for the ``frame_loss`` class.
+    """
+    reduction = orig_frames - comp_frames
+
+    base: dict[str, Any] = {
+        "frame_reduction": reduction if reduction > 0 else 0,
+        "frame_reduction_class": "none",
+        "frames_deduplicated": 0,
+        "frame_dedup": False,
+        "frame_loss": False,
+    }
+
+    # No reduction (equal, or compressed somehow has more frames): nothing to
+    # classify.  A frame *increase* is not a dedup/loss event.
+    if reduction <= 0:
+        return base
+
+    # We can only tell dedup from loss when both durations are known.  If
+    # either is missing, report "unknown" — never silently call it benign.
+    if orig_duration_ms is None or comp_duration_ms is None:
+        base["frame_reduction_class"] = "unknown"
+        return base
+
+    duration_tol_ms = max(_DURATION_TOL_FLOOR_MS, reduction * _CENTISECOND_MS)
+    if abs(orig_duration_ms - comp_duration_ms) <= duration_tol_ms:
+        base["frame_reduction_class"] = "dedup"
+        base["frames_deduplicated"] = reduction
+        base["frame_dedup"] = True
+    else:
+        base["frame_reduction_class"] = "frame_loss"
+        base["frame_loss"] = True
+    return base
 
 
 def open_csv_for_append(

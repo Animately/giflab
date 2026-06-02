@@ -193,7 +193,10 @@ def calculate_lpips_cached(
         result = calculate_deep_perceptual_quality_metrics(
             [frame1], [frame2], config={"device": "auto"}
         )
-        return result.get("lpips_quality_mean", 0.5)
+        # The key is always present (NaN on failure), so this default is dead;
+        # use NaN ("not measured") rather than a 0.5 sentinel for the
+        # never-hit case so the shape stays honest if the contract changes.
+        return result.get("lpips_quality_mean", float("nan"))
 
     cache = get_validation_cache()
     config = {"net": net, "version": version}
@@ -210,7 +213,8 @@ def calculate_lpips_cached(
     result = calculate_deep_perceptual_quality_metrics(
         [frame1], [frame2], config={"device": "auto"}
     )
-    value = result.get("lpips_quality_mean", 0.5)
+    # Key always present (NaN on failure); dead default kept honest with NaN.
+    value = result.get("lpips_quality_mean", float("nan"))
 
     cache.put(frame1, frame2, "lpips", value, config, frame_indices)
 

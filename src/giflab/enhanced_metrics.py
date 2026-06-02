@@ -206,12 +206,25 @@ def calculate_composite_quality(
     if "lpips_quality_mean" in metrics:
         # LPIPS scores are inverted (lower = better), so we need to invert for quality
         # Normalize LPIPS score: 0.0 (identical) -> 1.0, 1.0 (very different) -> 0.0
+        #
+        # NaN means LPIPS couldn't be computed (model load failure, no scores,
+        # subprocess crash) — skip the contribution rather than letting it
+        # through. ``max(0.0, min(1.0, 1.0 - nan))`` evaluates to 1.0 in
+        # Python's scalar min/max (every comparison with NaN is False, so the
+        # clamp returns its 1.0 upper bound), which would silently award the
+        # full LPIPS weight as PERFECT quality and corrupt total_weight.
+        # Mirrors the SSIMULACRA2 NaN guard below. (Full multi-metric weight
+        # redistribution is the separate giflab-composite-quality-nan-guard
+        # task; this is the minimal guard for the NaN this PR introduces.)
         lpips_score = metrics["lpips_quality_mean"]
-        normalized_lpips = max(
-            0.0, min(1.0, 1.0 - lpips_score)
-        )  # Invert: lower LPIPS = higher quality
-        composite_quality += config.ENHANCED_LPIPS_WEIGHT * normalized_lpips
-        total_weight += config.ENHANCED_LPIPS_WEIGHT
+        if lpips_score is not None and not (
+            isinstance(lpips_score, float) and math.isnan(lpips_score)
+        ):
+            normalized_lpips = max(
+                0.0, min(1.0, 1.0 - lpips_score)
+            )  # Invert: lower LPIPS = higher quality
+            composite_quality += config.ENHANCED_LPIPS_WEIGHT * normalized_lpips
+            total_weight += config.ENHANCED_LPIPS_WEIGHT
 
     if "ssimulacra2_mean" in metrics:
         # SSIMULACRA2 scores are already normalized (0-1, higher = better quality).

@@ -86,11 +86,22 @@ class TimingGridValidator:
                 # Extract duration for each frame
                 for i in range(total_frames):
                     img.seek(i)
-                    duration = img.info.get("duration", 100)  # Default 100ms
+                    # ``info.get("duration", 100)`` only falls back to 100ms when
+                    # PIL reports *no* duration at all (key absent). An explicit
+                    # per-frame delay of 0 is authored intent ("render as fast as
+                    # possible") and is returned verbatim — it must be preserved,
+                    # not fabricated up to 100ms. Substituting a synthetic 100ms
+                    # for genuine zeros produced phantom total-duration
+                    # differences whenever the original and compressed frame
+                    # counts diverged (see
+                    # [[giflab-timing-validation-zero-delay-fallback]]).
+                    duration = img.info.get("duration", 100)  # missing key -> 100ms
 
-                    # Validate duration is reasonable (1ms to 10s)
-                    if duration < 1:
-                        duration = 100  # Default fallback
+                    # Clamp to a sane range. Negative durations are nonsensical
+                    # (not authored), so floor at 0; cap the absurd upper bound
+                    # at 10s. Genuine 0ms delays pass through untouched.
+                    if duration < 0:
+                        duration = 0
                     elif duration > 10000:
                         duration = 10000  # Cap at 10 seconds
 
