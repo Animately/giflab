@@ -993,9 +993,13 @@ class TestTemporalArtifactsGate:
             calls == []
         ), "ENABLE_TEMPORAL_ARTIFACTS=False did not short-circuit the call"
         # The result must still expose zeroed temporal keys so downstream
-        # consumers reading `result["flicker_excess"]` don't KeyError.
-        assert result.get("flicker_excess") == 0.0
-        assert result.get("lpips_t_mean") == 0.0
+        # consumers don't KeyError. Wave 7: these single-stream signals are
+        # keyed with the honest ``_compressed`` suffix (the bare keys are gone).
+        assert result.get("flicker_excess_compressed") == 0.0
+        assert result.get("lpips_t_mean_compressed") == 0.0
+        # The bare keys must NOT be present any more.
+        assert "flicker_excess" not in result
+        assert "lpips_t_mean" not in result
 
     def test_gate_enabled_calls_temporal_artifacts(self, monkeypatch):
         from giflab.metrics import calculate_comprehensive_metrics_from_frames

@@ -916,10 +916,10 @@ class TestTemporalValidationBoundaryConditions:
         # Test with metrics exactly at thresholds
         with patch("giflab.metrics.calculate_comprehensive_metrics") as mock_metrics:
             mock_metrics.return_value = {
-                "flicker_excess": 0.05,  # Exactly at threshold
-                "flat_flicker_ratio": 0.1,  # Exactly at threshold
-                "temporal_pumping_score": 0.2,  # Exactly at threshold
-                "lpips_t_mean": 0.03,  # Exactly at threshold
+                "flicker_excess_compressed": 0.05,  # Exactly at threshold
+                "flat_flicker_ratio_compressed": 0.1,  # Exactly at threshold
+                "temporal_pumping_score_compressed": 0.2,  # Exactly at threshold
+                "lpips_t_mean_compressed": 0.03,  # Exactly at threshold
                 "ssim_mean": 0.8,
                 "psnr_mean": 25.0,
                 "mse_mean": 300.0,
@@ -941,10 +941,10 @@ class TestTemporalValidationBoundaryConditions:
             )
 
             compression_metrics = {
-                "flicker_excess": 0.05,  # Exactly at threshold
-                "flat_flicker_ratio": 0.1,  # Exactly at threshold
-                "temporal_pumping_score": 0.2,  # Exactly at threshold
-                "lpips_t_mean": 0.03,  # Exactly at threshold
+                "flicker_excess_compressed": 0.05,  # Exactly at threshold
+                "flat_flicker_ratio_compressed": 0.1,  # Exactly at threshold
+                "temporal_pumping_score_compressed": 0.2,  # Exactly at threshold
+                "lpips_t_mean_compressed": 0.03,  # Exactly at threshold
                 "ssim_mean": 0.8,
                 "psnr_mean": 25.0,
                 "mse_mean": 300.0,
@@ -979,10 +979,10 @@ class TestTemporalValidationBoundaryConditions:
         # Test with metrics just above thresholds
         with patch("giflab.metrics.calculate_comprehensive_metrics") as mock_metrics:
             mock_metrics.return_value = {
-                "flicker_excess": 0.051,  # Just above threshold
-                "flat_flicker_ratio": 0.101,  # Just above threshold
-                "temporal_pumping_score": 0.201,  # Just above threshold
-                "lpips_t_mean": 0.031,  # Just above threshold
+                "flicker_excess_compressed": 0.051,  # Just above threshold
+                "flat_flicker_ratio_compressed": 0.101,  # Just above threshold
+                "temporal_pumping_score_compressed": 0.201,  # Just above threshold
+                "lpips_t_mean_compressed": 0.031,  # Just above threshold
                 "ssim_mean": 0.8,
                 "psnr_mean": 25.0,
                 "mse_mean": 300.0,
@@ -1004,10 +1004,10 @@ class TestTemporalValidationBoundaryConditions:
             )
 
             compression_metrics = {
-                "flicker_excess": 0.06,  # Above threshold (0.05)
-                "flat_flicker_ratio": 0.11,  # Above threshold (0.1)
-                "temporal_pumping_score": 0.21,  # Above threshold (0.2)
-                "lpips_t_mean": 0.031,  # Above threshold (0.03)
+                "flicker_excess_compressed": 0.06,  # Above threshold (0.05)
+                "flat_flicker_ratio_compressed": 0.11,  # Above threshold (0.1)
+                "temporal_pumping_score_compressed": 0.21,  # Above threshold (0.2)
+                "lpips_t_mean_compressed": 0.031,  # Above threshold (0.03)
                 "ssim_mean": 0.79,  # Below threshold (0.8)
                 "psnr_mean": 24.9,  # Below threshold (25.0)
                 "mse_mean": 301.0,  # Above threshold (300.0)
@@ -1041,10 +1041,10 @@ class TestTemporalValidationBoundaryConditions:
         # Test with metrics just below thresholds
         with patch("giflab.metrics.calculate_comprehensive_metrics") as mock_metrics:
             mock_metrics.return_value = {
-                "flicker_excess": 0.049,  # Just below threshold
-                "flat_flicker_ratio": 0.099,  # Just below threshold
-                "temporal_pumping_score": 0.199,  # Just below threshold
-                "lpips_t_mean": 0.029,  # Just below threshold
+                "flicker_excess_compressed": 0.049,  # Just below threshold
+                "flat_flicker_ratio_compressed": 0.099,  # Just below threshold
+                "temporal_pumping_score_compressed": 0.199,  # Just below threshold
+                "lpips_t_mean_compressed": 0.029,  # Just below threshold
                 "ssim_mean": 0.8,
                 "psnr_mean": 25.0,
                 "mse_mean": 300.0,
@@ -1066,10 +1066,10 @@ class TestTemporalValidationBoundaryConditions:
             )
 
             compression_metrics = {
-                "flicker_excess": 0.04,  # Below threshold (0.05)
-                "flat_flicker_ratio": 0.09,  # Below threshold (0.1)
-                "temporal_pumping_score": 0.19,  # Below threshold (0.2)
-                "lpips_t_mean": 0.029,  # Below threshold (0.03)
+                "flicker_excess_compressed": 0.04,  # Below threshold (0.05)
+                "flat_flicker_ratio_compressed": 0.09,  # Below threshold (0.1)
+                "temporal_pumping_score_compressed": 0.19,  # Below threshold (0.2)
+                "lpips_t_mean_compressed": 0.029,  # Below threshold (0.03)
                 "ssim_mean": 0.81,  # Above threshold (0.8)
                 "psnr_mean": 25.1,  # Above threshold (25.0)
                 "mse_mean": 299.0,  # Below threshold (300.0)
