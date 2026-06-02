@@ -3323,6 +3323,74 @@ def calculate_comprehensive_metrics_from_frames(
         for metric_name, values in metric_values.items():
             result.update(_aggregate_metric(values, metric_name))
 
+        # Audit-fix [[giflab-composite-quality-bare-vs-mean-key-mismatch]]:
+        # ``_aggregate_metric`` emits the primary statistic under the BARE key
+        # (``ssim``, not ``ssim_mean``). But ``calculate_composite_quality``
+        # (enhanced_metrics.py), the storage CSV/SQLite schema
+        # (storage.QUALITY_METRIC_COLUMNS) and quality_validation all read the
+        # ``{metric}_mean`` keys. On this main serial/parallel path those keys
+        # were ABSENT, so ~90% of the composite weight (every structural /
+        # signal term) was silently dropped and ``total_weight``
+        # renormalisation hid it. Phase 6 (optimized_metrics.py) already emits
+        # BOTH bare and ``_mean`` for ssim/mse/psnr (locked by
+        # test_phase6_schema_contract); this brings the standard path to the
+        # same key shape. The fix is purely additive — bare keys are retained
+        # (public_api.measure() and several tests read them).
+        #
+        # Same-scale aliases: these ``_mean`` keys share the exact scale of
+        # their bare key (mse/rmse are raw; ssim/fsim/gmsd/chist/edge/texture/
+        # sharpness/ms_ssim are 0-1), matching Phase 6's ``_mean`` definitions.
+        # Skip NaN values so an all-NaN (every-frame-failed) structural metric
+        # keeps "key absent" semantics — composite then redistributes its
+        # weight exactly as it did before this fix, rather than entering a NaN
+        # into the weighted sum.
+        _mean_alias_bases = (
+            "ssim",
+            "ms_ssim",
+            "mse",
+            "rmse",
+            "fsim",
+            "gmsd",
+            "chist",
+            "edge_similarity",
+            "texture_similarity",
+            "sharpness_similarity",
+        )
+        for base in _mean_alias_bases:
+            if base in result:
+                base_value = result[base]
+                if isinstance(base_value, int | float) and not (
+                    isinstance(base_value, float) and math.isnan(base_value)
+                ):
+                    result[f"{base}_mean"] = float(base_value)
+
+        # PSNR special case: the bare ``psnr`` key is normalised to 0-1
+        # (divided by config.PSNR_MAX_DB above), but ``normalize_metric`` and
+        # ``calculate_composite_quality`` expect ``psnr_mean`` in RAW dB (they
+        # divide by 50 dB themselves). Aliasing the normalised bare value would
+        # DOUBLE-normalise (e.g. 0.47 → /50 → ~0.009), tanking the 20%-weight
+        # PSNR term. So compute ``psnr_mean`` from the raw-dB values held in
+        # ``raw_metric_values["psnr"]`` (populated by both the parallel and
+        # serial frame loops, independent of config.RAW_METRICS). This matches
+        # calculate_selected_metrics and Phase 6, both of which keep psnr raw.
+        #
+        # NaN handling — OMIT, don't emit NaN: when every frame's PSNR failed
+        # (raw list empty / all-NaN), ``psnr_mean`` is left ABSENT rather than
+        # set to NaN. This mirrors the skip-NaN policy for the structural
+        # aliases above and, crucially, avoids the
+        # ``normalize_metric('psnr_mean', nan)`` trap: that function does
+        # ``min(nan, 50.0)`` → ``nan`` then ``max(0.0, min(1.0, nan))`` →
+        # ``1.0``, so a present-but-NaN ``psnr_mean`` would silently award the
+        # FULL 20% PSNR weight as a PERFECT score — a fabricated value, worse
+        # than the honest "key absent → weight redistributed" outcome. (The
+        # separate ``psnr_raw`` block below still emits NaN because that key is
+        # diagnostic-only and never read by the composite.)
+        psnr_mean_raw_vals = np.array(raw_metric_values["psnr"], dtype=float)
+        if psnr_mean_raw_vals.size > 0 and not bool(
+            np.all(np.isnan(psnr_mean_raw_vals))
+        ):
+            result["psnr_mean"] = float(np.nanmean(psnr_mean_raw_vals))
+
         # Add temporal consistency (single value, not frame-level)
         # Keep legacy key pointing to *post*-compression value for backward compatibility
         result["temporal_consistency"] = float(temporal_post)

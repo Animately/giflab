@@ -1314,6 +1314,209 @@ class TestPerFrameExceptionNaNPropagation:
         assert abs(gmsd_value - expected) < abs(gmsd_value - contaminated)
 
 
+class TestMainPathMeanKeysForComposite:
+    """The main serial/parallel ``_from_frames`` path must emit ``{metric}_mean``
+    aliases for the structural/signal metrics that ``calculate_composite_quality``
+    (and storage / quality_validation) read.
+
+    Audit-fix [[giflab-composite-quality-bare-vs-mean-key-mismatch]]: the main
+    aggregation block (``_aggregate_metric``) emitted the primary statistic under
+    the BARE key (``ssim`` not ``ssim_mean``), so on the default-config main path
+    every ``"{m}_mean" in metrics`` lookup in ``calculate_composite_quality``
+    MISSED — the 11-metric composite silently collapsed to the thin perceptual /
+    temporal set (~10% of the weight) and ``total_weight`` renormalisation hid it.
+    Phase 6 (``optimized_metrics.py``) already emits BOTH bare and ``_mean`` for
+    ssim/mse/psnr (locked by ``test_phase6_schema_contract``); this brings the
+    standard path to the same key shape.
+    """
+
+    # The ten structural/signal keys that calculate_composite_quality reads as
+    # ``{name}_mean`` (enhanced_metrics.py:104-168). All MUST be present + finite
+    # on the main path post-fix.
+    _COMPOSITE_MEAN_KEYS = (
+        "ssim_mean",
+        "ms_ssim_mean",
+        "psnr_mean",
+        "mse_mean",
+        "fsim_mean",
+        "edge_similarity_mean",
+        "gmsd_mean",
+        "chist_mean",
+        "sharpness_similarity_mean",
+        "texture_similarity_mean",
+    )
+
+    # Bare → _mean aliases that share the SAME scale as their bare key. PSNR is
+    # excluded here because its bare key is normalised 0-1 while ``psnr_mean``
+    # must be RAW dB (see the dedicated PSNR test below).
+    _SAME_SCALE_PAIRS = (
+        "ssim",
+        "ms_ssim",
+        "mse",
+        "rmse",
+        "fsim",
+        "gmsd",
+        "chist",
+        "edge_similarity",
+        "texture_similarity",
+        "sharpness_similarity",
+    )
+
+    def _frames(self):
+        rng = np.random.default_rng(0)
+        orig = [rng.integers(0, 256, (64, 64, 3), dtype=np.uint8) for _ in range(4)]
+        comp = [
+            np.clip(
+                f.astype(int) + rng.integers(-30, 30, (64, 64, 3)), 0, 255
+            ).astype(np.uint8)
+            for f in orig
+        ]
+        return orig, comp
+
+    def test_from_frames_emits_mean_keys_for_composite(self, monkeypatch):
+        """FAILING-FIRST: every composite-read ``_mean`` key is present + finite
+        on the default-config main path.
+
+        Pre-fix the main path emits only bare ``ssim``/``mse``/``psnr``/... and
+        the ten ``_mean`` keys are ABSENT, so this fails.
+        """
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        # Force the deterministic serial path so the test is reproducible.
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        orig, comp = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            orig, comp, force_all_metrics=True
+        )
+
+        for key in self._COMPOSITE_MEAN_KEYS:
+            assert key in result, f"{key} missing on main path"
+            assert isinstance(result[key], float)
+            assert not math.isnan(result[key]), f"{key} is NaN on a realistic pair"
+
+    def test_from_frames_mean_aliases_match_bare(self, monkeypatch):
+        """Scale guard (the load-bearing one).
+
+        Same-scale ``_mean`` keys must EQUAL their bare key. ``psnr_mean`` must
+        NOT equal the bare normalised ``psnr`` — it must be RAW dB so it feeds
+        ``normalize_metric('psnr_mean', ...)`` (which divides by 50 dB) correctly
+        rather than being double-normalised (0.47 → /50 → ~0.009).
+        """
+        from giflab.config import DEFAULT_METRICS_CONFIG
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        orig, comp = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            orig, comp, force_all_metrics=True
+        )
+
+        for base in self._SAME_SCALE_PAIRS:
+            assert result[f"{base}_mean"] == pytest.approx(result[base]), (
+                f"{base}_mean must alias the same-scale bare {base} key"
+            )
+
+        # PSNR: the trap. Bare psnr is normalised 0-1; psnr_mean is raw dB.
+        psnr_bare = result["psnr"]
+        psnr_mean = result["psnr_mean"]
+        assert psnr_mean != pytest.approx(psnr_bare), (
+            "psnr_mean must be RAW dB, distinct from the normalised bare psnr — "
+            "aliasing the bare value would double-normalise in normalize_metric"
+        )
+        # On a realistic noisy pair PSNR is well above 1 dB.
+        assert psnr_mean > 1.0
+        # And psnr_mean ≈ bare_psnr * PSNR_MAX_DB (the un-normalisation), within
+        # clamp tolerance (bare psnr is clamped to [0, 1] before scaling back).
+        assert psnr_mean == pytest.approx(
+            psnr_bare * float(DEFAULT_METRICS_CONFIG.PSNR_MAX_DB), rel=1e-3
+        )
+
+    def test_composite_uses_structural_metrics_on_from_frames(self, monkeypatch):
+        """Behavioural: a structurally much-worse compression must score a lower
+        ``composite_quality`` than a near-perfect one on the main path.
+
+        Pre-fix the structural difference is INVISIBLE (the ten structural
+        ``_mean`` keys are absent, so composite is driven only by the thin
+        perceptual/temporal set); post-fix the structural collapse is counted
+        and ordering reflects it. Assert ordering (an inequality), not absolute
+        magnitudes, per CLAUDE.md "continuous, no cliff thresholds".
+        """
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        rng = np.random.default_rng(1)
+        orig = [rng.integers(0, 256, (64, 64, 3), dtype=np.uint8) for _ in range(4)]
+
+        # Near-perfect: tiny perturbation (structure preserved).
+        good = [
+            np.clip(f.astype(int) + rng.integers(-2, 2, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
+            for f in orig
+        ]
+        # Structurally destroyed: heavy noise wrecks ssim/fsim/edge/gmsd/...
+        bad = [
+            np.clip(
+                f.astype(int) + rng.integers(-120, 120, (64, 64, 3)), 0, 255
+            ).astype(np.uint8)
+            for f in orig
+        ]
+
+        good_metrics = calculate_comprehensive_metrics_from_frames(
+            orig, good, force_all_metrics=True
+        )
+        bad_metrics = calculate_comprehensive_metrics_from_frames(
+            orig, bad, force_all_metrics=True
+        )
+
+        assert (
+            good_metrics["composite_quality"] > bad_metrics["composite_quality"]
+        ), (
+            "Structurally-destroyed compression must score lower composite_quality "
+            "than a near-perfect one once the structural _mean keys are counted"
+        )
+
+    def test_psnr_mean_omitted_when_no_raw_values(self, monkeypatch):
+        """NaN-honesty guard: if every frame's PSNR fails (raw list all-NaN),
+        ``psnr_mean`` must be OMITTED — not present-with-NaN, not 0.0, not a
+        crash.
+
+        Omitting (rather than emitting NaN) is the load-bearing choice here:
+        ``normalize_metric('psnr_mean', nan)`` returns 1.0 (``min(nan, 50)`` →
+        ``nan`` → clamped to 1.0), so a present-but-NaN ``psnr_mean`` would
+        silently award the full 20% PSNR weight as a PERFECT score — a
+        fabricated value, worse than the honest "key absent → weight
+        redistributed" path. This matches the skip-NaN policy for the
+        structural aliases and the gmsd-exception NaN test.
+        """
+        import giflab.metrics as metrics_mod
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        # Force the sequential loop (parallel path runs in subprocesses where a
+        # monkeypatch wouldn't apply).
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+
+        def failing_psnr(*args, **kwargs):  # noqa: ANN001
+            raise RuntimeError("synthetic PSNR failure")
+
+        monkeypatch.setattr(metrics_mod, "calculate_safe_psnr", failing_psnr)
+
+        orig, comp = self._frames()
+        result = calculate_comprehensive_metrics_from_frames(
+            orig, comp, force_all_metrics=True
+        )
+
+        assert "psnr_mean" not in result, (
+            "psnr_mean must be omitted (not NaN) when no raw PSNR was measured, "
+            "so composite redistributes weight instead of awarding a fabricated "
+            "perfect PSNR score via normalize_metric('psnr_mean', nan) == 1.0"
+        )
+        # And composite must NOT be poisoned — finite, no fabricated-perfect
+        # PSNR term sneaking in.
+        assert "composite_quality" in result
+        assert not math.isnan(result["composite_quality"])
+
+
 class TestSsimulacra2ErrorPathKeyShape:
     """Every SSIMULACRA2 error / disabled path must emit the full 5-key shape,
     not just ``ssimulacra2_mean`` (the calculate_selected_metrics partial-keys
