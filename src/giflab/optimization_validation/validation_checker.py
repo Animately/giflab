@@ -145,6 +145,9 @@ class ValidationChecker:
             self._validate_temporal_consistency(
                 result, compression_metrics, effective_thresholds
             )
+            self._validate_alignment_accuracy(
+                result, compression_metrics, effective_thresholds
+            )
             self._validate_temporal_artifacts(
                 result, compression_metrics, effective_thresholds
             )
@@ -549,6 +552,50 @@ class ValidationChecker:
                     actual_value=temporal_score,
                     threshold=threshold,
                     recommendation="Consider using different compression parameters to preserve temporal consistency",
+                )
+            )
+
+    def _validate_alignment_accuracy(
+        self,
+        result: ValidationResult,
+        compression_metrics: dict[str, Any],
+        thresholds: dict[str, float],
+    ) -> None:
+        """Validate frame-drop alignment accuracy.
+
+        Appends a soft ``alignment_uncertain`` WARNING (never an issue/error)
+        when a REAL alignment_accuracy lands below the threshold — mirrors
+        ``_validate_temporal_consistency``. NaN/None/absent values are guarded
+        by ``_is_missing`` so the missing-data sentinel never false-fires.  The
+        documented -1.0 failure sentinel is also skipped (it is a failure
+        marker, not a genuine sub-threshold measurement).
+        ([[giflab-alignment-warning-threshold]])
+        """
+
+        alignment_accuracy = compression_metrics.get("alignment_accuracy")
+
+        # Missing (None / NaN) — do not warn (NaN-aware via _is_missing), and
+        # do not emit a spurious "unavailable" warning: alignment is a niche,
+        # frequently-absent signal, unlike the always-expected temporal score.
+        if _is_missing(alignment_accuracy):
+            return
+
+        # -1.0 is the documented timing-validation failure sentinel, not a
+        # genuine measurement — never trip the rule on it.
+        if alignment_accuracy == -1.0:
+            return
+
+        threshold = thresholds["alignment_warning_threshold"]
+
+        if alignment_accuracy < threshold:
+            result.warnings.append(
+                ValidationWarning(
+                    category="alignment_uncertain",
+                    message=f"Imperfect frame-drop alignment: {alignment_accuracy:.3f} < {threshold:.3f}",
+                    expected_value=threshold,
+                    actual_value=alignment_accuracy,
+                    threshold=threshold,
+                    recommendation="Frame timing may have drifted during frame reduction; verify the drop pattern preserves cadence",
                 )
             )
 

@@ -4,6 +4,7 @@ Tests the TimingGridValidator class and associated timing validation functions
 including frame duration extraction, timing grid alignment, and drift detection.
 """
 
+import math
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -410,18 +411,21 @@ class TestConvenienceFunctions:
 
         csv_metrics = extract_timing_metrics_for_csv(validation_result)
 
-        # Should return default values
+        # Should return default values. alignment_accuracy is now NaN on the
+        # missing-data default branch (so "could not measure" is distinguishable
+        # from a genuine 0% alignment) — asserted separately because nan != nan.
         expected_defaults = {
             "timing_grid_ms": 0,
             "grid_length": 0,
             "duration_diff_ms": 0,
             "timing_drift_score": 1.0,
             "max_timing_drift_ms": 0,
-            "alignment_accuracy": 0.0,
         }
 
         for key, expected_value in expected_defaults.items():
             assert csv_metrics[key] == expected_value
+
+        assert math.isnan(csv_metrics["alignment_accuracy"])
 
 
 class TestIntegrationScenarios:

@@ -4,6 +4,7 @@ This module tests the TimingGridValidator class and related timing validation
 functions to ensure frame timing integrity is properly validated.
 """
 
+import math
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -457,14 +458,20 @@ class TestHelperFunctions:
 
         csv_metrics = extract_timing_metrics_for_csv(validation_result)
 
-        # Should return default/empty metrics
+        # alignment_accuracy is now NaN on the missing-data default branch
+        # ("could not measure" != genuine 0% alignment). Whole-dict equality
+        # can't compare NaN (nan != nan), so pop it off, assert isnan, then
+        # compare the remaining dict.
+        alignment = csv_metrics.pop("alignment_accuracy")
+        assert math.isnan(alignment)
+
+        # Should return default/empty metrics for the remaining keys
         expected = {
             "timing_grid_ms": 0,
             "grid_length": 0,
             "duration_diff_ms": 0,
             "timing_drift_score": 1.0,
             "max_timing_drift_ms": 0,
-            "alignment_accuracy": 0.0,
         }
 
         assert csv_metrics == expected

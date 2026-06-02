@@ -381,3 +381,66 @@ class TestTemporalArtifactAllNanSilentPass:
         assert "flicker_excess" in issue_categories, (
             f"Expected flicker_excess issue; got {issue_categories}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Frame-drop alignment warning ([[giflab-alignment-warning-threshold]])
+# ---------------------------------------------------------------------------
+
+
+class TestAlignmentAccuracyWarning:
+    """``_validate_alignment_accuracy`` appends a soft ``alignment_uncertain``
+    warning when a REAL alignment_accuracy lands below the threshold, and is
+    NaN/None/absent-honest (the missing-data sentinel must NOT fire it).
+
+    Mirrors _validate_temporal_consistency: a WARNING, never an ERROR — the
+    overall verdict is still produced.
+    """
+
+    def _run(self, scores: dict) -> object:
+        checker = _make_checker()
+        metrics = {**_base_metrics(), **scores}
+        return checker.validate_compression_result(
+            original_metadata=_make_metadata(),
+            compression_metrics=metrics,
+            pipeline_id="pipe_test",
+            gif_name="test.gif",
+        )
+
+    def test_sub_threshold_alignment_warns_not_errors(self):
+        """A real alignment below threshold produces an alignment_uncertain
+        WARNING (status WARNING), not an ERROR."""
+        result = self._run({"alignment_accuracy": 0.847})
+        warning_categories = [w.category for w in result.warnings]
+        issue_categories = [i.category for i in result.issues]
+        assert "alignment_uncertain" in warning_categories, (
+            f"Expected alignment_uncertain warning; got warnings={warning_categories} "
+            f"issues={issue_categories}"
+        )
+        # Soft warning only — must not be an issue / error.
+        assert "alignment_uncertain" not in issue_categories
+        assert result.status == ValidationStatus.WARNING
+
+    def test_at_or_above_threshold_no_warning(self):
+        """alignment_accuracy >= threshold must NOT produce the warning."""
+        result = self._run({"alignment_accuracy": 1.0})
+        warning_categories = [w.category for w in result.warnings]
+        assert "alignment_uncertain" not in warning_categories
+
+    def test_nan_alignment_no_warning(self):
+        """NaN alignment (failure sentinel via NaN) must NOT fire the rule."""
+        result = self._run({"alignment_accuracy": NAN})
+        warning_categories = [w.category for w in result.warnings]
+        assert "alignment_uncertain" not in warning_categories
+
+    def test_none_alignment_no_warning(self):
+        """None alignment (never computed) must NOT fire the rule."""
+        result = self._run({"alignment_accuracy": None})
+        warning_categories = [w.category for w in result.warnings]
+        assert "alignment_uncertain" not in warning_categories
+
+    def test_absent_alignment_no_warning(self):
+        """Absent alignment key (most common) must NOT fire the rule."""
+        result = self._run({})
+        warning_categories = [w.category for w in result.warnings]
+        assert "alignment_uncertain" not in warning_categories

@@ -434,14 +434,23 @@ def extract_timing_metrics_for_csv(
         not validation_result.details
         or "timing_metrics" not in validation_result.details
     ):
-        # Return default/empty metrics if validation failed or no metrics available
+        # Return default/empty metrics if validation failed or no metrics available.
+        #
+        # alignment_accuracy is NaN here (not 0.0): on this default branch the
+        # alignment was NOT measured (validation failed / no timing metrics), so
+        # "could not measure" must be distinguishable from a genuine 0% alignment.
+        # A 0.0 sentinel would always read as "fully misaligned" and false-trip
+        # the downstream alignment warning (0.0 < 0.98). The genuine-computation
+        # path below (and ``calculate_alignment_accuracy``'s empty-list 0.0) are a
+        # different, real measurement and are left untouched.
+        # ([[giflab-alignment-warning-threshold]])
         return {
             "timing_grid_ms": 0,
             "grid_length": 0,
             "duration_diff_ms": 0,
             "timing_drift_score": 1.0,
             "max_timing_drift_ms": 0,
-            "alignment_accuracy": 0.0,
+            "alignment_accuracy": float("nan"),
         }
 
     timing_metrics = validation_result.details["timing_metrics"]
