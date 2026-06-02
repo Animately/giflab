@@ -3,7 +3,9 @@ from __future__ import annotations
 """Schemas for GifLab data exports."""
 
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+import math
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 # --------------------------------------------------------------------------- #
 # Helper constants
@@ -41,11 +43,36 @@ class MetricRecordV1(BaseModel):
 
     render_ms: int = Field(ge=0, description="Time taken to compute metrics (ms)")
     kilobytes: float = Field(ge=0, description="Size of compressed GIF in KB")
+    # NOTE: no ``ge=0.0, le=1.0`` Field constraint here — pydantic's bound checks
+    # categorically REJECT NaN (``nan <= 1`` is False), and as of the
+    # composite-quality NaN guard ``calculate_composite_quality`` legitimately
+    # returns ``float("nan")`` when the composite is majority-unmeasurable. The
+    # CSV/metrics export must round-trip that NaN (per CLAUDE.md "CSV
+    # serialisation must round-trip NaN") rather than crash the whole export.
+    # The ``_check_composite_quality`` validator below permits NaN while still
+    # rejecting finite out-of-range values.
     composite_quality: float = Field(
-        ge=0.0, le=1.0, description="Weighted composite quality score (0-1)"
+        description="Weighted composite quality score (0-1, or NaN if unmeasurable)"
     )
 
     model_config = ConfigDict(extra="allow")
+
+    @field_validator("composite_quality")
+    @classmethod
+    def _check_composite_quality(cls, value: float) -> float:
+        """Allow NaN (unmeasurable composite) through; enforce [0, 1] otherwise.
+
+        A NaN composite is the honest signal that quality could not be measured
+        (see ``calculate_composite_quality``); it must serialise and round-trip
+        rather than fail validation. Finite values are still bounded to [0, 1].
+        """
+        if isinstance(value, float) and math.isnan(value):
+            return value
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(
+                "composite_quality must be in [0.0, 1.0] or NaN, " f"got {value!r}"
+            )
+        return value
 
 
 # --------------------------------------------------------------------------- #
