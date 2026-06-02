@@ -1929,6 +1929,25 @@ def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
     Despite these invariances the metric is NOT single-stream — both frames
     are required and the LBP statistics are compared.
 
+    COLOUR-BLIND — NOT a standalone perceptual-quality proxy. LBP is computed
+    on a GREYSCALE conversion of each frame (``cv2.cvtColor(..., RGB2GRAY)``
+    below), so it measures only the coarse spatial micro-texture pattern and
+    is insensitive to colour. A pure colour-quantisation failure — where the
+    palette is reorganised but the luminance pattern survives — leaves the LBP
+    histogram almost unchanged, so ``texture_similarity`` stays near 1.0 even
+    when the image "looks" badly degraded. The 2026-05-26 outlier deep-dive
+    saw exactly this on two real GIFs (``8e172835`` Christmas stocking,
+    ``XpkfMAWfUsWg`` gstatic data-viz): ``texture_similarity ≈ 0.999`` while
+    ssim fell to 0.11-0.23, deltae rose to 25-66 and ssimulacra2 hit 0. Use
+    this metric to detect grain removal / texture smoothing, NOT to judge
+    whether colour fidelity survived; always pair it with a colour- and
+    luminance-sensitive metric (ssim, deltae, ssimulacra2, lpips) for any
+    quality decision. It contributes a small ``ENHANCED_TEXTURE_WEIGHT`` share
+    of ``composite_quality`` precisely so that a surviving texture score
+    cannot offset a catastrophic colour failure — see
+    docs/metrics-audit/outlier-deep-dive-2026-05-26.md and task note
+    giflab-texture-similarity-composite-weight-review.
+
     Flat- and near-flat-content handling (audit-fix, this metric was the last
     structure-based pair metric missing it; fsim/gmsd/edge_similarity/
     sharpness_similarity converted earlier):
