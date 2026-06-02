@@ -2090,6 +2090,55 @@ _MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(
 )
 
 
+# Keys produced by the temporal-artifact and gradient-color detectors that are
+# computed on the COMPRESSED stream alone (the original frames are accepted but
+# never used by the detector). They read like original-vs-compressed pair
+# signals but never were one, so they MUST be emitted only under a
+# ``_compressed`` suffix — never as a bare key that downstream consumers
+# (composite_quality, validation_checker, the storage CSV) would mistake for a
+# pair comparison. See CLAUDE.md "Pair-wise over single-stream — and labelled
+# honestly". ``flat_region_count`` is produced by BOTH
+# ``calculate_enhanced_temporal_metrics`` and ``calculate_gradient_color_metrics``;
+# both producer merges must gate on this same tuple. The bare keys were REMOVED
+# (Wave 7) — this single source of truth is shared by every assembly path
+# (``calculate_comprehensive_metrics_from_frames`` main + high-tier branches and
+# ``calculate_selected_metrics``) so the key schema stays identical across paths.
+_SINGLE_STREAM_TEMPORAL_KEYS: tuple[str, ...] = (
+    "flicker_excess",
+    "flicker_frame_ratio",
+    "flat_flicker_ratio",
+    "flat_region_count",
+    "temporal_pumping_score",
+    "quality_oscillation_frequency",
+    "lpips_t_mean",
+    "lpips_t_p95",
+    "lpips_t_max",
+)
+
+
+def _merge_single_stream_metrics(
+    target: dict[str, Any], producer_metrics: dict[str, Any]
+) -> None:
+    """Merge a temporal/gradient producer dict into ``target`` in place.
+
+    Re-keys any single-stream key (``_SINGLE_STREAM_TEMPORAL_KEYS``) to its
+    ``_compressed`` suffix so a single-stream value can never land in the result
+    under a bare pair-shaped name. All other keys pass through unchanged. Numeric
+    values are coerced to ``float`` to match the rest of the result schema; the
+    rare non-numeric value (e.g. an error string) is passed through verbatim.
+
+    Used by every assembly path so the emitted key schema is identical
+    regardless of which path computed the metrics (CLAUDE.md "Same key shape
+    across paths").
+    """
+    for key, value in producer_metrics.items():
+        coerced = float(value) if isinstance(value, int | float) else value
+        if key in _SINGLE_STREAM_TEMPORAL_KEYS:
+            target[f"{key}_compressed"] = coerced
+        else:
+            target[key] = coerced
+
+
 def _nan_fallback_dict(keys: list[str]) -> dict[str, float]:
     """Build a "no measurement" fallback dict mapping every key to NaN.
 
@@ -2433,7 +2482,11 @@ def calculate_selected_metrics(
             temporal_metrics = calculate_enhanced_temporal_metrics(
                 original_frames_resized, compressed_frames_resized, device=None
             )
-            results.update(temporal_metrics)
+            # Re-key single-stream temporal keys to ``_compressed`` so this
+            # optimized path emits the SAME schema as the main from_frames
+            # assembly — a bare ``flicker_excess`` etc. must never reach the
+            # storage CSV / validation_checker, which now read ``_compressed``.
+            _merge_single_stream_metrics(results, temporal_metrics)
         except Exception as e:
             logger.warning(f"Temporal artifacts calculation failed: {e}")
 
@@ -2455,7 +2508,10 @@ def calculate_selected_metrics(
             gradient_metrics = calculate_gradient_color_metrics(
                 original_frames_resized, compressed_frames_resized
             )
-            results.update(gradient_metrics)
+            # ``flat_region_count`` is single-stream here too — gate the
+            # gradient merge on the same tuple so the gradient-sourced
+            # ``flat_region_count`` becomes ``_compressed`` rather than bare.
+            _merge_single_stream_metrics(results, gradient_metrics)
         except Exception as e:
             logger.warning(f"Color gradients calculation failed: {e}")
 
@@ -2745,16 +2801,14 @@ def calculate_comprehensive_metrics_from_frames(
                                 original_frames_resized, compressed_frames_resized
                             )
 
-                            # Add gradient and color metrics to optimized results
-                            for (
-                                metric_key,
-                                metric_value,
-                            ) in gradient_color_metrics.items():
-                                optimized_results[metric_key] = (
-                                    float(metric_value)
-                                    if isinstance(metric_value, int | float)
-                                    else metric_value
-                                )
+                            # Add gradient and color metrics to optimized
+                            # results, re-keying the single-stream
+                            # ``flat_region_count`` to ``_compressed`` so this
+                            # high-tier fast branch emits the same schema as the
+                            # main path (CLAUDE.md "Same key shape across paths").
+                            _merge_single_stream_metrics(
+                                optimized_results, gradient_color_metrics
+                            )
                         except Exception as e:
                             logger.warning(
                                 f"Gradient/color metrics failed in optimized path: {e}, using defaults"
@@ -3638,45 +3692,19 @@ def calculate_comprehensive_metrics_from_frames(
         # suffix so callers cannot mistake a single-stream value for an
         # original-vs-compressed pair signal. The legacy bare keys have been
         # REMOVED (Wave 7) — they read like pair signals but never were one.
-        _single_stream_temporal_keys = (
-            "flicker_excess",
-            "flicker_frame_ratio",
-            "flat_flicker_ratio",
-            "flat_region_count",
-            "temporal_pumping_score",
-            "quality_oscillation_frequency",
-            "lpips_t_mean",
-            "lpips_t_p95",
-            "lpips_t_max",
-        )
+        # The re-keying tuple + merge live at module scope
+        # (``_SINGLE_STREAM_TEMPORAL_KEYS`` / ``_merge_single_stream_metrics``)
+        # so every assembly path applies the identical schema.
 
         # Add enhanced temporal artifact metrics (Task 1.2). Suppress the bare
         # single-stream keys and re-key them to ``_compressed`` sourced directly
         # from the producer dict — never let the bare key land in ``result``.
-        for metric_key, metric_value in enhanced_temporal_metrics.items():
-            coerced = (
-                float(metric_value)
-                if isinstance(metric_value, int | float)
-                else metric_value
-            )
-            if metric_key in _single_stream_temporal_keys:
-                result[f"{metric_key}_compressed"] = coerced
-            else:
-                result[metric_key] = coerced
+        _merge_single_stream_metrics(result, enhanced_temporal_metrics)
 
         # Add enhanced gradient and color artifact metrics (Task 1.3 & 1.4).
         # ``flat_region_count`` is also a single-stream key produced here — it
         # must follow the same ``_compressed``-only treatment as above.
-        for metric_key, metric_value in gradient_color_metrics.items():
-            coerced = (
-                float(metric_value)
-                if isinstance(metric_value, int | float)
-                else metric_value
-            )
-            if metric_key in _single_stream_temporal_keys:
-                result[f"{metric_key}_compressed"] = coerced
-            else:
-                result[metric_key] = coerced
+        _merge_single_stream_metrics(result, gradient_color_metrics)
 
         # Add deep perceptual metrics (Task 2.2)
         for deep_key, deep_value in deep_perceptual_metrics.items():

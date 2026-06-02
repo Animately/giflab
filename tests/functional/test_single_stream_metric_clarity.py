@@ -27,7 +27,11 @@ from giflab.enhanced_metrics import (
     calculate_composite_quality,
     process_metrics_with_enhanced_quality,
 )
-from giflab.metrics import calculate_comprehensive_metrics_from_frames
+from giflab.metrics import (
+    _SINGLE_STREAM_TEMPORAL_KEYS,
+    calculate_comprehensive_metrics_from_frames,
+    calculate_selected_metrics,
+)
 
 
 def _solid_frames(
@@ -596,3 +600,133 @@ class TestTextureSimilarityCannotMaskColourFailure:
             f"composite={composite:.4f}; it must stay well below acceptance. If "
             f"this rises above 0.5 the texture weight is masking a colour failure."
         )
+
+
+def _single_stream_aliases() -> tuple[str, ...]:
+    """The ``_compressed`` suffixed names for every single-stream key."""
+    return tuple(f"{key}_compressed" for key in _SINGLE_STREAM_TEMPORAL_KEYS)
+
+
+def _noisy_pair(
+    n: int = 5, size: tuple[int, int] = (40, 40), seed: int = 7
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Build a distinct original/compressed pair that exercises the temporal
+    and gradient-colour detectors (non-trivial, non-identical content)."""
+    rng = np.random.default_rng(seed)
+    orig = [rng.integers(0, 255, (*size, 3), dtype=np.uint8) for _ in range(n)]
+    comp = [rng.integers(0, 255, (*size, 3), dtype=np.uint8) for _ in range(n)]
+    return orig, comp
+
+
+class TestSelectedMetricsPathSingleStreamKeys:
+    """Regression for the optimized / conditional metric paths (Wave 7 round 2).
+
+    ``calculate_selected_metrics`` — and the high-tier fast branch in
+    ``calculate_comprehensive_metrics_from_frames`` plus
+    ``ConditionalMetricsCalculator.calculate_progressive`` that delegate to it —
+    merge the temporal and gradient-colour producer dicts. Before the fix they
+    merged them WHOLESALE (``results.update(...)``), so they emitted the bare
+    single-stream keys (``flicker_excess`` etc.) and NO ``_compressed`` variants.
+
+    That produced a cross-path schema inconsistency: a high-tier GIF written via
+    this path would leave the storage CSV ``*_compressed`` columns empty and make
+    ``validation_checker._validate_temporal_artifacts`` read ``None`` and silently
+    classify temporal artifacts as 'unavailable' — disabling flicker/pumping
+    validation. These tests assert the optimized path emits the SAME
+    ``_compressed`` schema (and ABSENCE of bare keys) as the main path.
+    """
+
+    def test_selected_metrics_temporal_and_gradient_rekeyed(self) -> None:
+        config = MetricsConfig()
+        orig, comp = _noisy_pair()
+        selected = {"temporal_artifacts": True, "color_gradients": True}
+
+        result = calculate_selected_metrics(orig, comp, selected, config=config)
+
+        # No bare single-stream key may survive on this path.
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from "
+                f"calculate_selected_metrics"
+            )
+
+        # The temporal producer actually emits the flicker/pumping signals on
+        # this content, so their _compressed aliases must be present (not merely
+        # 'no bare key because nothing was produced').
+        for alias in (
+            "flicker_excess_compressed",
+            "flicker_frame_ratio_compressed",
+            "flat_flicker_ratio_compressed",
+            "flat_region_count_compressed",
+            "temporal_pumping_score_compressed",
+            "quality_oscillation_frequency_compressed",
+        ):
+            assert alias in result, (
+                f"{alias} missing — calculate_selected_metrics must re-key "
+                f"single-stream temporal/gradient signals to _compressed"
+            )
+
+    def test_selected_metrics_gradient_only_flat_region_count_rekeyed(self) -> None:
+        """``flat_region_count`` is produced by the gradient-colour detector too.
+        With only ``color_gradients`` selected (temporal off), it must STILL be
+        re-keyed to ``flat_region_count_compressed`` rather than land bare."""
+        config = MetricsConfig()
+        orig, comp = _noisy_pair(seed=11)
+        selected = {"color_gradients": True}
+
+        result = calculate_selected_metrics(orig, comp, selected, config=config)
+
+        assert (
+            "flat_region_count" not in result
+        ), "gradient-sourced flat_region_count leaked as a bare key"
+        assert "flat_region_count_compressed" in result
+
+    def test_high_tier_optimized_branch_rekeys_flat_region_count(
+        self, monkeypatch
+    ) -> None:
+        """End-to-end: a high-quality (near-identical) compression triggers the
+        high-tier optimized branch, which merges gradient-colour metrics into
+        ``optimized_results`` separately. That second merge must also re-key the
+        single-stream ``flat_region_count`` — otherwise the bare key reappears
+        only on the fast path (cross-path schema drift)."""
+        # Force the gradient/colour metrics to run inside the high-tier branch
+        # (otherwise they are skipped for high quality and we never exercise the
+        # branch's gradient merge at all).
+        monkeypatch.setenv("GIFLAB_ENABLE_CONDITIONAL_METRICS", "true")
+        monkeypatch.setenv("GIFLAB_FORCE_GRADIENT_METRICS", "true")
+
+        # Near-identical frames → high PSNR → high quality tier → optimized path.
+        grad = _gradient_frames(n=6, size=(48, 48))
+        result = calculate_comprehensive_metrics_from_frames(grad, list(grad))
+
+        meta = result.get("_optimization_metadata", {})
+        assert meta.get("optimization_applied") is True, (
+            "test did not exercise the high-tier optimized branch "
+            f"(metadata={meta!r})"
+        )
+
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from the high-tier "
+                f"optimized branch"
+            )
+        assert (
+            "flat_region_count_compressed" in result
+        ), "high-tier branch must emit flat_region_count_compressed"
+
+    def test_conditional_calculator_progressive_rekeys(self) -> None:
+        """``ConditionalMetricsCalculator.calculate_progressive`` returns the
+        ``calculate_selected_metrics`` result directly; assert the live entry
+        point used by the quality-tier optimization emits no bare keys."""
+        import giflab.metrics as metrics_module
+        from giflab.conditional_metrics import ConditionalMetricsCalculator
+
+        orig, comp = _noisy_pair(seed=23)
+        calc = ConditionalMetricsCalculator()
+        result = calc.calculate_progressive(orig, comp, metrics_module)
+
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from "
+                f"ConditionalMetricsCalculator.calculate_progressive"
+            )
