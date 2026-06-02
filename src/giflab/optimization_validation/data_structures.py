@@ -242,6 +242,13 @@ class ValidationConfig:
     # Temporal consistency thresholds
     temporal_consistency_threshold: float = 0.75  # Minimum temporal consistency
 
+    # Frame-drop alignment threshold ([[giflab-alignment-warning-threshold]]).
+    # Drives the validation-checker ``alignment_uncertain`` warning rule.
+    # Deliberately separate from MetricsConfig.ALIGNMENT_WARNING_THRESHOLD
+    # (which drives the metrics-pipeline ``alignment_warning`` key); both
+    # default 0.98 and live in their natural homes.
+    alignment_warning_threshold: float = 0.98  # Minimum frame-drop alignment
+
     # Enhanced temporal artifact thresholds (Task 1.2)
     flicker_excess_threshold: float = 0.02  # Maximum acceptable flicker excess
     flat_flicker_ratio_threshold: float = 0.1  # Maximum flicker in stable regions
@@ -288,6 +295,7 @@ class ValidationConfig:
             "disposal_artifact_threshold": self.disposal_artifact_threshold,
             "disposal_artifact_delta_threshold": self.disposal_artifact_delta_threshold,
             "temporal_consistency_threshold": self.temporal_consistency_threshold,
+            "alignment_warning_threshold": self.alignment_warning_threshold,
             # Enhanced temporal artifact thresholds (Task 1.2)
             "flicker_excess_threshold": self.flicker_excess_threshold,
             "flat_flicker_ratio_threshold": self.flat_flicker_ratio_threshold,

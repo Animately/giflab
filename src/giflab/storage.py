@@ -118,6 +118,9 @@ QUALITY_METRIC_COLUMNS: list[str] = [
     "max_timing_drift_ms",
     "alignment_accuracy",
     "duration_diff_ms",
+    # Frame-drop alignment warning flag (computed in metrics.py;
+    # [[giflab-alignment-warning-threshold]]). Float 0.0/1.0, nullable REAL.
+    "alignment_warning",
     # Color quantization (computed in gradient_color_artifacts.py)
     "color_count_original",
     "color_count_compressed",

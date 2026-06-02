@@ -159,6 +159,14 @@ class MetricsConfig:
     # audit-fix/extract-gif-frames-alpha-compositing-bug regression test.
     ALPHA_BACKGROUND: tuple[int, int, int] = (255, 255, 255)
 
+    # Frame-drop alignment warning threshold. When the timing validator reports
+    # a REAL alignment_accuracy below this value, the metrics pipeline sets an
+    # ``alignment_warning`` flag and logs a warning so imperfect frame-drop
+    # alignment (the silent ``alignment_accuracy=0.976`` case) is surfaced rather
+    # than slipping through. NaN / -1.0 (failure sentinel) / absent values never
+    # warn. ([[giflab-alignment-warning-threshold]])
+    ALIGNMENT_WARNING_THRESHOLD: float = 0.98
+
     def __post_init__(self) -> None:
         # Validate legacy weights sum to 1.0 with proper floating point tolerance
         legacy_total = (
@@ -242,6 +250,13 @@ class MetricsConfig:
         # Validate PSNR max dB
         if self.PSNR_MAX_DB <= 0:
             raise ValueError("PSNR_MAX_DB must be positive")
+
+        # Validate alignment warning threshold is a valid 0-1 fraction
+        if not (0.0 <= self.ALIGNMENT_WARNING_THRESHOLD <= 1.0):
+            raise ValueError(
+                "ALIGNMENT_WARNING_THRESHOLD must be between 0 and 1, "
+                f"got {self.ALIGNMENT_WARNING_THRESHOLD}"
+            )
 
         # Validate Canny thresholds
         if self.EDGE_CANNY_THRESHOLD1 <= 0 or self.EDGE_CANNY_THRESHOLD2 <= 0:

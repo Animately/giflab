@@ -3681,6 +3681,39 @@ def calculate_comprehensive_metrics_from_frames(
         for key, value in timing_metrics.items():
             result[key] = value
 
+        # Frame-drop alignment warning ([[giflab-alignment-warning-threshold]]).
+        # Surface imperfect frame-drop alignment (the silent
+        # ``alignment_accuracy=0.976`` case) as a float flag (1.0 = warn,
+        # 0.0 = no warn). NaN-honest: only a REAL alignment value below the
+        # configured threshold warns. The value is NEVER set when:
+        #   - alignment was not measured (no file_metadata -> timing_metrics == {},
+        #     so the key is absent),
+        #   - it is the missing-data NaN default (timing_validation.py),
+        #   - it is the documented -1.0 failure sentinel (the timing-validation
+        #     except branches above).
+        # A genuine 0.0 (fully misaligned) DOES warn — distinct from NaN.
+        alignment_accuracy = result.get("alignment_accuracy")
+        alignment_warning = 0.0
+        if isinstance(alignment_accuracy, int | float):
+            alignment_value = float(alignment_accuracy)
+            is_missing = math.isnan(alignment_value)
+            is_failure_sentinel = alignment_value == -1.0
+            if (
+                not is_missing
+                and not is_failure_sentinel
+                and alignment_value < config.ALIGNMENT_WARNING_THRESHOLD
+            ):
+                alignment_warning = 1.0
+                logger.warning(
+                    "Imperfect frame-drop alignment: alignment_accuracy=%.3f "
+                    "< threshold %.3f (original frames=%d, compressed frames=%d)",
+                    alignment_value,
+                    config.ALIGNMENT_WARNING_THRESHOLD,
+                    int(original_frame_count),
+                    int(compressed_frame_count),
+                )
+        result["alignment_warning"] = alignment_warning
+
         # Calculate compression ratio for efficiency calculation (if file metadata provided)
         if (
             file_metadata

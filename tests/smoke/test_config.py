@@ -249,3 +249,24 @@ class TestMetricsConfig:
         # Bool rejected (would otherwise pass as int 0/1).
         with pytest.raises(ValueError):
             MetricsConfig(ALPHA_BACKGROUND=(True, 0, 0))
+
+    def test_alignment_warning_threshold_default(self):
+        """Default frame-drop alignment warning threshold is 0.98."""
+        assert MetricsConfig().ALIGNMENT_WARNING_THRESHOLD == 0.98
+
+    def test_alignment_warning_threshold_validation(self):
+        """ALIGNMENT_WARNING_THRESHOLD must be in [0, 1].
+
+        Mirrors test_alpha_background_validation: an in-range value succeeds,
+        out-of-range values (>1, <0) raise ValueError.
+        """
+        # In-range succeeds.
+        assert MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=0.5).ALIGNMENT_WARNING_THRESHOLD == 0.5
+
+        # Above 1.0 -> ValueError.
+        with pytest.raises(ValueError):
+            MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=1.5)
+
+        # Below 0.0 -> ValueError.
+        with pytest.raises(ValueError):
+            MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=-0.1)
