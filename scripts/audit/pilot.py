@@ -30,11 +30,13 @@ import numpy as np
 # Local helpers
 sys.path.insert(0, str(Path(__file__).parent))
 from _common import (  # noqa: E402
+    classify_frame_reduction,
     compress_animately,
     import_giflab,
     load_existing_keys,
     measure_pair,
     open_csv_for_append,
+    read_gif_timing,
 )
 from build_sample import sample_balanced, stratify, walk_corpus  # noqa: E402
 
@@ -70,6 +72,15 @@ BASE_FIELDS = [
     "success",
     "error",
     "runtime_s",
+    # Frame-reduction classification (see _common.classify_frame_reduction):
+    # distinguishes benign temporal dedup (duration preserved) from possible
+    # frame-loss bugs (duration not preserved) so operators can filter sweep
+    # rows instead of investigating every frame-count mismatch.
+    "frame_reduction",
+    "frame_reduction_class",
+    "frames_deduplicated",
+    "frame_dedup",
+    "frame_loss",
 ]
 
 
@@ -195,6 +206,17 @@ def sweep_pilot(
                     continue
                 metrics, runtime_s = measure_pair(orig, compressed, gl)
                 kb_compressed = round(compressed.stat().st_size / 1024.0, 2)
+                # Classify any frame-count reduction (dedup vs frame_loss)
+                # while both GIFs still exist on disk — the compressed
+                # artifact is unlinked a few lines below.
+                orig_frames, orig_dur = read_gif_timing(orig)
+                comp_frames, comp_dur = read_gif_timing(compressed)
+                frame_class = classify_frame_reduction(
+                    orig_frames=orig_frames,
+                    orig_duration_ms=orig_dur,
+                    comp_frames=comp_frames,
+                    comp_duration_ms=comp_dur,
+                )
                 row = {
                     **entry,
                     "path": str(orig),
@@ -208,6 +230,7 @@ def sweep_pilot(
                     "success": True,
                     "error": "",
                     "runtime_s": round(runtime_s, 2),
+                    **frame_class,
                     **metrics,
                 }
                 writer.writerow(row)
