@@ -256,17 +256,23 @@ class ValidationChecker:
             disposal_artifacts_delta=compression_metrics.get(
                 "disposal_artifacts_delta"
             ),
-            # Enhanced temporal artifact metrics (Task 1.2)
-            flicker_excess=compression_metrics.get("flicker_excess"),
-            flicker_frame_ratio=compression_metrics.get("flicker_frame_ratio"),
-            flat_flicker_ratio=compression_metrics.get("flat_flicker_ratio"),
-            flat_region_count=compression_metrics.get("flat_region_count"),
-            temporal_pumping_score=compression_metrics.get("temporal_pumping_score"),
-            quality_oscillation_frequency=compression_metrics.get(
-                "quality_oscillation_frequency"
+            # Enhanced temporal artifact metrics (Task 1.2). Wave 7: these
+            # single-stream signals (computed on the compressed frames only) are
+            # now keyed with the honest ``_compressed`` suffix in the result dict.
+            flicker_excess=compression_metrics.get("flicker_excess_compressed"),
+            flicker_frame_ratio=compression_metrics.get(
+                "flicker_frame_ratio_compressed"
             ),
-            lpips_t_mean=compression_metrics.get("lpips_t_mean"),
-            lpips_t_p95=compression_metrics.get("lpips_t_p95"),
+            flat_flicker_ratio=compression_metrics.get("flat_flicker_ratio_compressed"),
+            flat_region_count=compression_metrics.get("flat_region_count_compressed"),
+            temporal_pumping_score=compression_metrics.get(
+                "temporal_pumping_score_compressed"
+            ),
+            quality_oscillation_frequency=compression_metrics.get(
+                "quality_oscillation_frequency_compressed"
+            ),
+            lpips_t_mean=compression_metrics.get("lpips_t_mean_compressed"),
+            lpips_t_p95=compression_metrics.get("lpips_t_p95_compressed"),
             # Deep perceptual metrics (Task 2.2)
             lpips_quality_mean=compression_metrics.get("lpips_quality_mean"),
             lpips_quality_p95=compression_metrics.get("lpips_quality_p95"),
@@ -694,11 +700,12 @@ class ValidationChecker:
         This validates the new temporal artifact metrics including flicker excess,
         flat-region flicker, and temporal pumping detection.
         """
-        # Check if temporal artifact metrics are available
-        flicker_excess = compression_metrics.get("flicker_excess")
-        flat_flicker_ratio = compression_metrics.get("flat_flicker_ratio")
-        temporal_pumping = compression_metrics.get("temporal_pumping_score")
-        lpips_t_mean = compression_metrics.get("lpips_t_mean")
+        # Check if temporal artifact metrics are available. Wave 7: single-
+        # stream signals are keyed with the ``_compressed`` suffix.
+        flicker_excess = compression_metrics.get("flicker_excess_compressed")
+        flat_flicker_ratio = compression_metrics.get("flat_flicker_ratio_compressed")
+        temporal_pumping = compression_metrics.get("temporal_pumping_score_compressed")
+        lpips_t_mean = compression_metrics.get("lpips_t_mean_compressed")
 
         if all(
             _is_missing(v) for v in (flicker_excess, flat_flicker_ratio, temporal_pumping, lpips_t_mean)

@@ -2896,12 +2896,16 @@ def calculate_comprehensive_metrics_from_frames(
                         )
                         temporal_delta = abs(temporal_pre - temporal_post)
 
-                        optimized_results["temporal_consistency"] = float(temporal_post)
-                        optimized_results["temporal_consistency_std"] = 0.0
-                        optimized_results["temporal_consistency_min"] = float(
+                        # Audit-fix (Wave 7): bare ``temporal_consistency``
+                        # removed; statistical siblings re-rooted onto
+                        # ``_compressed`` (single-stream value computed on the
+                        # compressed frames only — see
+                        # calculate_comprehensive_metrics_from_frames).
+                        optimized_results["temporal_consistency_compressed_std"] = 0.0
+                        optimized_results["temporal_consistency_compressed_min"] = float(
                             temporal_post
                         )
-                        optimized_results["temporal_consistency_max"] = float(
+                        optimized_results["temporal_consistency_compressed_max"] = float(
                             temporal_post
                         )
                         optimized_results["temporal_consistency_pre"] = float(
@@ -2913,8 +2917,7 @@ def calculate_comprehensive_metrics_from_frames(
                         optimized_results["temporal_consistency_delta"] = float(
                             temporal_delta
                         )
-                        # Audit-fix (Wave 3): explicit single-stream aliases
-                        # (see calculate_comprehensive_metrics_from_frames).
+                        # Honest single-stream labelling (see from_frames path).
                         optimized_results["temporal_consistency_compressed"] = float(
                             temporal_post
                         )
@@ -2924,7 +2927,6 @@ def calculate_comprehensive_metrics_from_frames(
                     except Exception as e:
                         logger.warning(f"Temporal consistency calculation failed: {e}")
                         # Use default values if calculation fails
-                        optimized_results["temporal_consistency"] = 1.0
                         optimized_results["temporal_consistency_pre"] = 1.0
                         optimized_results["temporal_consistency_post"] = 1.0
                         optimized_results["temporal_consistency_delta"] = 0.0
@@ -3590,60 +3592,52 @@ def calculate_comprehensive_metrics_from_frames(
         ):
             result["psnr_mean"] = float(np.nanmean(psnr_mean_raw_vals))
 
-        # Add temporal consistency (single value, not frame-level)
-        # Keep legacy key pointing to *post*-compression value for backward compatibility
-        result["temporal_consistency"] = float(temporal_post)
-        result["temporal_consistency_std"] = 0.0
-        result["temporal_consistency_min"] = float(temporal_post)
-        result["temporal_consistency_max"] = float(temporal_post)
+        # Add temporal consistency (single value, not frame-level).
+        #
+        # Audit-fix (Wave 7): the legacy bare ``temporal_consistency`` key has
+        # been REMOVED. It carried the post-compression value of a metric
+        # computed on the COMPRESSED STREAM ONLY, yet its name read like an
+        # original-vs-compressed pair signal — exactly the single-stream-
+        # mislabelled-as-pair anti-pattern CLAUDE.md warns against. The honest
+        # ``_compressed`` / ``_original`` suffixed keys are the replacement, and
+        # the statistical siblings are re-rooted onto ``_compressed`` so the
+        # ``X_min <= X_mean <= X_max`` family invariant still holds.
+        result["temporal_consistency_compressed_std"] = 0.0
+        result["temporal_consistency_compressed_min"] = float(temporal_post)
+        result["temporal_consistency_compressed_max"] = float(temporal_post)
 
-        # New keys: pre, post (explicit) and delta
+        # Provenance keys: pre, post (explicit) and delta (true pair signal).
         result["temporal_consistency_pre"] = float(temporal_pre)
         result["temporal_consistency_post"] = float(temporal_post)
         result["temporal_consistency_delta"] = float(temporal_delta)
 
-        # Audit-fix (Wave 3): explicit single-stream aliases so consumers can
-        # tell at a glance whether the value describes the original or the
-        # compressed stream. The legacy bare ``temporal_consistency`` key is
-        # set to the post-compression value (compressed-only); the
-        # ``_compressed`` / ``_original`` suffixes make that explicit. See
-        # docs/metrics-audit/2026-05-22/report.md and Wave 3 task note.
+        # Honest single-stream labelling: ``_compressed`` is the compressed-only
+        # value (== post), ``_original`` is the original-only value (== pre).
         result["temporal_consistency_compressed"] = float(temporal_post)
         result["temporal_consistency_original"] = float(temporal_pre)
 
-        # Add disposal artifact metrics
-        result["disposal_artifacts"] = float(disposal_artifacts_post)
-        result["disposal_artifacts_std"] = 0.0
-        result["disposal_artifacts_min"] = float(disposal_artifacts_post)
-        result["disposal_artifacts_max"] = float(disposal_artifacts_post)
+        # Add disposal artifact metrics. Same Wave-7 treatment: bare
+        # ``disposal_artifacts`` removed; stats re-rooted onto ``_compressed``.
+        result["disposal_artifacts_compressed_std"] = 0.0
+        result["disposal_artifacts_compressed_min"] = float(disposal_artifacts_post)
+        result["disposal_artifacts_compressed_max"] = float(disposal_artifacts_post)
         result["disposal_artifacts_pre"] = float(disposal_artifacts_pre)
         result["disposal_artifacts_post"] = float(disposal_artifacts_post)
         result["disposal_artifacts_delta"] = float(disposal_artifacts_delta)
-        # Audit-fix (Wave 3): same _compressed / _original convention.
         result["disposal_artifacts_compressed"] = float(disposal_artifacts_post)
         result["disposal_artifacts_original"] = float(disposal_artifacts_pre)
 
-        # Add enhanced temporal artifact metrics (Task 1.2)
-        for metric_key, metric_value in enhanced_temporal_metrics.items():
-            result[metric_key] = (
-                float(metric_value)
-                if isinstance(metric_value, int | float)
-                else metric_value
-            )
-
-        # Audit-fix (Wave 3): all of the enhanced temporal metrics
+        # Audit-fix (Wave 7): all of the enhanced temporal metrics
         # (flicker_excess, flicker_frame_ratio, flat_flicker_ratio,
         # flat_region_count, temporal_pumping_score,
-        # quality_oscillation_frequency, lpips_t_mean, lpips_t_p95) are
-        # computed on COMPRESSED FRAMES ONLY (see
+        # quality_oscillation_frequency, lpips_t_mean, lpips_t_p95,
+        # lpips_t_max) are computed on COMPRESSED FRAMES ONLY (see
         # temporal_artifacts.calculate_enhanced_temporal_metrics — the
         # ``original_frames`` argument is accepted but never used in the
-        # detector calls). Expose ``_compressed`` aliases so callers can
-        # tell at a glance that these describe the compressed stream's
-        # behaviour, not how compression altered it relative to the
-        # original. The legacy bare keys are retained for one cycle for
-        # backward compatibility with downstream consumers (storage CSV
-        # schema, validation_checker, etc.).
+        # detector calls). They are emitted ONLY under their ``_compressed``
+        # suffix so callers cannot mistake a single-stream value for an
+        # original-vs-compressed pair signal. The legacy bare keys have been
+        # REMOVED (Wave 7) — they read like pair signals but never were one.
         _single_stream_temporal_keys = (
             "flicker_excess",
             "flicker_frame_ratio",
@@ -3655,17 +3649,34 @@ def calculate_comprehensive_metrics_from_frames(
             "lpips_t_p95",
             "lpips_t_max",
         )
-        for legacy_key in _single_stream_temporal_keys:
-            if legacy_key in result:
-                result[f"{legacy_key}_compressed"] = result[legacy_key]
 
-        # Add enhanced gradient and color artifact metrics (Task 1.3 & 1.4)
-        for metric_key, metric_value in gradient_color_metrics.items():
-            result[metric_key] = (
+        # Add enhanced temporal artifact metrics (Task 1.2). Suppress the bare
+        # single-stream keys and re-key them to ``_compressed`` sourced directly
+        # from the producer dict — never let the bare key land in ``result``.
+        for metric_key, metric_value in enhanced_temporal_metrics.items():
+            coerced = (
                 float(metric_value)
                 if isinstance(metric_value, int | float)
                 else metric_value
             )
+            if metric_key in _single_stream_temporal_keys:
+                result[f"{metric_key}_compressed"] = coerced
+            else:
+                result[metric_key] = coerced
+
+        # Add enhanced gradient and color artifact metrics (Task 1.3 & 1.4).
+        # ``flat_region_count`` is also a single-stream key produced here — it
+        # must follow the same ``_compressed``-only treatment as above.
+        for metric_key, metric_value in gradient_color_metrics.items():
+            coerced = (
+                float(metric_value)
+                if isinstance(metric_value, int | float)
+                else metric_value
+            )
+            if metric_key in _single_stream_temporal_keys:
+                result[f"{metric_key}_compressed"] = coerced
+            else:
+                result[metric_key] = coerced
 
         # Add deep perceptual metrics (Task 2.2)
         for deep_key, deep_value in deep_perceptual_metrics.items():
@@ -3818,7 +3829,8 @@ def calculate_comprehensive_metrics_from_frames(
                 "edge_similarity",
                 "texture_similarity",
                 "sharpness_similarity",
-                "temporal_consistency",
+                # Wave 7: bare ``temporal_consistency`` removed; the explicit
+                # provenance variants keep their raw copies below.
                 "temporal_consistency_pre",
                 "temporal_consistency_post",
                 "temporal_consistency_delta",
@@ -3873,7 +3885,7 @@ _POLARITY_PROBE_SENTINELS: dict[str, tuple[float, float]] = {
     "deltae_mean": (1.0, 9.0),
     "lpips_quality_mean": (0.1, 0.9),
     "temporal_consistency_delta": (0.1, 0.9),
-    "temporal_consistency": (0.1, 0.9),
+    "temporal_consistency_compressed": (0.1, 0.9),
 }
 
 # Per-stem sibling-statistic suffixes copied alongside the chosen ``_mean`` /
@@ -3967,10 +3979,13 @@ def _composite_metric_polarity(config: MetricsConfig) -> dict[str, int]:
         "banding_score_mean",
         "deltae_mean",
     ]
-    # Temporal: True -> delta (worst=MAX); False -> bare temporal_consistency
-    # (higher-better via the standard branch, worst=MIN).
+    # Temporal: True -> delta (worst=MAX); False -> temporal_consistency_compressed
+    # (single-stream compressed value, higher-better via the standard branch,
+    # worst=MIN). Wave 7 renamed the bare key to ``_compressed``.
     candidate_keys.append(
-        "temporal_consistency_delta" if use_temporal_delta else "temporal_consistency"
+        "temporal_consistency_delta"
+        if use_temporal_delta
+        else "temporal_consistency_compressed"
     )
 
     polarity: dict[str, int] = {}
@@ -4024,12 +4039,15 @@ def _companion_stem_for(key: str) -> str:
     ``X_std`` / ``X_min`` / ``X_max`` / ``X_raw`` stats AND non-sibling
     companions such as ``X_p95``, ``X_first`` / ``X_last`` / ``X_middle`` /
     ``X_positional_variance``, ``X_pct_gt*`` all move together). The temporal
-    keys (``temporal_consistency`` / ``temporal_consistency_delta``) collapse to
+    candidate keys (``temporal_consistency_compressed`` /
+    ``temporal_consistency_delta`` — Wave 7 renamed the bare key) collapse to
     the shared ``temporal_consistency`` family so the whole pre/post/original/
-    compressed/delta cluster follows whichever background won the temporal
-    comparison — never half-white, half-black.
+    compressed/delta cluster (including the re-rooted
+    ``temporal_consistency_compressed_std`` / ``_min`` / ``_max``, which still
+    start with ``temporal_consistency_``) follows whichever background won the
+    temporal comparison — never half-white, half-black.
     """
-    if key in ("temporal_consistency", "temporal_consistency_delta"):
+    if key in ("temporal_consistency_compressed", "temporal_consistency_delta"):
         return "temporal_consistency"
     return key[: -len("_mean")] if key.endswith("_mean") else key
 

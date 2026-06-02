@@ -260,18 +260,20 @@ class TestComprehensiveMetrics:
             "ssim",
             "ms_ssim",
             "psnr",
-            "temporal_consistency",
+            "temporal_consistency_compressed",
             "composite_quality",
             "render_ms",
             "kilobytes",
         ]
         assert all(key in metrics for key in required_keys)
+        # Wave 7: bare ``temporal_consistency`` removed entirely.
+        assert "temporal_consistency" not in metrics
 
         # Check value ranges
         assert 0.0 <= metrics["ssim"] <= 1.0
         assert 0.0 <= metrics["ms_ssim"] <= 1.0
         assert 0.0 <= metrics["psnr"] <= 1.0
-        assert 0.0 <= metrics["temporal_consistency"] <= 1.0
+        assert 0.0 <= metrics["temporal_consistency_compressed"] <= 1.0
         assert 0.0 <= metrics["composite_quality"] <= 1.0
         assert metrics["render_ms"] >= 0
         assert metrics["kilobytes"] > 0
@@ -596,7 +598,7 @@ class TestEdgeCases:
 
         assert isinstance(metrics, dict)
         assert (
-            metrics["temporal_consistency"] == 1.0
+            metrics["temporal_consistency_compressed"] == 1.0
         )  # Single frame is perfectly consistent
 
 
@@ -871,7 +873,7 @@ class TestEnhancedCompositeQuality:
             "chist_mean": 0.75,
             "sharpness_similarity_mean": 0.78,
             "texture_similarity_mean": 0.84,
-            "temporal_consistency": 0.92,
+            "temporal_consistency_compressed": 0.92,
         }
 
     def test_enhanced_composite_calculation(self):
@@ -908,7 +910,7 @@ class TestProcessMetricsIntegration:
             "ssim_mean": 0.9,
             "ms_ssim_mean": 0.85,
             "psnr_mean": 0.8,
-            "temporal_consistency": 0.92,
+            "temporal_consistency_compressed": 0.92,
         }
 
         processed = process_metrics_with_enhanced_quality(raw_metrics)
@@ -1587,8 +1589,8 @@ class TestMainPathMeanKeysForComposite:
         """Companion (non-sibling) keys must follow the SAME pass that won their
         stem — no stale white-provenance drift.
 
-        ``ssimulacra2_p95``, the ``temporal_consistency`` pre/post/original/
-        compressed cluster and the positional ``ssim_first/last/middle/
+        ``ssimulacra2_p95``, the ``temporal_consistency_compressed`` pre/post/
+        original/compressed cluster and the positional ``ssim_first/last/middle/
         positional_variance`` stats are NOT covered by the old
         ``_SIBLING_SUFFIXES`` set, so before the fix they stayed at the white
         value even when black won the stem. This asserts they now move with the
@@ -1649,7 +1651,10 @@ class TestMainPathMeanKeysForComposite:
                 "ssim_positional_variance",
             ],
             "ssimulacra2": ["ssimulacra2_p95"],
-            "temporal_consistency": [
+            # Wave 7: the bare ``temporal_consistency`` stem is gone; use the
+            # honest ``_compressed`` key as the representative of the family for
+            # determining the winning pass.
+            "temporal_consistency_compressed": [
                 "temporal_consistency_pre",
                 "temporal_consistency_post",
                 "temporal_consistency_original",
@@ -1920,13 +1925,14 @@ class TestCompositeQualityNaNRedistribution:
     def test_temporal_delta_nan_skips_temporal_does_not_fall_back(self):
         """A NaN ``temporal_consistency_delta`` must skip the temporal block
         entirely — NOT silently fall back to the single-stream
-        ``temporal_consistency`` legacy value, which would re-introduce the
-        static-black-wins bug the delta was added to fix."""
+        ``temporal_consistency_compressed`` value (Wave 7 renamed the bare
+        key), which would re-introduce the static-black-wins bug the delta was
+        added to fix."""
         metrics = dict(self._base_metrics())
         metrics["temporal_consistency_delta"] = float("nan")
-        # A deliberately perfect single-stream legacy value that would inflate
-        # the score if the code fell back to it.
-        metrics["temporal_consistency"] = 1.0
+        # A deliberately perfect single-stream value that would inflate the
+        # score if the code fell back to it.
+        metrics["temporal_consistency_compressed"] = 1.0
 
         metrics_no_temporal = dict(self._base_metrics())
         del metrics_no_temporal["temporal_consistency_delta"]
@@ -2001,7 +2007,7 @@ class TestLegacyCompositeQualityNaNSafety:
             "ssim_mean": float("nan"),
             "ms_ssim_mean": float("nan"),
             "psnr_mean": float("nan"),
-            "temporal_consistency": float("nan"),
+            "temporal_consistency_compressed": float("nan"),
         }
         from giflab.enhanced_metrics import calculate_legacy_composite_quality
 
@@ -2019,7 +2025,7 @@ class TestLegacyCompositeQualityNaNSafety:
             "ssim_mean": float("nan"),
             "ms_ssim_mean": 0.8,
             "psnr_mean": 0.8,
-            "temporal_consistency": 0.9,
+            "temporal_consistency_compressed": 0.9,
         }
         result = calculate_legacy_composite_quality(metrics, config)
         assert not math.isnan(result)

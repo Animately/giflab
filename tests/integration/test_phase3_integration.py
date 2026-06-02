@@ -593,7 +593,9 @@ class TestCrossPhaseInteractions:
 
         # Verify that both temporal and spatial metrics are present
         # and can interact in the composite quality calculation
-        assert "flicker_score" in result or "temporal_consistency" in result
+        # Wave 7: bare ``temporal_consistency`` removed; result carries the
+        # honest ``temporal_consistency_compressed`` key.
+        assert "flicker_score" in result or "temporal_consistency_compressed" in result
         assert "composite_quality" in result
 
         # Composite quality should integrate temporal and spatial aspects
@@ -685,8 +687,9 @@ def sample_phase3_metrics():
         "timing_grid_ms": 83.3,
         "grid_length": 10.0,
         "duration_diff_ms": 15.0,
-        "flicker_excess": 0.025,
-        "lpips_t_mean": 0.04,
+        # Wave 7: single-stream temporal signals keyed with ``_compressed``.
+        "flicker_excess_compressed": 0.025,
+        "lpips_t_mean_compressed": 0.04,
         # Phase 1 gradient/color metrics (for context)
         "deltae_mean": 2.1,
         "banding_score_mean": 32.0,
@@ -1162,7 +1165,7 @@ class TestValidationSystemIntegrationE2E:
             "efficiency": 0.68,
             "compression_ratio": 2.5,
             # All Phase 1-3 metrics
-            "flicker_excess": 0.02,
+            "flicker_excess_compressed": 0.02,  # Wave 7: ``_compressed`` suffix
             "deltae_mean": 1.8,
             "banding_score_mean": 25.0,
             "lpips_quality_mean": 0.18,

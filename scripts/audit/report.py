@@ -47,7 +47,7 @@ KEY_METRICS = [
     "edge_similarity",
     "texture_similarity",
     "composite_quality",
-    "temporal_consistency",
+    "temporal_consistency_compressed",
     "ssimulacra2_mean",
     "deltae_mean",
     "banding_score_mean",
@@ -65,7 +65,7 @@ HIGHER_IS_BETTER = {
     "edge_similarity",
     "texture_similarity",
     "composite_quality",
-    "temporal_consistency",
+    "temporal_consistency_compressed",
     "ssimulacra2_mean",
     "sharpness_similarity",
 }
@@ -76,8 +76,8 @@ LOWER_IS_BETTER = {
     "banding_score_mean",
     "mse",
     "rmse",
-    "flicker_excess",
-    "temporal_pumping_score",
+    "flicker_excess_compressed",
+    "temporal_pumping_score_compressed",
 }
 
 

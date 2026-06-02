@@ -92,7 +92,7 @@ def _outlier3_isolation_row() -> dict[str, float]:
         "temporal_consistency_pre": 2.28e-8,
         "temporal_consistency_post": 2.28e-8,
         "temporal_consistency_delta": abs(2.28e-8 - 2.28e-8),
-        "temporal_consistency": 2.28e-8,
+        "temporal_consistency_compressed": 2.28e-8,
     }
 
 
@@ -162,14 +162,14 @@ class TestCompositeIgnoresSingleStreamTemporalConsistency:
         # they differ.
         metrics_a = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.8,
+            "temporal_consistency_compressed": 0.8,
             "temporal_consistency_pre": 0.8,
             "temporal_consistency_post": 0.8,
             "temporal_consistency_delta": 0.0,
         }
         metrics_b = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.8,
+            "temporal_consistency_compressed": 0.8,
             "temporal_consistency_pre": 0.2,
             "temporal_consistency_post": 0.8,
             "temporal_consistency_delta": 0.6,
@@ -192,14 +192,14 @@ class TestCompositeIgnoresSingleStreamTemporalConsistency:
 
         metrics_high_post = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.95,
+            "temporal_consistency_compressed": 0.95,
             "temporal_consistency_pre": 0.10,
             "temporal_consistency_post": 0.95,
             "temporal_consistency_delta": 0.85,
         }
         metrics_low_post = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.10,
+            "temporal_consistency_compressed": 0.10,
             "temporal_consistency_pre": 0.95,
             "temporal_consistency_post": 0.10,
             "temporal_consistency_delta": 0.85,
@@ -349,8 +349,15 @@ class TestCompositeQualityDefensiveClamps:
 
 
 class TestSingleStreamMetricAliases:
-    """Renamed _compressed / _original alias keys must be emitted alongside
-    the legacy bare keys."""
+    """The honest _compressed / _original keys must be emitted and the legacy
+    bare single-stream keys (which read like pair signals) must be ABSENT.
+
+    Wave 7 removed the bare aliases entirely: a single-stream value computed on
+    the compressed frames only must NOT appear under a name like
+    ``temporal_consistency`` / ``disposal_artifacts`` / ``flicker_excess`` that
+    reads as an original-vs-compressed pair signal. The honest ``_compressed``
+    (and ``_original`` / ``_pre`` / ``_post`` / ``_delta`` provenance) keys stay.
+    """
 
     def _run(self) -> dict[str, float | str]:
         config = MetricsConfig()
@@ -360,11 +367,11 @@ class TestSingleStreamMetricAliases:
             original, compressed, config=config
         )
 
-    def test_temporal_consistency_aliases_present(self) -> None:
+    def test_temporal_consistency_compressed_present_bare_absent(self) -> None:
         result = self._run()
         assert "temporal_consistency_compressed" in result
         assert "temporal_consistency_original" in result
-        # Aliases mirror the legacy keys.
+        # The honest _compressed/_original keys mirror the provenance siblings.
         assert (
             result["temporal_consistency_compressed"]
             == result["temporal_consistency_post"]
@@ -373,10 +380,18 @@ class TestSingleStreamMetricAliases:
             result["temporal_consistency_original"]
             == result["temporal_consistency_pre"]
         )
-        # Legacy bare key still present for backward compatibility.
-        assert "temporal_consistency" in result
+        # The legacy bare single-stream key (reads like a pair signal) is GONE.
+        assert "temporal_consistency" not in result
+        # Re-rooted statistical siblings live under _compressed now.
+        assert "temporal_consistency_compressed_std" in result
+        assert "temporal_consistency_compressed_min" in result
+        assert "temporal_consistency_compressed_max" in result
+        # The bare-key statistical siblings must NOT survive.
+        assert "temporal_consistency_std" not in result
+        assert "temporal_consistency_min" not in result
+        assert "temporal_consistency_max" not in result
 
-    def test_disposal_artifacts_aliases_present(self) -> None:
+    def test_disposal_artifacts_compressed_present_bare_absent(self) -> None:
         result = self._run()
         assert "disposal_artifacts_compressed" in result
         assert "disposal_artifacts_original" in result
@@ -384,28 +399,36 @@ class TestSingleStreamMetricAliases:
             result["disposal_artifacts_compressed"] == result["disposal_artifacts_post"]
         )
         assert result["disposal_artifacts_original"] == result["disposal_artifacts_pre"]
-        # Legacy bare key still present.
-        assert "disposal_artifacts" in result
+        # Legacy bare key GONE.
+        assert "disposal_artifacts" not in result
+        # Re-rooted statistical siblings.
+        assert "disposal_artifacts_compressed_std" in result
+        assert "disposal_artifacts_compressed_min" in result
+        assert "disposal_artifacts_compressed_max" in result
+        assert "disposal_artifacts_std" not in result
+        assert "disposal_artifacts_min" not in result
+        assert "disposal_artifacts_max" not in result
 
-    def test_temporal_artifact_aliases_present(self) -> None:
+    def test_temporal_artifact_compressed_present_bare_absent(self) -> None:
         # ENABLE_TEMPORAL_ARTIFACTS defaults to True in MetricsConfig.
         result = self._run()
-        # Only assert when the legacy keys actually made it into the dict
-        # (the temporal-artifacts module is gated and may emit the
-        # zero-fallback shape, which still includes these keys).
+        # Each single-stream enhanced-temporal signal must now appear ONLY under
+        # its _compressed alias; the bare key (reads like a pair signal) is gone.
         for legacy, alias in [
             ("flicker_excess", "flicker_excess_compressed"),
             ("flicker_frame_ratio", "flicker_frame_ratio_compressed"),
             ("flat_flicker_ratio", "flat_flicker_ratio_compressed"),
+            ("flat_region_count", "flat_region_count_compressed"),
             ("temporal_pumping_score", "temporal_pumping_score_compressed"),
+            ("quality_oscillation_frequency", "quality_oscillation_frequency_compressed"),
             ("lpips_t_mean", "lpips_t_mean_compressed"),
             ("lpips_t_p95", "lpips_t_p95_compressed"),
         ]:
-            assert legacy in result, f"legacy key {legacy} missing"
-            assert alias in result, f"alias {alias} missing"
-            assert (
-                result[alias] == result[legacy]
-            ), f"{alias} should mirror {legacy}: {result[alias]} vs {result[legacy]}"
+            # The bare single-stream key must NOT be in the result dict.
+            assert legacy not in result, f"bare key {legacy} should be absent"
+            # When the signal was computed, only the _compressed alias carries it.
+            if alias in result:
+                assert result[alias] is not None
 
 
 class TestSingleStreamMetricsDocumented:
@@ -508,7 +531,7 @@ def _colour_failure_row(texture_value: float) -> dict[str, float]:
         "temporal_consistency_pre": 0.5,
         "temporal_consistency_post": 0.5,
         "temporal_consistency_delta": 0.0,
-        "temporal_consistency": 0.5,
+        "temporal_consistency_compressed": 0.5,
     }
 
 

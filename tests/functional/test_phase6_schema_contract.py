@@ -10,20 +10,24 @@ The main paths (``calculate_comprehensive_metrics`` /
 ``calculate_comprehensive_metrics_from_frames`` in ``giflab.metrics``) emit
 ``temporal_consistency_compressed`` and ``temporal_consistency_original`` keys
 that describe independent measurements on the compressed and original streams
-respectively (added in the Wave-3 audit-fix).
+respectively.
 
 Phase 6 measures temporal consistency on the compressed stream only and cannot
-separate the two values.  Per CLAUDE.md "Same key shape across paths":
+separate the two values. Wave 7 removed the bare ``temporal_consistency`` key
+everywhere; Phase 6 now emits the honestly-labelled ``_compressed`` value (it
+IS what was measured) but still must NOT emit ``_original`` (never measured —
+fabrication). Per CLAUDE.md "Same key shape across paths":
 
     *If the optimized path can't compute ``_pre``/``_post`` separately,
     document that prominently rather than silently aliasing — silent
     equivalence lies to the consumer about what was actually measured.*
 
 These tests enforce:
-1. The Phase 6 result contains the known base keys that it genuinely computes.
-2. The Phase 6 result does NOT contain the alias keys that would misrepresent
-   what was measured (``_compressed`` / ``_original`` suffixes for keys that
-   are computed single-stream).
+1. The Phase 6 result contains the known base keys that it genuinely computes
+   (including ``temporal_consistency_compressed``).
+2. The Phase 6 result does NOT contain the bare ``temporal_consistency`` key
+   (removed) nor ``_original`` aliases that would misrepresent what was
+   measured (single-stream values dressed up as a pair signal).
 
 If a future PR adds silent equivalence aliases, this test will fail — which is
 intentional.  The fix is either to actually compute both streams separately
@@ -81,7 +85,11 @@ PHASE6_REQUIRED_KEYS = {
     "psnr_min",
     "psnr_max",
     "psnr",
-    "temporal_consistency",
+    # Wave 7: bare ``temporal_consistency`` removed; Phase 6 emits the honest
+    # compressed-stream value under ``_compressed`` (still required here — it
+    # IS measured, correctly labelled). ``_original`` stays forbidden (never
+    # measured by Phase 6).
+    "temporal_consistency_compressed",
     "temporal_consistency_pre",
     "temporal_consistency_post",
     "temporal_consistency_delta",
@@ -91,12 +99,17 @@ PHASE6_REQUIRED_KEYS = {
     "_optimization_applied",
 }
 
-# These alias keys are emitted by the MAIN paths after the Wave-3 audit-fix
-# but must NOT appear in the Phase 6 output — they would silently lie about
-# independent stream measurements.
+# These alias keys are emitted by the MAIN paths but must NOT appear in the
+# Phase 6 output — they would silently lie about independent stream
+# measurements. Note: ``temporal_consistency_compressed`` is NO LONGER
+# forbidden (Wave 7) — Phase 6 emits it because it IS the honestly-labelled
+# compressed-stream value it actually measures. Only ``_original`` (and the
+# other-stream pair aliases) remain forbidden because Phase 6 never measures
+# the original stream and would have to fabricate them.
 PHASE6_FORBIDDEN_ALIAS_KEYS = {
-    # temporal_consistency aliases
-    "temporal_consistency_compressed",
+    # temporal_consistency aliases — _compressed is now PRESENT (required); the
+    # bare key is removed entirely; _original would be a fabrication.
+    "temporal_consistency",
     "temporal_consistency_original",
     # disposal artifact aliases
     "disposal_artifacts_compressed",
@@ -163,18 +176,18 @@ class TestPhase6SchemaContract:
         )
 
     def test_temporal_consistency_pre_post_equal(self):
-        """_pre and _post must equal temporal_consistency (single-stream limitation)."""
+        """_pre and _post must equal temporal_consistency_compressed (single-stream)."""
         orig = _gradient_frames(6)
         comp = _gradient_frames(6)
         result = self._run(orig, comp)
-        tc = result["temporal_consistency"]
+        tc = result["temporal_consistency_compressed"]
         assert result["temporal_consistency_pre"] == tc, (
-            "_pre differs from temporal_consistency — Phase 6 may have changed "
-            "to compute separate streams; update PHASE6_FORBIDDEN_ALIAS_KEYS if so."
+            "_pre differs from temporal_consistency_compressed — Phase 6 may have "
+            "changed to compute separate streams; update PHASE6_FORBIDDEN_ALIAS_KEYS."
         )
         assert result["temporal_consistency_post"] == tc, (
-            "_post differs from temporal_consistency — Phase 6 may have changed "
-            "to compute separate streams; update PHASE6_FORBIDDEN_ALIAS_KEYS if so."
+            "_post differs from temporal_consistency_compressed — Phase 6 may have "
+            "changed to compute separate streams; update PHASE6_FORBIDDEN_ALIAS_KEYS."
         )
 
     def test_frame_counts_match_input(self):
@@ -190,7 +203,12 @@ class TestPhase6SchemaContract:
         orig = _gradient_frames(4)
         comp = _solid_frames(4, value=200)
         result = self._run(orig, comp)
-        for key in ("ssim_mean", "mse_mean", "psnr_mean", "temporal_consistency"):
+        for key in (
+            "ssim_mean",
+            "mse_mean",
+            "psnr_mean",
+            "temporal_consistency_compressed",
+        ):
             val = result[key]
             assert np.isfinite(val), f"Phase 6 result['{key}'] = {val} is not finite"
 
@@ -209,3 +227,26 @@ class TestPhase6SchemaContract:
         assert result["ssim_mean"] > 0.99
         missing = PHASE6_REQUIRED_KEYS - result.keys()
         assert not missing
+
+    def test_no_aligned_pairs_fallback_emits_full_temporal_set(self):
+        """The empty-aligned-pairs fallback must emit the FULL temporal key set.
+
+        Wave 7 closed a pre-existing shape divergence: this branch previously
+        emitted only the bare ``temporal_consistency`` key and none of the
+        ``_compressed`` / ``_pre`` / ``_post`` / ``_delta`` siblings. It must now
+        emit the same honest temporal shape as the normal path so the
+        required-keys contract holds — and it must NOT emit the removed bare key
+        or the forbidden ``_original`` alias.
+        """
+        # Two empty frame lists align to zero pairs -> fallback branch.
+        result = self._run([], [])
+        for key in (
+            "temporal_consistency_compressed",
+            "temporal_consistency_pre",
+            "temporal_consistency_post",
+            "temporal_consistency_delta",
+        ):
+            assert key in result, f"fallback missing temporal key {key}"
+        # The removed bare key and the never-measured _original must be absent.
+        assert "temporal_consistency" not in result
+        assert "temporal_consistency_original" not in result
