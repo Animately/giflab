@@ -3826,8 +3826,33 @@ _POLARITY_PROBE_SENTINELS: dict[str, tuple[float, float]] = {
 
 # Per-stem sibling-statistic suffixes copied alongside the chosen ``_mean`` /
 # delta value so the aggregate invariant ``X_min <= X_mean <= X_max`` holds for
-# whichever pass won that stem.
+# whichever pass won that stem. Retained as documentation of the *statistical*
+# siblings, but the merge now copies EVERY ``{stem}*`` companion from the
+# chosen pass (see ``_merge_worst_of_dual_composite``) so no companion can
+# drift to the losing pass's provenance.
 _SIBLING_SUFFIXES = ("_std", "_min", "_max", "_raw")
+
+# NOTE on the same-scale BARE alias: for ssim/ms_ssim/mse/fsim/gmsd/chist/
+# edge_similarity/texture_similarity/sharpness_similarity the bare key equals the
+# ``_mean`` key (``result[base] == result[f"{base}_mean"]`` — a load-bearing
+# contract the public ``measure()`` surface projects; see metrics.py ~3506-3545
+# and ``test_from_frames_mean_aliases_match_bare``). The worst-of merge does NOT
+# need a hand-maintained list of these stems: ``_copy_stem_family`` copies the
+# bare key (``key == stem``) along with the whole family from the winning pass,
+# so the alias is preserved generically. PSNR's bare key is normalised 0-1 while
+# ``psnr_mean`` is raw dB; that scale split is preserved automatically because
+# each pass's bare ``psnr`` is that pass's OWN normalised value, so the family
+# copy carries both consistently.
+
+# Cache of derived polarity maps, keyed by the two config flags that determine
+# the sign/membership of the composite-input set. The polarity (the SIGN of each
+# single-metric monotone composite) is config-derived and stable per run; the
+# weight MAGNITUDES that ``USE_ENHANCED_COMPOSITE_QUALITY`` toggles never flip a
+# monotone single-metric composite's direction, and ``USE_TEMPORAL_DELTA_FOR_
+# COMPOSITE`` only swaps WHICH temporal key is in the set. Memoising on this
+# tuple avoids re-running the ~30-call probe (~15 keys x 2 sentinels) on every
+# transparent-GIF metrics call in a batch run.
+_POLARITY_CACHE: dict[tuple[bool, bool], dict[str, int]] = {}
 
 
 def _composite_metric_polarity(config: MetricsConfig) -> dict[str, int]:
@@ -3863,6 +3888,15 @@ def _composite_metric_polarity(config: MetricsConfig) -> dict[str, int]:
     from .enhanced_metrics import calculate_composite_quality
 
     use_temporal_delta = getattr(config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True)
+    use_enhanced = getattr(config, "USE_ENHANCED_COMPOSITE_QUALITY", True)
+
+    # Memoise per (temporal-delta, enhanced) flag tuple: polarity is config-
+    # derived and stable per run, so the ~30-call probe should run at most once
+    # per config mode rather than on every transparent-GIF metrics call.
+    cache_key = (bool(use_temporal_delta), bool(use_enhanced))
+    cached = _POLARITY_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
 
     # The keys the composite actually reads in the active config mode.
     candidate_keys = [
@@ -3897,6 +3931,10 @@ def _composite_metric_polarity(config: MetricsConfig) -> dict[str, int]:
             polarity[key] = 1  # higher raw better -> worst is the minimum
         else:
             polarity[key] = -1  # higher raw worse -> worst is the maximum
+
+    # Store a copy so callers can mutate the returned dict without poisoning the
+    # cache, and return a fresh copy for the same reason.
+    _POLARITY_CACHE[cache_key] = dict(polarity)
     return polarity
 
 
@@ -3926,6 +3964,44 @@ def _worst_of(value_a: float, value_b: float, polarity: int) -> tuple[float, boo
     return (value_b, True) if value_b > value_a else (value_a, False)
 
 
+def _companion_stem_for(key: str) -> str:
+    """Return the COMPANION prefix whose ``{stem}*`` family follows a stem's
+    winning pass.
+
+    For an ``X_mean`` key the family is ``X*`` (so the bare ``X`` alias, the
+    ``X_std`` / ``X_min`` / ``X_max`` / ``X_raw`` stats AND non-sibling
+    companions such as ``X_p95``, ``X_first`` / ``X_last`` / ``X_middle`` /
+    ``X_positional_variance``, ``X_pct_gt*`` all move together). The temporal
+    keys (``temporal_consistency`` / ``temporal_consistency_delta``) collapse to
+    the shared ``temporal_consistency`` family so the whole pre/post/original/
+    compressed/delta cluster follows whichever background won the temporal
+    comparison — never half-white, half-black.
+    """
+    if key in ("temporal_consistency", "temporal_consistency_delta"):
+        return "temporal_consistency"
+    return key[: -len("_mean")] if key.endswith("_mean") else key
+
+
+def _copy_stem_family(
+    src: dict[str, float | str],
+    dst: dict[str, float | str],
+    stem: str,
+) -> None:
+    """Overwrite every ``{stem}`` / ``{stem}_*`` key in *dst* with *src*'s value.
+
+    This copies the BARE alias (``key == stem``), the statistical siblings AND
+    every non-sibling companion (``_p95`` / ``_pre`` / ``_post`` / ``_first`` /
+    ``_pct_gt*`` / …) so a stem's full key family carries a single, consistent
+    provenance after the merge. Stems never prefix-collide across metric
+    families (``ssim_`` vs ``ssimulacra2``, ``mse_`` vs ``ms_ssim``, etc.), so
+    matching on ``key == stem or key.startswith(stem + "_")`` is exact.
+    """
+    prefix = stem + "_"
+    for k, v in src.items():
+        if k == stem or k.startswith(prefix):
+            dst[k] = v
+
+
 def _merge_worst_of_dual_composite(
     white: dict[str, float | str],
     black: dict[str, float | str],
@@ -3936,18 +4012,38 @@ def _merge_worst_of_dual_composite(
     Strategy A: for every composite-input ``_mean`` / delta key the composite
     consumes, pick the value that is WORSE for quality (direction derived from
     the live end-to-end composite via ``_composite_metric_polarity``). When the
-    worst value comes from the BLACK pass, also copy that stem's
-    ``_std`` / ``_min`` / ``_max`` / ``_raw`` siblings from BLACK so the
-    aggregate invariant ``X_min <= X_mean <= X_max`` holds; otherwise the white
-    siblings (already in the base) are kept.
+    worst value comes from the BLACK pass, copy that stem's ENTIRE key family
+    (``{stem}`` bare alias + ``_std`` / ``_min`` / ``_max`` / ``_raw`` siblings +
+    every non-sibling companion such as ``_p95`` / ``_pre`` / ``_post`` /
+    ``_first`` / ``_pct_gt*``) from BLACK; otherwise the white family (already in
+    the base) is kept.
 
-    The base is the WHITE dict, so every non-``_mean`` key (frame counts,
+    Why the bare-alias copy is load-bearing: the public ``measure()`` surface
+    projects the BARE metric keys (``ssim``, ``gmsd``, ``fsim``, … via
+    ``public_api._PUBLIC_TO_INTERNAL_METRIC_KEY``), NOT the ``_mean`` keys. The
+    bare key is also a documented same-scale alias of ``_mean`` (metrics.py
+    ~3506-3545, ``test_from_frames_mean_aliases_match_bare``). If the merge
+    updated only ``X_mean`` and left bare ``X`` at the optimistic white value,
+    ``measure().ssim`` / ``.gmsd`` / … would report the WHITE-only score on a
+    transparent dark-content GIF — directly contradicting the worst-of contract.
+    Copying the whole family from the winning pass keeps bare == ``_mean`` and
+    keeps every companion (``ssimulacra2_p95``, the temporal cluster, the
+    positional ssim stats) on a single provenance. PSNR's scale split survives
+    because each pass's bare ``psnr`` is that pass's own normalised value
+    (``psnr_mean / PSNR_MAX_DB``); copying black's bare ``psnr`` alongside black's
+    raw-dB ``psnr_mean`` keeps the normalised-bare / raw-dB-``_mean`` relationship
+    intact at the worst-of value.
+
+    The base is the WHITE dict, so every non-composite key (frame counts,
     kilobytes, compression_ratio, string keys) is authoritative from white —
-    these are identical across passes (same files/metadata). ``render_ms``,
-    ``composite_quality`` and ``efficiency`` are intentionally NOT finalised
-    here: the caller overwrites render_ms at the file level and re-runs
-    ``process_metrics_with_enhanced_quality`` to recompute composite_quality
-    AND efficiency from the merged worst-of values.
+    these are identical across passes (same files/metadata). The merge is purely
+    per-``_mean`` worst-of and NEVER asserts equal frame counts between passes:
+    content-based alignment can legitimately yield different pair counts per
+    background, and the ``_mean`` values remain comparable regardless.
+    ``render_ms``, ``composite_quality`` and ``efficiency`` are intentionally NOT
+    finalised here: the caller overwrites render_ms at the file level and re-runs
+    ``process_metrics_with_enhanced_quality`` to recompute composite_quality AND
+    efficiency from the merged worst-of values.
 
     NaN-aware throughout (see ``_worst_of``): a missing measurement never
     coerces to a fabricated best/worst case.
@@ -3963,24 +4059,18 @@ def _merge_worst_of_dual_composite(
         if not white_present and not black_present:
             continue
 
-        stem = key[: -len("_mean")] if key.endswith("_mean") else key
+        stem = _companion_stem_for(key)
 
         if white_present and not black_present:
             # Present only on white — already in base; nothing to overwrite.
             continue
         if black_present and not white_present:
-            # Present only on black — take it plus its siblings (no white
-            # sibling exists to keep the invariant otherwise).
-            merged[key] = black[key]
-            for suffix in _SIBLING_SUFFIXES:
-                sib = f"{stem}{suffix}"
-                if sib in black:
-                    merged[sib] = black[sib]
+            # Present only on black — take its whole family (no white family
+            # exists to keep aliases/companions consistent otherwise).
+            _copy_stem_family(black, merged, stem)
             continue
 
-        # Present on both: worst-of. frame_count provenance can differ between
-        # backgrounds (content-based alignment yields different pair counts),
-        # but the _mean values are still comparable; warn rather than crash.
+        # Present on both: per-metric worst-of.
         white_val = white[key]
         black_val = black[key]
         if not isinstance(white_val, int | float) or not isinstance(
@@ -3992,12 +4082,15 @@ def _merge_worst_of_dual_composite(
         worst_value, chose_black = _worst_of(float(white_val), float(black_val), pol)
         merged[key] = worst_value
         if chose_black:
-            # Copy the chosen pass's sibling stats so X_min <= X_mean <= X_max
-            # holds for the value we kept.
-            for suffix in _SIBLING_SUFFIXES:
-                sib = f"{stem}{suffix}"
-                if sib in black:
-                    merged[sib] = black[sib]
+            # Copy the chosen (black) pass's WHOLE family — bare alias, sibling
+            # stats and every non-sibling companion — so bare == _mean holds,
+            # X_min <= X_mean <= X_max holds, and no companion (ssimulacra2_p95,
+            # the temporal cluster, the positional ssim stats) drifts to the
+            # losing white pass. ``merged[key]`` is re-set to ``worst_value``
+            # afterwards in case ``_worst_of`` returned a NaN-resolved value that
+            # differs from the raw ``black[key]`` the family copy just wrote.
+            _copy_stem_family(black, merged, stem)
+            merged[key] = worst_value
 
     return merged
 

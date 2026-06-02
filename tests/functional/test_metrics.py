@@ -1512,6 +1512,168 @@ class TestMainPathMeanKeysForComposite:
         assert "composite_quality" in result
         assert not math.isnan(result["composite_quality"])
 
+    def test_dual_merge_preserves_bare_equals_mean_contract(self, monkeypatch):
+        """Contract guard for the DUAL (white+black) worst-of merge.
+
+        The existing ``test_from_frames_mean_aliases_match_bare`` runs on a
+        SINGLE ``_from_frames`` pass, so it never exercises the merge that
+        mutates ``_mean`` keys on the file-level transparent-GIF path. This test
+        builds two real ``_from_frames`` results (a near-perfect and a degraded
+        pass standing in for white/black), merges them, and asserts that AFTER
+        the merge:
+
+        * every same-scale stem still satisfies bare == ``_mean`` (the
+          load-bearing alias the public ``measure()`` surface projects); and
+        * ``psnr`` stays NORMALISED 0-1 while ``psnr_mean`` stays RAW dB, with
+          ``psnr_mean ≈ psnr * PSNR_MAX_DB`` (the scale split survives the merge).
+
+        Pre-fix the merge updated only ``X_mean`` and left bare ``X`` at the
+        optimistic pass's value, so bare != ``_mean`` and ``measure().ssim`` /
+        ``.gmsd`` / … reported the white-only score.
+        """
+        from giflab.config import DEFAULT_METRICS_CONFIG
+        from giflab.metrics import (
+            _merge_worst_of_dual_composite,
+            calculate_comprehensive_metrics_from_frames,
+        )
+
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        rng = np.random.default_rng(7)
+        orig = [rng.integers(0, 256, (64, 64, 3), dtype=np.uint8) for _ in range(4)]
+        # "white" stand-in: near-perfect (small perturbation).
+        white_comp = [
+            np.clip(f.astype(int) + rng.integers(-3, 3, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
+            for f in orig
+        ]
+        # "black" stand-in: degraded (heavy noise) so it wins (worst-of) most
+        # stems, forcing the bare/companion family copy from the degraded pass.
+        black_comp = [
+            np.clip(f.astype(int) + rng.integers(-90, 90, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
+            for f in orig
+        ]
+
+        white = calculate_comprehensive_metrics_from_frames(
+            orig, white_comp, force_all_metrics=True
+        )
+        black = calculate_comprehensive_metrics_from_frames(
+            orig, black_comp, force_all_metrics=True
+        )
+        merged = _merge_worst_of_dual_composite(white, black, DEFAULT_METRICS_CONFIG)
+
+        for base in self._SAME_SCALE_PAIRS:
+            assert merged[f"{base}_mean"] == pytest.approx(merged[base]), (
+                f"after dual merge, {base}_mean must still alias the same-scale "
+                f"bare {base} key (got bare={merged[base]}, "
+                f"mean={merged[f'{base}_mean']})"
+            )
+
+        # PSNR scale split must survive the merge.
+        psnr_bare = merged["psnr"]
+        psnr_mean = merged["psnr_mean"]
+        assert psnr_mean != pytest.approx(psnr_bare), (
+            "after dual merge, psnr_mean must stay RAW dB, distinct from the "
+            "normalised bare psnr"
+        )
+        assert psnr_mean > 1.0
+        assert psnr_mean == pytest.approx(
+            psnr_bare * float(DEFAULT_METRICS_CONFIG.PSNR_MAX_DB), rel=1e-3
+        )
+
+    def test_dual_merge_companion_keys_follow_winning_pass(self, monkeypatch):
+        """Companion (non-sibling) keys must follow the SAME pass that won their
+        stem — no stale white-provenance drift.
+
+        ``ssimulacra2_p95``, the ``temporal_consistency`` pre/post/original/
+        compressed cluster and the positional ``ssim_first/last/middle/
+        positional_variance`` stats are NOT covered by the old
+        ``_SIBLING_SUFFIXES`` set, so before the fix they stayed at the white
+        value even when black won the stem. This asserts they now move with the
+        winning pass by checking each companion equals the value from whichever
+        pass supplied the merged ``_mean``/bare stem.
+        """
+        from giflab.config import DEFAULT_METRICS_CONFIG
+        from giflab.metrics import (
+            _merge_worst_of_dual_composite,
+            calculate_comprehensive_metrics_from_frames,
+        )
+
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+        rng = np.random.default_rng(11)
+        orig = [rng.integers(0, 256, (64, 64, 3), dtype=np.uint8) for _ in range(4)]
+        white_comp = [
+            np.clip(f.astype(int) + rng.integers(-3, 3, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
+            for f in orig
+        ]
+        black_comp = [
+            np.clip(f.astype(int) + rng.integers(-90, 90, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
+            for f in orig
+        ]
+        white = calculate_comprehensive_metrics_from_frames(
+            orig, white_comp, force_all_metrics=True
+        )
+        black = calculate_comprehensive_metrics_from_frames(
+            orig, black_comp, force_all_metrics=True
+        )
+        merged = _merge_worst_of_dual_composite(white, black, DEFAULT_METRICS_CONFIG)
+
+        # For each stem with companions, the merged companion must equal the
+        # value from whichever pass supplied the merged bare/stem value (no
+        # half-white/half-black drift). Determine the winning pass per stem by
+        # matching the merged bare value to white vs black.
+        def winning_pass(stem):
+            mv = merged.get(stem)
+            if mv is None or (isinstance(mv, float) and math.isnan(mv)):
+                return None
+            if white.get(stem) == pytest.approx(mv):
+                # Ambiguous when both passes agree — skip (no drift possible).
+                if black.get(stem) == pytest.approx(mv):
+                    return None
+                return white
+            if black.get(stem) == pytest.approx(mv):
+                return black
+            return None
+
+        companions = {
+            "ssim": [
+                "ssim_first",
+                "ssim_last",
+                "ssim_middle",
+                "ssim_positional_variance",
+            ],
+            "ssimulacra2": ["ssimulacra2_p95"],
+            "temporal_consistency": [
+                "temporal_consistency_pre",
+                "temporal_consistency_post",
+                "temporal_consistency_original",
+                "temporal_consistency_compressed",
+            ],
+        }
+        checked = 0
+        for stem, comp_keys in companions.items():
+            winner = winning_pass(stem)
+            if winner is None:
+                continue
+            for ck in comp_keys:
+                if ck not in winner or ck not in merged:
+                    continue
+                assert merged[ck] == pytest.approx(winner[ck]), (
+                    f"companion {ck} must follow the pass that won stem {stem!r} "
+                    f"(merged={merged[ck]}, winner={winner[ck]})"
+                )
+                checked += 1
+        assert checked > 0, (
+            "expected at least one companion key to be asserted; the synthetic "
+            "passes should diverge enough to exercise the family copy"
+        )
+
 
 class TestSsimulacra2ErrorPathKeyShape:
     """Every SSIMULACRA2 error / disabled path must emit the full 5-key shape,

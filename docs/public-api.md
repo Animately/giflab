@@ -171,7 +171,18 @@ Behaviour:
 - The **public `measure()` surface is unaffected**: it projects only the seven
   metric fields; the worst-of merge happens beneath that projection, so a caller
   requesting e.g. `ssim` simply receives the (worst-of, transparency-aware)
-  value with the same field shape.
+  value with the same field shape. The public surface reads the **bare** metric
+  keys (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`), so when a stem's
+  worst-of value comes from the black pass the merge overwrites the **entire key
+  family** for that stem — the bare alias, the `_std`/`_min`/`_max`/`_raw`
+  siblings, **and** every non-sibling companion (`ssimulacra2_p95`, the
+  `temporal_consistency` pre/post/original/compressed cluster, the positional
+  `ssim_first`/`_last`/`_middle`/`_positional_variance` stats) — from the winning
+  pass. This keeps the documented same-scale `bare == _mean` alias intact and
+  ensures no companion silently retains white provenance. PSNR's scale split is
+  preserved: bare `psnr` stays normalised `[0, 1]` and `psnr_mean` stays raw dB,
+  because each pass's bare `psnr` is that pass's own normalised value, so copying
+  black's family carries both consistently.
 
 > Note (out of scope, follow-up): under the experimental Phase 6 optimized
 > metrics path (`GIFLAB_ENABLE_PHASE6_OPTIMIZATION=true`), a temporal-metric

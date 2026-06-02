@@ -122,6 +122,72 @@ class TestPolarityDirectionContract:
         )
 
 
+class TestPolarityMemoisation:
+    """The polarity probe is memoised per (temporal-delta, enhanced) flag tuple
+    so the ~30-call composite probe runs at most once per config mode in a batch
+    run — without changing the derived result.
+    """
+
+    def test_memoised_result_matches_fresh_derivation(self):
+        import giflab.metrics as metrics_mod
+
+        config = MetricsConfig()
+        # Clear the cache so the first call genuinely derives.
+        metrics_mod._POLARITY_CACHE.clear()
+        first = _composite_metric_polarity(config)
+        # A second call must hit the cache and return an EQUAL mapping.
+        second = _composite_metric_polarity(config)
+        assert first == second
+
+    def test_cache_is_populated_and_call_avoids_recompute(self, monkeypatch):
+        import giflab.enhanced_metrics as enh
+        import giflab.metrics as metrics_mod
+
+        metrics_mod._POLARITY_CACHE.clear()
+        config = MetricsConfig()
+
+        calls = {"n": 0}
+        real = enh.calculate_composite_quality
+
+        def counting(metrics, cfg=None):  # noqa: ANN001
+            calls["n"] += 1
+            return real(metrics, cfg)
+
+        monkeypatch.setattr(enh, "calculate_composite_quality", counting)
+
+        _composite_metric_polarity(config)
+        first_calls = calls["n"]
+        assert first_calls > 0  # the probe ran on the cold cache
+        # Second call: cache hit, ZERO additional probe calls.
+        _composite_metric_polarity(config)
+        assert calls["n"] == first_calls
+
+    def test_returned_dict_is_isolated_from_cache(self):
+        import giflab.metrics as metrics_mod
+
+        metrics_mod._POLARITY_CACHE.clear()
+        config = MetricsConfig()
+        result = _composite_metric_polarity(config)
+        result["ssim_mean"] = 999  # mutate the returned dict
+        # A subsequent call must NOT observe the mutation (cache stored a copy).
+        fresh = _composite_metric_polarity(config)
+        assert fresh["ssim_mean"] in (1, -1)
+
+    def test_distinct_config_modes_get_distinct_cache_entries(self):
+        import giflab.metrics as metrics_mod
+
+        metrics_mod._POLARITY_CACHE.clear()
+        delta = _composite_metric_polarity(
+            MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=True)
+        )
+        legacy = _composite_metric_polarity(
+            MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=False)
+        )
+        assert "temporal_consistency_delta" in delta
+        assert "temporal_consistency" in legacy
+        assert len(metrics_mod._POLARITY_CACHE) >= 2
+
+
 class TestMergeWorstOfDualComposite:
     """Test 8: direct unit test of the worst-of merge."""
 
@@ -214,6 +280,135 @@ class TestMergeWorstOfDualComposite:
         merged = _merge_worst_of_dual_composite(white, black, config)
         # deltae present only on black -> taken (with siblings), not fabricated.
         assert merged["deltae_mean"] == 5.0
+
+    def test_black_win_overwrites_bare_same_scale_alias(self):
+        """When black wins a same-scale stem, the BARE alias is overwritten too.
+
+        The public ``measure()`` surface projects bare keys (``ssim``/``gmsd``/
+        ``fsim``/``chist``/``ms_ssim``/``mse``), NOT ``_mean``. Leaving the bare
+        key at the white value would make ``measure()`` report the optimistic
+        white-only score on a transparent dark-content GIF. Regression for the
+        round-2 LOAD-BEARING bug.
+        """
+        config = MetricsConfig()
+        # Real _from_frames emits the BARE same-scale key alongside _mean; mirror
+        # that so the family copy has a bare key to carry from the winning pass.
+        white = self._full_stats(
+            {
+                "ssim_mean": 0.99,
+                "gmsd_mean": 0.0036,  # gmsd higher = worse
+                "fsim_mean": 0.99,
+                "chist_mean": 0.99,
+                "ms_ssim_mean": 0.99,
+                "mse_mean": 1.0,
+            }
+        )
+        black = self._full_stats(
+            {
+                "ssim_mean": 0.60,
+                "gmsd_mean": 0.068,
+                "fsim_mean": 0.70,
+                "chist_mean": 0.65,
+                "ms_ssim_mean": 0.62,
+                "mse_mean": 500.0,
+            }
+        )
+        for stem, wv, bv in (
+            ("ssim", 0.99, 0.60),
+            ("gmsd", 0.0036, 0.068),
+            ("fsim", 0.99, 0.70),
+            ("chist", 0.99, 0.65),
+            ("ms_ssim", 0.99, 0.62),
+            ("mse", 1.0, 500.0),
+        ):
+            white[stem] = wv
+            black[stem] = bv
+        merged = _merge_worst_of_dual_composite(white, black, config)
+        for stem in ("ssim", "gmsd", "fsim", "chist", "ms_ssim", "mse"):
+            assert (
+                merged[stem] == merged[f"{stem}_mean"]
+            ), f"bare {stem} must equal {stem}_mean after a black win"
+            assert (
+                merged[stem] == black[f"{stem}_mean"]
+            ), f"bare {stem} must reflect the worst-of (black) value, not white"
+
+    def test_psnr_scale_split_preserved_on_black_win(self):
+        """bare ``psnr`` stays normalised 0-1; ``psnr_mean`` stays raw dB.
+
+        When black wins PSNR (lower dB = worse), the merge must keep black's
+        normalised bare ``psnr`` AND black's raw-dB ``psnr_mean`` — never alias
+        one to the other (that would double-normalise downstream).
+        """
+        config = MetricsConfig()
+        psnr_max = float(config.PSNR_MAX_DB)
+        white = {"psnr_mean": 45.0, "psnr": 45.0 / psnr_max}
+        black = {"psnr_mean": 20.0, "psnr": 20.0 / psnr_max}
+        merged = _merge_worst_of_dual_composite(white, black, config)
+        # PSNR worst = LOWER dB -> black wins.
+        assert merged["psnr_mean"] == 20.0
+        assert merged["psnr"] == pytest.approx(20.0 / psnr_max)
+        assert (
+            merged["psnr"] != merged["psnr_mean"]
+        ), "bare psnr (normalised) must stay distinct from psnr_mean (raw dB)"
+
+    def test_non_sibling_companions_follow_chosen_pass(self):
+        """``_p95`` / ``_pre`` / ``_post`` / ``_first`` companions follow the
+        winning pass, not just the ``_std``/``_min``/``_max``/``_raw`` siblings.
+
+        These were the keys ``_SIBLING_SUFFIXES`` missed (round-2 secondary
+        drift): ssimulacra2_p95, the temporal cluster, the positional ssim
+        stats. They must now carry the winning pass's provenance.
+        """
+        config = MetricsConfig()
+        white = {
+            "ssimulacra2_mean": 90.0,
+            "ssimulacra2_p95": 95.0,
+            "ssimulacra2_min": 85.0,
+            "temporal_consistency_delta": 0.01,
+            "temporal_consistency": 0.99,
+            "temporal_consistency_pre": 0.99,
+            "temporal_consistency_post": 0.99,
+            "temporal_consistency_original": 0.99,
+            "temporal_consistency_compressed": 0.99,
+            "ssim_mean": 0.99,
+            "ssim": 0.99,
+            "ssim_first": 0.99,
+            "ssim_last": 0.99,
+            "ssim_middle": 0.99,
+            "ssim_positional_variance": 0.0,
+        }
+        black = {
+            "ssimulacra2_mean": 40.0,  # ssimulacra2 higher = better -> black worse
+            "ssimulacra2_p95": 60.0,
+            "ssimulacra2_min": 30.0,
+            "temporal_consistency_delta": 0.30,  # delta higher = worse -> black worse
+            "temporal_consistency": 0.70,
+            "temporal_consistency_pre": 0.90,
+            "temporal_consistency_post": 0.70,
+            "temporal_consistency_original": 0.90,
+            "temporal_consistency_compressed": 0.70,
+            "ssim_mean": 0.60,  # ssim lower = worse -> black worse
+            "ssim": 0.60,
+            "ssim_first": 0.55,
+            "ssim_last": 0.65,
+            "ssim_middle": 0.60,
+            "ssim_positional_variance": 0.02,
+        }
+        merged = _merge_worst_of_dual_composite(white, black, config)
+        # ssimulacra2 family from black.
+        assert merged["ssimulacra2_mean"] == 40.0
+        assert merged["ssimulacra2_p95"] == 60.0
+        # temporal cluster from black (delta won by black).
+        assert merged["temporal_consistency_pre"] == 0.90
+        assert merged["temporal_consistency_post"] == 0.70
+        assert merged["temporal_consistency_original"] == 0.90
+        assert merged["temporal_consistency_compressed"] == 0.70
+        assert merged["temporal_consistency"] == 0.70
+        # positional ssim stats from black.
+        assert merged["ssim_first"] == 0.55
+        assert merged["ssim_last"] == 0.65
+        assert merged["ssim_middle"] == 0.60
+        assert merged["ssim_positional_variance"] == 0.02
 
     def test_recomputed_composite_and_efficiency_are_pessimistic(self):
         """After re-running the enhanced processor on the merged dict, both
