@@ -19,9 +19,9 @@ import pytest
 from giflab.config import MetricsConfig
 from giflab.enhanced_metrics import calculate_composite_quality
 from giflab.metrics import (
+    _POLARITY_PROBE_SENTINELS,
     _composite_metric_polarity,
     _merge_worst_of_dual_composite,
-    _POLARITY_PROBE_SENTINELS,
 )
 
 

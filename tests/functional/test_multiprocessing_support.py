@@ -376,7 +376,9 @@ class TestMultiprocessingIntegration:
         # loaded M3 while still catching real hangs or infinite loops.
         elapsed = end_time - start_time
         fps = len(images) / elapsed
-        assert fps >= 0.5, f"Frame generation too slow: {fps:.2f} fps ({elapsed:.1f}s for {len(images)} frames)"
+        assert (
+            fps >= 0.5
+        ), f"Frame generation too slow: {fps:.2f} fps ({elapsed:.1f}s for {len(images)} frames)"
 
     def test_process_safety_simulation(self):
         """Test that multiprocessing doesn't break under concurrent access."""

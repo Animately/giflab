@@ -661,9 +661,9 @@ class TestGlobalDetectorReuse:
             calculate_enhanced_temporal_metrics(frames_a, frames_b, device="cpu")
 
         assert len(captured) == 2
-        assert captured[0] is captured[1], (
-            "Singleton detector was not reused across calls"
-        )
+        assert (
+            captured[0] is captured[1]
+        ), "Singleton detector was not reused across calls"
 
     def test_cleanup_global_temporal_detector_releases_instance(self):
         # Force creation

@@ -922,8 +922,10 @@ def calculate_enhanced_temporal_metrics(
     # LPIPSModelCache) and detector state aren't redone on every call. Resolve
     # None to an explicit device string here — mirrors what TemporalArtifactDetector
     # does internally — so the singleton's device-equality check works.
-    resolved_device = device if device is not None else (
-        "cuda" if torch.cuda.is_available() else "cpu"
+    resolved_device = (
+        device
+        if device is not None
+        else ("cuda" if torch.cuda.is_available() else "cpu")
     )
     detector = get_temporal_detector(
         device=resolved_device, force_mse_fallback=force_mse_fallback

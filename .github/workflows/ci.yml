@@ -336,9 +336,14 @@ jobs:
         virtualenvs-in-project: true
     
     - name: Install dependencies
+      # snok/install-poetry only adds Poetry to PATH for bash shells; Windows
+      # run-steps default to pwsh, where `poetry` is not found. Force bash
+      # (Git Bash, already present on windows-latest) so Poetry resolves.
+      shell: bash
       run: poetry install --no-interaction
-    
+
     - name: Run tool discovery test
+      shell: bash
       run: |
         poetry run python -c "
         from giflab.system_tools import get_available_tools, discover_tool
@@ -354,10 +359,12 @@ jobs:
         "
     
     - name: Run core tests on Windows
+      shell: bash
       run: |
         poetry run python -m pytest -m "not external_tools" -v --tb=short
-    
+
     - name: Run available external tools tests
+      shell: bash
       run: |
         # Run external tools tests but continue on individual failures
         poetry run python -m pytest -m external_tools -v --tb=short --continue-on-collection-errors

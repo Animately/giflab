@@ -261,7 +261,10 @@ class TestMetricsConfig:
         out-of-range values (>1, <0) raise ValueError.
         """
         # In-range succeeds.
-        assert MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=0.5).ALIGNMENT_WARNING_THRESHOLD == 0.5
+        assert (
+            MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=0.5).ALIGNMENT_WARNING_THRESHOLD
+            == 0.5
+        )
 
         # Above 1.0 -> ValueError.
         with pytest.raises(ValueError):

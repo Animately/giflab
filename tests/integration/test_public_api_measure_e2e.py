@@ -14,10 +14,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from PIL import Image, ImageDraw
-
 from giflab import MeasureResult, compress, measure
 from giflab.tool_wrappers import GifsicleLossyCompressor
+from PIL import Image, ImageDraw
 
 
 def _build_real_gif(

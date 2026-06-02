@@ -95,9 +95,7 @@ def _resolve_run_timeout(params: dict[str, Any] | None) -> int:
     if params is not None and "timeout_s" in params:
         value = int(params["timeout_s"])
         if value <= 0:
-            raise ValueError(
-                f"timeout_s must be a positive integer, got {value}"
-            )
+            raise ValueError(f"timeout_s must be a positive integer, got {value}")
         return value
 
     # 2. env var (read at call time)
@@ -112,6 +110,7 @@ def _resolve_run_timeout(params: dict[str, Any] | None) -> int:
 
     # 3. default
     return DEFAULT_RUN_TIMEOUT
+
 
 from .color_keep import (
     build_animately_color_args,
@@ -648,7 +647,9 @@ def compress_with_gifsicle(
     cmd.extend(["--output", output_str])
 
     # Command ready for execution
-    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
+    run_timeout = _resolve_run_timeout(
+        {"timeout_s": timeout_s} if timeout_s is not None else None
+    )
 
     # Execute command and measure time
     start_time = time.time()
@@ -774,7 +775,9 @@ def compress_with_animately(
         Animately uses decimal ratios (0.50 for 50%) and consistent flag syntax.
         All parameters are specified via flags, unlike gifsicle's mixed approach.
     """
-    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
+    run_timeout = _resolve_run_timeout(
+        {"timeout_s": timeout_s} if timeout_s is not None else None
+    )
     animately_path = DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
 
     # Check if animately is available
@@ -942,7 +945,9 @@ def compress_with_animately_hard(
         RuntimeError: If animately command fails or binary not found
         ValueError: If paths contain dangerous characters
     """
-    run_timeout = _resolve_run_timeout({"timeout_s": timeout_s} if timeout_s is not None else None)
+    run_timeout = _resolve_run_timeout(
+        {"timeout_s": timeout_s} if timeout_s is not None else None
+    )
     animately_path = DEFAULT_ENGINE_CONFIG.ANIMATELY_PATH
 
     if not animately_path or not _is_executable(animately_path):
@@ -1486,9 +1491,7 @@ def _execute_animately_advanced(
     if timeout_s is not None:
         run_timeout = int(timeout_s)
         if run_timeout <= 0:
-            raise ValueError(
-                f"timeout_s must be a positive integer, got {run_timeout}"
-            )
+            raise ValueError(f"timeout_s must be a positive integer, got {run_timeout}")
     else:
         run_timeout = _resolve_run_timeout(None) * ADVANCED_TIMEOUT_MULTIPLIER
 

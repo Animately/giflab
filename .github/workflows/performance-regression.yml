@@ -108,15 +108,10 @@ jobs:
           REPORT_FILE=$(ls -t benchmark_results/ci_report_*.json | head -1)
           echo "report_file=$REPORT_FILE" >> $GITHUB_OUTPUT
           
-          # Extract summary for output
-          python -c "
-import json
-with open('$REPORT_FILE') as f:
-    report = json.load(f)
-    print(f\"scenarios_run={report['scenarios_run']}\")
-    print(f\"scenarios_passed={report['scenarios_passed']}\")
-    print(f\"has_regressions={report['has_regressions']}\")
-          " >> $GITHUB_OUTPUT
+          # Extract summary for output. Keep this as a single -c expression:
+          # multi-line Python inside a YAML block scalar is whitespace-fragile
+          # (a stray leading indent breaks the whole workflow parse).
+          python -c "import json, sys; r = json.load(open(sys.argv[1])); print('scenarios_run={}'.format(r['scenarios_run'])); print('scenarios_passed={}'.format(r['scenarios_passed'])); print('has_regressions={}'.format(r['has_regressions']))" "$REPORT_FILE" >> $GITHUB_OUTPUT
         fi
         
         exit $TEST_EXIT_CODE

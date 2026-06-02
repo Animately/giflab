@@ -23,13 +23,11 @@ GIF I/O for the controlled-value cases.
 import math
 from pathlib import Path
 
+import giflab.wrapper_validation.timing_validation as timing_validation_module
 import numpy as np
 import pytest
-
-import giflab.wrapper_validation.timing_validation as timing_validation_module
 from giflab.config import MetricsConfig
 from giflab.metrics import calculate_comprehensive_metrics_from_frames
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -116,7 +114,10 @@ class TestAlignmentWarningThresholdConfig:
         assert MetricsConfig().ALIGNMENT_WARNING_THRESHOLD == 0.98
 
     def test_in_range_value_accepted(self):
-        assert MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=0.5).ALIGNMENT_WARNING_THRESHOLD == 0.5
+        assert (
+            MetricsConfig(ALIGNMENT_WARNING_THRESHOLD=0.5).ALIGNMENT_WARNING_THRESHOLD
+            == 0.5
+        )
 
     def test_above_one_rejected(self):
         with pytest.raises(ValueError):

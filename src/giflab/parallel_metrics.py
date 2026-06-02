@@ -277,9 +277,7 @@ class ParallelMetricsCalculator:
         # unfilled (a frame whose metric produced no value) stays NaN rather
         # than a fabricated 0.0; the NaN-aware aggregator in
         # metrics._aggregate_metric then skips it honestly.
-        aggregated = {
-            name: [float("nan")] * (max_idx + 1) for name in metric_names
-        }
+        aggregated = {name: [float("nan")] * (max_idx + 1) for name in metric_names}
 
         # Place values at their correct indices
         for chunk_result in chunk_results:

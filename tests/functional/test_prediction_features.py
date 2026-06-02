@@ -249,10 +249,18 @@ def _make_transparent_palette_gif(
     the transparent region differently — but the *alpha* is stable.
     """
     palette = [
-        255, 0, 0,   # index 0 = red
-        0, 255, 0,   # index 1 = green
-        0, 0, 255,   # index 2 = blue
-        255, 255, 0, # index 3 = yellow
+        255,
+        0,
+        0,  # index 0 = red
+        0,
+        255,
+        0,  # index 1 = green
+        0,
+        0,
+        255,  # index 2 = blue
+        255,
+        255,
+        0,  # index 3 = yellow
     ] + [0] * (256 * 3 - 12)
 
     # Visible (opaque) index: use one that is NOT the transparent index.
@@ -371,9 +379,7 @@ class TestTransparencyRatioAudit:
             f"{ratio_idx1} vs {ratio_idx2}. PIL must use alpha not colour."
         )
 
-    def test_transparency_ratio_opaque_gif_returns_zero(
-        self, tmp_path: Path
-    ) -> None:
+    def test_transparency_ratio_opaque_gif_returns_zero(self, tmp_path: Path) -> None:
         """Fully opaque GIF (no transparency declared) returns 0.0."""
         palette = [255, 0, 0] + [0] * (256 * 3 - 3)
         img = Image.new("P", (32, 32), 0)
@@ -397,9 +403,9 @@ class TestTransparencyRatioAudit:
 
         ratio = _calculate_transparency_ratio(path)
 
-        assert ratio == pytest.approx(1.0, abs=0.01), (
-            f"Fully transparent GIF should return ≈1.0, got {ratio}"
-        )
+        assert ratio == pytest.approx(
+            1.0, abs=0.01
+        ), f"Fully transparent GIF should return ≈1.0, got {ratio}"
 
     # ── Invariant 2: multi-frame averaging ───────────────────────────────────
 
@@ -468,9 +474,7 @@ class TestTransparencyRatioAudit:
 
         result = _calculate_transparency_ratio(corrupt)
 
-        assert result is None, (
-            f"Expected None on corrupt file, got {result!r}."
-        )
+        assert result is None, f"Expected None on corrupt file, got {result!r}."
 
 
 class TestGifFeaturesSchemaAcceptsNoneTransparencyRatio:
@@ -615,21 +619,37 @@ class TestTransparencyRatioStorageNullable:
             "gif_sha": "f" * 64,
             "gif_name": "no_transparency.gif",
             "file_path": "/tmp/no_transparency.gif",
-            "width": 32, "height": 32, "frame_count": 1,
-            "duration_ms": 100, "file_size_bytes": 100, "unique_colors": 4,
-            "entropy": 1.0, "edge_density": 0.1, "color_complexity": 0.1,
-            "gradient_smoothness": 0.5, "contrast_score": 0.5,
-            "text_density": 0.1, "dct_energy_ratio": 0.3,
-            "color_histogram_entropy": 2.0, "dominant_color_ratio": 0.5,
-            "motion_intensity": 0.0, "motion_smoothness": 1.0,
-            "static_region_ratio": 1.0, "temporal_entropy": 0.0,
-            "frame_similarity": 1.0, "inter_frame_mse_mean": 0.0,
-            "inter_frame_mse_std": 0.0, "lossless_compression_ratio": 0.5,
+            "width": 32,
+            "height": 32,
+            "frame_count": 1,
+            "duration_ms": 100,
+            "file_size_bytes": 100,
+            "unique_colors": 4,
+            "entropy": 1.0,
+            "edge_density": 0.1,
+            "color_complexity": 0.1,
+            "gradient_smoothness": 0.5,
+            "contrast_score": 0.5,
+            "text_density": 0.1,
+            "dct_energy_ratio": 0.3,
+            "color_histogram_entropy": 2.0,
+            "dominant_color_ratio": 0.5,
+            "motion_intensity": 0.0,
+            "motion_smoothness": 1.0,
+            "static_region_ratio": 1.0,
+            "temporal_entropy": 0.0,
+            "frame_similarity": 1.0,
+            "inter_frame_mse_mean": 0.0,
+            "inter_frame_mse_std": 0.0,
+            "lossless_compression_ratio": 0.5,
             # The bit under test: NULL transparency_ratio.
             "transparency_ratio": None,
-            "clip_screen_capture": None, "clip_vector_art": None,
-            "clip_photography": None, "clip_hand_drawn": None,
-            "clip_3d_rendered": None, "clip_pixel_art": None,
+            "clip_screen_capture": None,
+            "clip_vector_art": None,
+            "clip_photography": None,
+            "clip_hand_drawn": None,
+            "clip_3d_rendered": None,
+            "clip_pixel_art": None,
             "feature_extraction_version": "1.0.0",
             "extracted_at": datetime.now(UTC).isoformat(),
         }
@@ -652,9 +672,7 @@ class TestTransparencyRatioMigration:
     """Migration regression: existing DBs with the old NOT NULL constraint
     must be transparently upgraded to nullable when GifLabStorage opens them."""
 
-    def test_migration_drops_not_null_and_preserves_data(
-        self, tmp_path: Path
-    ) -> None:
+    def test_migration_drops_not_null_and_preserves_data(self, tmp_path: Path) -> None:
         """Open a DB created with the OLD schema (NOT NULL); verify the
         migration kicks in, the column becomes nullable, AND the existing
         rows are preserved."""
@@ -751,9 +769,9 @@ class TestTransparencyRatioMigration:
         with storage._connect() as conn:
             cols = conn.execute("PRAGMA table_info(gif_features)").fetchall()
             t_col = next(c for c in cols if c["name"] == "transparency_ratio")
-            assert t_col["notnull"] == 0, (
-                "Migration failed: transparency_ratio is still NOT NULL"
-            )
+            assert (
+                t_col["notnull"] == 0
+            ), "Migration failed: transparency_ratio is still NOT NULL"
 
             # Sentinel row preserved with its value intact
             sentinel = conn.execute(
@@ -765,27 +783,45 @@ class TestTransparencyRatioMigration:
             assert sentinel["gif_name"] == "sentinel.gif"
 
             # Inserting NULL now works
-            storage.save_gif_features({
-                "gif_sha": "post_migration_sha" + "0" * 46,
-                "gif_name": "after.gif",
-                "file_path": "/tmp/after.gif",
-                "width": 32, "height": 32, "frame_count": 1,
-                "duration_ms": 100, "file_size_bytes": 100, "unique_colors": 4,
-                "entropy": 1.0, "edge_density": 0.1, "color_complexity": 0.1,
-                "gradient_smoothness": 0.5, "contrast_score": 0.5,
-                "text_density": 0.1, "dct_energy_ratio": 0.3,
-                "color_histogram_entropy": 2.0, "dominant_color_ratio": 0.5,
-                "motion_intensity": 0.0, "motion_smoothness": 1.0,
-                "static_region_ratio": 1.0, "temporal_entropy": 0.0,
-                "frame_similarity": 1.0, "inter_frame_mse_mean": 0.0,
-                "inter_frame_mse_std": 0.0, "lossless_compression_ratio": 0.5,
-                "transparency_ratio": None,
-                "clip_screen_capture": None, "clip_vector_art": None,
-                "clip_photography": None, "clip_hand_drawn": None,
-                "clip_3d_rendered": None, "clip_pixel_art": None,
-                "feature_extraction_version": "1.0.0",
-                "extracted_at": now,
-            })
+            storage.save_gif_features(
+                {
+                    "gif_sha": "post_migration_sha" + "0" * 46,
+                    "gif_name": "after.gif",
+                    "file_path": "/tmp/after.gif",
+                    "width": 32,
+                    "height": 32,
+                    "frame_count": 1,
+                    "duration_ms": 100,
+                    "file_size_bytes": 100,
+                    "unique_colors": 4,
+                    "entropy": 1.0,
+                    "edge_density": 0.1,
+                    "color_complexity": 0.1,
+                    "gradient_smoothness": 0.5,
+                    "contrast_score": 0.5,
+                    "text_density": 0.1,
+                    "dct_energy_ratio": 0.3,
+                    "color_histogram_entropy": 2.0,
+                    "dominant_color_ratio": 0.5,
+                    "motion_intensity": 0.0,
+                    "motion_smoothness": 1.0,
+                    "static_region_ratio": 1.0,
+                    "temporal_entropy": 0.0,
+                    "frame_similarity": 1.0,
+                    "inter_frame_mse_mean": 0.0,
+                    "inter_frame_mse_std": 0.0,
+                    "lossless_compression_ratio": 0.5,
+                    "transparency_ratio": None,
+                    "clip_screen_capture": None,
+                    "clip_vector_art": None,
+                    "clip_photography": None,
+                    "clip_hand_drawn": None,
+                    "clip_3d_rendered": None,
+                    "clip_pixel_art": None,
+                    "feature_extraction_version": "1.0.0",
+                    "extracted_at": now,
+                }
+            )
 
     def test_migration_is_idempotent(self, tmp_path: Path) -> None:
         """Opening an already-migrated DB doesn't re-run the rebuild."""
@@ -824,23 +860,33 @@ class TestFeaturesToMatrixNoneCoercion:
             gif_name="t.gif",
             extraction_version="1.0.0",
             extracted_at=datetime.now(UTC),
-            width=32, height=32, frame_count=1, duration_ms=100,
-            file_size_bytes=100, unique_colors=4,
-            entropy=1.0, edge_density=0.1, color_complexity=0.1,
-            gradient_smoothness=0.5, contrast_score=0.5, text_density=0.1,
-            dct_energy_ratio=0.3, color_histogram_entropy=2.0,
+            width=32,
+            height=32,
+            frame_count=1,
+            duration_ms=100,
+            file_size_bytes=100,
+            unique_colors=4,
+            entropy=1.0,
+            edge_density=0.1,
+            color_complexity=0.1,
+            gradient_smoothness=0.5,
+            contrast_score=0.5,
+            text_density=0.1,
+            dct_energy_ratio=0.3,
+            color_histogram_entropy=2.0,
             dominant_color_ratio=0.5,
-            motion_intensity=0.0, motion_smoothness=1.0,
-            static_region_ratio=1.0, temporal_entropy=0.0,
+            motion_intensity=0.0,
+            motion_smoothness=1.0,
+            static_region_ratio=1.0,
+            temporal_entropy=0.0,
             frame_similarity=1.0,
-            inter_frame_mse_mean=0.0, inter_frame_mse_std=0.0,
+            inter_frame_mse_mean=0.0,
+            inter_frame_mse_std=0.0,
             lossless_compression_ratio=0.5,
             transparency_ratio=None,  # ← the case under test
         )
 
-        model = CurvePredictionModel(
-            engine=Engine.GIFSICLE, curve_type=CurveType.LOSSY
-        )
+        model = CurvePredictionModel(engine=Engine.GIFSICLE, curve_type=CurveType.LOSSY)
         matrix = model._features_to_matrix([features])
 
         # Find the transparency_ratio column index

@@ -139,7 +139,9 @@ def test_flat_content_fallback_sub_dn_is_identity_not_worst() -> None:
     near_white = _solid((253, 253, 253))  # L2 ≈ sqrt(12) ≈ 3.46
     # L2 ≈ 3.46 is below FLAT_IDENTITY_FLOOR (≈1.0) + FLAT_DEGRADATION_SCALE (≈50)
     # so result must be well above 0.0 (should be near-identity)
-    result = _flat_content_fallback(white, near_white, identity_value=1.0, worst_value=0.0)
+    result = _flat_content_fallback(
+        white, near_white, identity_value=1.0, worst_value=0.0
+    )
     assert result is not None
     # With smooth degradation at L2≈3.46, floor=1.0, scale=50.0:
     # blend = (3.46 - 1.0) / 50.0 ≈ 0.049
@@ -154,15 +156,16 @@ def test_flat_content_fallback_sub_dn_is_identity_not_worst() -> None:
 def test_flat_content_fallback_exact_identity() -> None:
     """Same colour → exactly identity_value."""
     frame = _solid((128, 128, 128))
-    result = _flat_content_fallback(frame, frame.copy(), identity_value=1.0, worst_value=0.0)
+    result = _flat_content_fallback(
+        frame, frame.copy(), identity_value=1.0, worst_value=0.0
+    )
     assert result == pytest.approx(1.0)
 
 
 def test_flat_content_fallback_catastrophe_is_worst() -> None:
     """White vs black (L2≈441) is far past the saturation point → worst_value."""
     result = _flat_content_fallback(
-        _solid((255, 255, 255)), _solid((0, 0, 0)),
-        identity_value=1.0, worst_value=0.0
+        _solid((255, 255, 255)), _solid((0, 0, 0)), identity_value=1.0, worst_value=0.0
     )
     assert result == pytest.approx(0.0)
 
@@ -170,8 +173,10 @@ def test_flat_content_fallback_catastrophe_is_worst() -> None:
 def test_flat_content_fallback_one_flat_is_worst() -> None:
     """Asymmetric case: one flat, one textured → worst."""
     result = _flat_content_fallback(
-        _solid((255, 255, 255)), _textured((255, 255, 255)),
-        identity_value=1.0, worst_value=0.0
+        _solid((255, 255, 255)),
+        _textured((255, 255, 255)),
+        identity_value=1.0,
+        worst_value=0.0,
     )
     assert result == pytest.approx(0.0)
 
@@ -179,8 +184,10 @@ def test_flat_content_fallback_one_flat_is_worst() -> None:
 def test_flat_content_fallback_two_non_flat_returns_none() -> None:
     """Neither flat → None (caller falls through to structure-based computation)."""
     result = _flat_content_fallback(
-        _textured((255, 255, 255)), _textured((0, 0, 0)),
-        identity_value=1.0, worst_value=0.0
+        _textured((255, 255, 255)),
+        _textured((0, 0, 0)),
+        identity_value=1.0,
+        worst_value=0.0,
     )
     assert result is None
 
@@ -200,7 +207,9 @@ def test_flat_content_fallback_monotonic_over_colour_sweep() -> None:
     for k in range(0, 256, 5):  # step=5 to keep test fast
         frame1 = _solid((255, 255, 255))
         frame2 = _solid((255 - k, 255 - k, 255 - k))
-        result = _flat_content_fallback(frame1, frame2, identity_value=1.0, worst_value=0.0)
+        result = _flat_content_fallback(
+            frame1, frame2, identity_value=1.0, worst_value=0.0
+        )
         assert result is not None, f"Expected non-None fallback for k={k}"
         scores.append(result)
 
@@ -216,8 +225,7 @@ def test_flat_content_fallback_saturates_to_worst() -> None:
     # L2 well past FLAT_IDENTITY_FLOOR + FLAT_DEGRADATION_SCALE
     # (255,255,255) vs (0,0,0): L2 ≈ 441 >> 1 + 50 = 51
     result = _flat_content_fallback(
-        _solid((255, 255, 255)), _solid((0, 0, 0)),
-        identity_value=1.0, worst_value=0.0
+        _solid((255, 255, 255)), _solid((0, 0, 0)), identity_value=1.0, worst_value=0.0
     )
     assert result == pytest.approx(0.0, abs=1e-9)
 
@@ -226,8 +234,10 @@ def test_flat_content_fallback_below_floor_is_exact_identity() -> None:
     """Below FLAT_IDENTITY_FLOOR the score must be exactly identity_value."""
     # (128,128,128) vs (128,128,128): L2 = 0 < FLAT_IDENTITY_FLOOR
     result = _flat_content_fallback(
-        _solid((128, 128, 128)), _solid((128, 128, 128)),
-        identity_value=1.0, worst_value=0.0
+        _solid((128, 128, 128)),
+        _solid((128, 128, 128)),
+        identity_value=1.0,
+        worst_value=0.0,
     )
     assert result == pytest.approx(1.0)
 
@@ -240,15 +250,16 @@ def test_flat_content_fallback_below_floor_is_exact_identity() -> None:
 def test_flat_content_fallback_gmsd_identity_is_zero() -> None:
     """gmsd identity is 0.0 (lower is better)."""
     frame = _solid((128, 128, 128))
-    result = _flat_content_fallback(frame, frame.copy(), identity_value=0.0, worst_value=0.5)
+    result = _flat_content_fallback(
+        frame, frame.copy(), identity_value=0.0, worst_value=0.5
+    )
     assert result == pytest.approx(0.0)
 
 
 def test_flat_content_fallback_gmsd_catastrophe_is_half() -> None:
     """gmsd worst-case for flat content is 0.5."""
     result = _flat_content_fallback(
-        _solid((255, 255, 255)), _solid((0, 0, 0)),
-        identity_value=0.0, worst_value=0.5
+        _solid((255, 255, 255)), _solid((0, 0, 0)), identity_value=0.0, worst_value=0.5
     )
     assert result == pytest.approx(0.5)
 
@@ -367,9 +378,9 @@ def test_fsim_medium_drift_mid_band() -> None:
     """
     score = fsim(_solid((255, 255, 255)), _solid((200, 200, 200)))
     # L2 ≈ 55 * sqrt(3) ≈ 95 >> floor+scale ≈ 51 → should be worst-case (0.0)
-    assert score <= 0.1, (
-        f"fsim for 55DN drift returned {score:.4f} — should be at/near worst-case."
-    )
+    assert (
+        score <= 0.1
+    ), f"fsim for 55DN drift returned {score:.4f} — should be at/near worst-case."
 
 
 def test_gmsd_sub_dn_drift_stays_near_identity() -> None:

@@ -2956,12 +2956,12 @@ def calculate_comprehensive_metrics_from_frames(
                         # compressed frames only — see
                         # calculate_comprehensive_metrics_from_frames).
                         optimized_results["temporal_consistency_compressed_std"] = 0.0
-                        optimized_results["temporal_consistency_compressed_min"] = float(
-                            temporal_post
-                        )
-                        optimized_results["temporal_consistency_compressed_max"] = float(
-                            temporal_post
-                        )
+                        optimized_results[
+                            "temporal_consistency_compressed_min"
+                        ] = float(temporal_post)
+                        optimized_results[
+                            "temporal_consistency_compressed_max"
+                        ] = float(temporal_post)
                         optimized_results["temporal_consistency_pre"] = float(
                             temporal_pre
                         )

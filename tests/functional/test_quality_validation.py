@@ -37,8 +37,13 @@ class TestQualityThresholdValidator:
         'Pair-wise over single-stream — and labelled honestly'.
         """
         validator = QualityThresholdValidator()
-        assert "min_compressed_temporal_consistency" in validator.catastrophic_thresholds
-        assert validator.catastrophic_thresholds["min_compressed_temporal_consistency"] == 0.1
+        assert (
+            "min_compressed_temporal_consistency" in validator.catastrophic_thresholds
+        )
+        assert (
+            validator.catastrophic_thresholds["min_compressed_temporal_consistency"]
+            == 0.1
+        )
 
     def test_old_bare_threshold_key_absent(self):
         """The old bare key 'min_temporal_consistency' must not appear.
@@ -93,12 +98,16 @@ class TestQualityThresholdValidator:
         metrics = {"temporal_consistency_compressed": 0.07}  # Above 0.05, below 0.10
 
         # Frame-reduction branch: 0.07 >= 0.05 lenient literal → acceptable
-        lenient = validator._check_metric_outliers(metrics, frame_reduction_context=True)
+        lenient = validator._check_metric_outliers(
+            metrics, frame_reduction_context=True
+        )
         assert lenient["temporal"]["threshold"] == 0.05
         assert lenient["temporal"]["acceptable"] is True
 
         # Non-frame-reduction branch: must read renamed key (0.10) → rejected
-        strict = validator._check_metric_outliers(metrics, frame_reduction_context=False)
+        strict = validator._check_metric_outliers(
+            metrics, frame_reduction_context=False
+        )
         assert strict["temporal"]["threshold"] == 0.1
         assert strict["temporal"]["acceptable"] is False
 

@@ -28,9 +28,7 @@ import time
 
 import numpy as np
 import pytest
-
 from giflab.metrics import _is_flat_frame
-
 
 _FRAME_H = 480
 _FRAME_W = 480
@@ -48,7 +46,7 @@ def non_flat_frames() -> list[np.ndarray]:
     """100 distinct 480×480 RGB frames, all with high ptp → fast-reject fires."""
     rng = np.random.default_rng(2026_05_27)
     frames = []
-    for i in range(_N_FRAMES):
+    for _ in range(_N_FRAMES):
         frame = np.full((_FRAME_H, _FRAME_W, 3), 200, dtype=np.uint8)
         # Random rectangle with contrasting colour ensures ptp > 4 on all channels.
         r0 = rng.integers(50, 200)

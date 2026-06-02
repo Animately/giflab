@@ -23,9 +23,7 @@ import sys
 from pathlib import Path
 
 # scripts/audit/ is not a Python package; load sanity.py directly.
-_SCRIPTS_AUDIT = (
-    Path(__file__).resolve().parents[2] / "scripts" / "audit"
-)
+_SCRIPTS_AUDIT = Path(__file__).resolve().parents[2] / "scripts" / "audit"
 if str(_SCRIPTS_AUDIT) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_AUDIT))
 
@@ -89,9 +87,7 @@ class TestMonotonicityCheck:
         # Flip size at index 2→3: 0.804 - 0.800 = 0.004
         # Old tol=1e-4: 0.004 > 1e-4 → would be flagged
         # New tol=max(1e-4, 0.1 * 0.05)=0.005: 0.004 < 0.005 → absorbed
-        invs = sanity._monotonicity_check(
-            [0.9, 0.85, 0.800, 0.804], "higher_better"
-        )
+        invs = sanity._monotonicity_check([0.9, 0.85, 0.800, 0.804], "higher_better")
         assert invs == [], (
             f"Expected no inversions for a noise-floor flip (0.004) within "
             f"5% of the observed range (0.1), but got: {invs}"
@@ -105,9 +101,7 @@ class TestMonotonicityCheck:
         """
         # Observed range: 0.9 - 0.6 = 0.3
         # Flip size: 0.75 - 0.6 = 0.15 (50% of range — clearly real)
-        invs = sanity._monotonicity_check(
-            [0.9, 0.75, 0.6, 0.75], "higher_better"
-        )
+        invs = sanity._monotonicity_check([0.9, 0.75, 0.6, 0.75], "higher_better")
         assert len(invs) == 1, (
             "Expected exactly one inversion for a large flip (50% of range); "
             f"got {invs}"
@@ -121,9 +115,7 @@ class TestMonotonicityCheck:
         # Flip at index 2→3: 8.96 - 9.0 = -0.04 (went down when should go up)
         # |flip| = 0.04 < tol = 0.05 → absorbed as noise-floor
         # (Old fixed tol=1e-4 would have flagged this.)
-        invs = sanity._monotonicity_check(
-            [8.0, 8.8, 9.0, 8.96], "lower_better"
-        )
+        invs = sanity._monotonicity_check([8.0, 8.8, 9.0, 8.96], "lower_better")
         assert invs == [], (
             f"Expected no inversions for lower_better noise flip (0.04) "
             f"within 5% of observed range (1.0), but got: {invs}"
@@ -203,7 +195,9 @@ class TestCoalesceByteIdenticalLevels:
         assert kept_metrics == {"ssim": [0.9, 0.5, 0.9]}
 
 
-def _make_multiframe_gif(path: Path, color: tuple[int, int, int] = (128, 128, 128)) -> None:
+def _make_multiframe_gif(
+    path: Path, color: tuple[int, int, int] = (128, 128, 128)
+) -> None:
     """Create a 2-frame solid-colour GIF that ``read_gif_frames`` can read."""
     from PIL import Image
 
@@ -237,6 +231,7 @@ def _build_fake_gl(metric_dict_factory):
     ``metric_dict_factory`` is called once per ``run_metrics`` invocation
     and returns the dict of metric values for that call.
     """
+
     class _FakeGenerator:
         def __init__(self, out_dir: Path) -> None:
             self.out_dir = out_dir
@@ -325,9 +320,7 @@ class TestCoalesceIntegratedIntoRunSanity:
         calls: list[tuple[list[Path], dict[str, list[float]]]] = []
 
         def _spy(paths, per_metric):
-            calls.append(
-                (list(paths), {k: list(v) for k, v in per_metric.items()})
-            )
+            calls.append((list(paths), {k: list(v) for k, v in per_metric.items()}))
             return real_coalesce(paths, per_metric)
 
         monkeypatch.setattr(sanity, "_coalesce_byte_identical_levels", _spy)
@@ -386,9 +379,7 @@ class TestCoalesceIntegratedIntoRunSanity:
         def _stub_coalesce(paths, per_metric):
             return list(paths), {"ssim": list(sentinel_values)}
 
-        monkeypatch.setattr(
-            sanity, "_coalesce_byte_identical_levels", _stub_coalesce
-        )
+        monkeypatch.setattr(sanity, "_coalesce_byte_identical_levels", _stub_coalesce)
 
         # Capture the value-lists passed to _monotonicity_check. The lossy
         # arm's stored entry should appear as [99.0] (the sentinel),
@@ -558,9 +549,7 @@ class TestAuditLossySweepBypassesContentCeiling:
             return output_path
 
         gl = {"compress": _fake_compress}
-        ok, err = common.compress_animately(
-            Path("in.gif"), Path("out.gif"), 100, gl
-        )
+        ok, err = common.compress_animately(Path("in.gif"), Path("out.gif"), 100, gl)
 
         assert ok, f"compress_animately reported failure: {err}"
         assert captured.get("apply_content_ceiling") is False, (
@@ -733,9 +722,7 @@ class TestTransparencyBearingGifFixture:
 
             # Correct path: alpha-composite onto white → transparent pixels become white.
             bg = Image.new("RGBA", im.size, (255, 255, 255, 255))
-            composited_arr = np.array(
-                Image.alpha_composite(bg, rgba).convert("RGB")
-            )
+            composited_arr = np.array(Image.alpha_composite(bg, rgba).convert("RGB"))
             transparent_composited = composited_arr[alpha_zero_mask]
             assert (transparent_composited == 255).all(), (
                 "RGBA-composite path did not yield (255,255,255) for transparent "
@@ -830,9 +817,7 @@ class TestFixtureMonotonicityBasesIntegration:
         fixture_dir = tmp_path / "fixtures"
         fixture_dir.mkdir()
         fixture_path = fixture_dir / "transparency_bearing_monotonicity.gif"
-        frames_list = [
-            Image.new("P", (16, 16), color=i) for i in (100, 120)
-        ]
+        frames_list = [Image.new("P", (16, 16), color=i) for i in (100, 120)]
         frames_list[0].putpalette([i % 256 for i in range(768)])
         frames_list[1].putpalette([i % 256 for i in range(768)])
         frames_list[0].save(
@@ -1005,9 +990,9 @@ class TestFixtureMonotonicityBasesIntegration:
         results = sanity.run_sanity(tmp_path / "workdir", skip_lossy=True)
 
         cfg = results.get("config", {})
-        assert "fixture_monotonicity_bases" in cfg, (
-            "run_sanity() output['config'] must contain 'fixture_monotonicity_bases' key."
-        )
+        assert (
+            "fixture_monotonicity_bases" in cfg
+        ), "run_sanity() output['config'] must contain 'fixture_monotonicity_bases' key."
         assert "transparency_bearing" in cfg["fixture_monotonicity_bases"], (
             "Expected 'transparency_bearing' in config.fixture_monotonicity_bases; "
             f"got: {cfg['fixture_monotonicity_bases']}"

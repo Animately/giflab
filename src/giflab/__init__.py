@@ -140,6 +140,22 @@ from .prediction import (
     PredictionModelMetadataV1,
     TrainingRecordV1,
 )
+
+# Public API surface (see docs/public-api.md). External consumers MUST import
+# these from the top-level `giflab` package, not from `giflab.public_api`.
+from .public_api import (
+    SUPPORTED_ENGINES,
+    SUPPORTED_METRICS,
+    CompressResult,
+    EngineIdentifier,
+    EngineUnavailableError,
+    MeasureResult,
+    MetricIdentifier,
+    UnknownEngineError,
+    UnknownMetricError,
+    compress,
+    measure,
+)
 from .system_tools import ToolInfo, verify_required_tools
 from .tool_interfaces import (
     ColorReductionTool,
@@ -180,20 +196,4 @@ from .tool_wrappers import (  # All Bayer scale variations for systematic elimin
     ImageMagickColorReducerRiemersma,
     ImageMagickFrameReducer,
     ImageMagickLossyCompressor,
-)
-
-# Public API surface (see docs/public-api.md). External consumers MUST import
-# these from the top-level `giflab` package, not from `giflab.public_api`.
-from .public_api import (
-    SUPPORTED_ENGINES,
-    SUPPORTED_METRICS,
-    CompressResult,
-    EngineIdentifier,
-    EngineUnavailableError,
-    MeasureResult,
-    MetricIdentifier,
-    UnknownEngineError,
-    UnknownMetricError,
-    compress,
-    measure,
 )

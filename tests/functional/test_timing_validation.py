@@ -522,9 +522,7 @@ class TestZeroDelayGifs:
         assert sum(durations) == 0  # real total duration is genuinely 0ms
 
     @patch("src.giflab.wrapper_validation.timing_validation.Image.open")
-    def test_zero_delay_mismatched_frame_counts_no_phantom_diff(
-        self, mock_image_open
-    ):
+    def test_zero_delay_mismatched_frame_counts_no_phantom_diff(self, mock_image_open):
         """The worked example: 55-frame source vs 43-frame compressed, all 0ms.
 
         Real timing: 0ms == 0ms == preserved. The reported duration_diff_ms

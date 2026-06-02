@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from giflab.metrics import _is_flat_frame
-
 
 # ---------------------------------------------------------------------------
 # Flat frames must still return True
@@ -125,6 +123,6 @@ def test_result_matches_reference_for_random_frame() -> None:
     rng = np.random.default_rng(0)
     for _ in range(50):
         frame = rng.integers(0, 256, size=(48, 48, 3), dtype=np.uint8)
-        assert _is_flat_frame(frame) == _reference(frame), (
-            "Optimised _is_flat_frame disagrees with reference implementation."
-        )
+        assert _is_flat_frame(frame) == _reference(
+            frame
+        ), "Optimised _is_flat_frame disagrees with reference implementation."
