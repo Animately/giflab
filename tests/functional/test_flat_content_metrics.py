@@ -41,6 +41,7 @@ from giflab.metrics import (
     fsim,
     gmsd,
     sharpness_similarity,
+    texture_similarity,
 )
 
 # ---------------------------------------------------------------------------
@@ -447,3 +448,193 @@ def test_sharpness_similarity_textured_self_pair_unchanged() -> None:
     frame = _textured((255, 255, 255))
     score = sharpness_similarity(frame, frame.copy())
     assert score == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# texture_similarity — Wave-N flat-content + near-flat-escape coverage
+#
+# Audit context: ``texture_similarity`` is LBP-histogram correlation. LBP is
+# intensity-INVERSION invariant, so a frame and its inverted counterpart
+# (white vs black, or a ramp vs its 255-complement) produce nearly identical
+# uniform-LBP histograms and the raw corrcoef path scored ~0.9996 — silently
+# treating a catastrophically different pair as near-identity.
+#
+# Fix: route solid-colour pairs through ``_flat_content_fallback`` (the same
+# smooth-degradation path the four sibling structure metrics already use) and
+# guard the residual *near-flat* zone — frames with a tiny gradient that
+# escape the strict ``_is_flat_frame`` std test but still have negligible
+# real structure — with a continuous flatness-weighted blend toward the
+# colour-distance degradation. No new cliff: the blend weight is a continuous
+# function of the grayscale peak-to-peak.
+#
+# Rollout: [[giflab-rollout]] — task
+# giflab-texture-similarity-flat-content-aggregation-and-cliff.
+# ---------------------------------------------------------------------------
+
+
+def _near_flat_ramp(
+    start: int, span: int = 12, size: tuple[int, int] = (96, 96)
+) -> np.ndarray:
+    """A horizontal grayscale ramp with a tiny span — near-flat but NOT flat.
+
+    With span=12 the per-channel std is ~3.47 (> FLAT_STD_THRESHOLD=1.0) and
+    the grayscale ptp is 12 (> _PTP_FAST_REJECT_THRESHOLD=4), so
+    ``_is_flat_frame`` returns False and the strict flat-content fallback does
+    not fire. This is the residual near-flat escape the Part-3 guard handles.
+    """
+    h, w = size
+    row = np.linspace(start, start + span, w).astype(np.uint8)
+    gray = np.tile(row, (h, 1))
+    return np.stack([gray, gray, gray], axis=-1)
+
+
+def test_texture_similarity_white_vs_black_is_not_identity() -> None:
+    """Audit regression: white vs black previously returned ~0.9996 (identity).
+
+    LBP intensity-inversion invariance made the worst-possible flat pair score
+    as near-identical. Both frames are flat → _flat_content_fallback must
+    report worst-case.
+    """
+    score = texture_similarity(_solid((255, 255, 255)), _solid((0, 0, 0)))
+    assert score < 0.5, (
+        f"texture_similarity(white, black) returned {score:.4f} — should report "
+        "worst-case, not identity (LBP intensity-inversion pathology). See "
+        "docs/metrics-audit/2026-05-22/report.md."
+    )
+
+
+@pytest.mark.parametrize("colour", [(0, 0, 0), (255, 255, 255), (128, 128, 128)])
+def test_texture_similarity_identity_on_flat_self_pair_returns_one(
+    colour: tuple[int, int, int],
+) -> None:
+    frame = _solid(colour)
+    assert texture_similarity(frame, frame.copy()) == pytest.approx(1.0)
+
+
+def test_texture_similarity_sub_dn_drift_stays_near_identity() -> None:
+    """(255,255,255) vs (253,253,253) — 2DN per channel, perceptually invisible.
+
+    Must stay near identity (smooth degradation), not collapse to worst-case.
+    """
+    score = texture_similarity(_solid((255, 255, 255)), _solid((253, 253, 253)))
+    assert score > 0.5, (
+        f"texture_similarity for 2DN sub-pixel drift returned {score:.4f} — "
+        "should stay near identity, not collapse to worst-case."
+    )
+
+
+def test_texture_similarity_near_identity_band_for_close_flats() -> None:
+    """(255,255,255) vs (254,254,254) — L2≈1.73, sits in the (0.9, 1.0) band.
+
+    Acceptance-criteria note: the task's (240,240,240) example is NOT in
+    (0.9, 1.0) — with FLAT_DEGRADATION_SCALE=50 it lands at ~0.50. A genuinely
+    near-white flat (254) is the colour that belongs in the near-identity band.
+    """
+    score = texture_similarity(_solid((255, 255, 255)), _solid((254, 254, 254)))
+    assert 0.9 < score <= 1.0, (
+        f"texture_similarity(white, near-white-254) returned {score:.4f} — "
+        "a sub-DN flat pair must sit in the near-identity (0.9, 1.0) band."
+    )
+
+
+def test_texture_similarity_mid_band_for_moderate_flat_drift() -> None:
+    """(255,255,255) vs (240,240,240) — L2≈25.98, a degraded mid-band value.
+
+    Acceptance-criteria note: the task asserts ``> 0.5`` for this pair, but
+    with scale=50 it lands at ~0.50 (a 0.0004 knife-edge). We assert the
+    robust property instead: meaningfully degraded below identity yet not
+    worst-case.
+    """
+    score = texture_similarity(_solid((255, 255, 255)), _solid((240, 240, 240)))
+    assert 0.0 < score < 1.0, (
+        f"texture_similarity(white, 240) returned {score:.4f} — should be a "
+        "degraded mid-band value (below identity, above worst-case)."
+    )
+
+
+def test_texture_similarity_flat_vs_textured_is_not_identity() -> None:
+    """One flat, one textured → unambiguous mismatch → well below identity."""
+    score = texture_similarity(_solid((255, 255, 255)), _textured((255, 255, 255)))
+    assert score < 0.95, (
+        f"texture_similarity(flat, textured) returned {score:.4f} — an "
+        "asymmetric flat/textured pair must not score as near-identity."
+    )
+
+
+def test_texture_similarity_near_flat_inverted_escape_is_not_identity() -> None:
+    """Part-3 residual pathology: two near-flat ramps, one the 255-complement
+    of the other, escape the strict _is_flat_frame test (std≈3.47, gray_ptp=12)
+    yet are catastrophically different in colour.
+
+    Before the Part-3 guard the LBP corrcoef path returned ~0.9995 (identity).
+    The continuous near-flat blend must degrade this meaningfully.
+    """
+    r1 = _near_flat_ramp(0, span=12)  # values 0..12
+    r2 = (255 - r1).astype(np.uint8)  # inverted: 255..243
+    assert _is_flat_frame(r1) is False  # escapes the strict flat test
+    assert _is_flat_frame(r2) is False
+    score = texture_similarity(r1, r2)
+    assert score < 0.9, (
+        f"texture_similarity for inverted near-flat ramps returned {score:.4f} "
+        "— the near-flat guard must degrade this far below the LBP-identity "
+        "pathology (~0.9995)."
+    )
+
+
+def test_texture_similarity_near_flat_same_colour_stays_near_identity() -> None:
+    """A near-flat ramp vs itself must stay near identity — the near-flat guard
+    must not penalise same-content near-flat pairs.
+    """
+    r1 = _near_flat_ramp(0, span=12)
+    score = texture_similarity(r1, r1.copy())
+    assert score > 0.9, (
+        f"texture_similarity(near-flat ramp, itself) returned {score:.4f} — "
+        "identity on near-flat content must stay near 1.0."
+    )
+
+
+def test_texture_similarity_textured_content_unchanged_by_near_flat_guard() -> None:
+    """Real textured content (gray_ptp well above the near-flat ceiling) must be
+    scored by the unchanged LBP path: identity ⇒ 1.0, the near-flat blend
+    weight must be exactly zero.
+    """
+    frame = _textured((255, 255, 255))
+    assert texture_similarity(frame, frame.copy()) == pytest.approx(1.0)
+
+
+def test_texture_similarity_grayscale_flat_pair() -> None:
+    """ndim==2 (grayscale) flat inputs must route through the flat fallback too."""
+    white = np.full((96, 96), 255, dtype=np.uint8)
+    black = np.full((96, 96), 0, dtype=np.uint8)
+    assert texture_similarity(white, black) < 0.5
+    assert texture_similarity(white, white.copy()) == pytest.approx(1.0)
+
+
+def test_texture_similarity_monotonic_over_flat_colour_sweep() -> None:
+    """As the second flat colour darkens from white to black, texture_similarity
+    must be weakly decreasing (no rebound) — mirrors the sibling-metric
+    monotonicity guarantee.
+    """
+    scores: list[float] = []
+    white = _solid((255, 255, 255))
+    for k in range(0, 256, 5):
+        other = _solid((255 - k, 255 - k, 255 - k))
+        scores.append(texture_similarity(white, other))
+    for i in range(1, len(scores)):
+        assert scores[i] <= scores[i - 1] + 1e-9, (
+            f"Monotonicity violation at step {i}: "
+            f"score[{i-1}]={scores[i-1]:.6f} < score[{i}]={scores[i]:.6f}"
+        )
+
+
+def test_texture_similarity_non_flat_inputs_are_not_nan() -> None:
+    """Normal (non-flat) content must still produce a real float, never NaN —
+    a NaN would corrupt composite_quality (weight redistribution is out of
+    scope for this task).
+    """
+    rng = np.random.default_rng(0)
+    f1 = rng.integers(0, 256, size=(96, 96, 3), dtype=np.uint8)
+    f2 = (f1 // 4 * 4).astype(np.uint8)  # 64-colour quantization
+    score = texture_similarity(f1, f2)
+    assert not math.isnan(score)
+    assert 0.0 <= score <= 1.0

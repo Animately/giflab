@@ -1414,6 +1414,56 @@ FLAT_DEGRADATION_SCALE: float = 50.0
 # docstring for the precise divergence math).
 _PTP_FAST_REJECT_THRESHOLD = int(round(FLAT_STD_THRESHOLD * 4))
 
+# Grayscale peak-to-peak ceiling below which a frame is "near flat" for the
+# texture_similarity near-flat guard. Derived from _PTP_FAST_REJECT_THRESHOLD
+# (= 4 DN at FLAT_STD_THRESHOLD = 1.0) so it stays in lock-step with the flat
+# constants — no independent free tunable.
+#
+# Why texture_similarity needs this and the four sibling structure metrics do
+# not: LBP encodes LOCAL ORDER relations, so it is intensity-INVERSION
+# invariant. A frame with a tiny gradient and its 255-complement (a
+# catastrophically different colour pair) produce nearly identical uniform-LBP
+# histograms and the raw corrcoef path scores ~0.9995 — even though
+# ``_is_flat_frame`` correctly reports the pair as non-flat (the gradient
+# carries real per-channel std > FLAT_STD_THRESHOLD). The fsim/gmsd/edge/
+# sharpness metrics degrade naturally on such a gradient, so they need no
+# near-flat guard; only the inversion-invariant LBP metric does.
+#
+# Derivation: 8 × _PTP_FAST_REJECT_THRESHOLD = 32 DN. This sits well above the
+# residual near-flat escape zone (gray_ptp 12–24 for sub-DN-band gradients)
+# and far below any frame with visible structure (a single 30-DN palette step
+# already exceeds it; real content measures gray_ptp ≥ ~175). The near-flat
+# blend weight is a CONTINUOUS function of gray_ptp (no cliff): it reaches
+# full strength only as both frames approach perfect flatness and is exactly
+# zero for any textured frame.
+_TEXTURE_NEAR_FLAT_PTP_CEILING = _PTP_FAST_REJECT_THRESHOLD * 8
+
+
+def _flat_colour_degradation(
+    frame1: np.ndarray,
+    frame2: np.ndarray,
+    *,
+    identity_value: float,
+    worst_value: float,
+) -> float:
+    """Smooth degradation from ``identity_value`` to ``worst_value`` by colour L2.
+
+    Shared by ``_flat_content_fallback`` (both-flat branch) and the
+    ``texture_similarity`` near-flat guard so the two regimes degrade on the
+    exact same curve. No hard threshold cliff:
+
+        blend = clamp((L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE, 0, 1)
+        score = identity_value * (1 - blend) + worst_value * blend
+
+    L2 below ``FLAT_IDENTITY_FLOOR`` returns exactly ``identity_value`` (sub-DN
+    round-trip drift is perceptually invisible and must not be penalised).
+    """
+    L2 = _flat_mean_distance(frame1, frame2)
+    if L2 < FLAT_IDENTITY_FLOOR:
+        return identity_value
+    blend = min(1.0, (L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE)
+    return identity_value * (1.0 - blend) + worst_value * blend
+
 
 def _is_flat_frame(frame: np.ndarray, threshold: float = FLAT_STD_THRESHOLD) -> bool:
     """Return True if every channel of ``frame`` has std below ``threshold``.
@@ -1539,11 +1589,9 @@ def _flat_content_fallback(
         return None
 
     if flat1 and flat2:
-        L2 = _flat_mean_distance(frame1, frame2)
-        if L2 < FLAT_IDENTITY_FLOOR:
-            return identity_value
-        blend = min(1.0, (L2 - FLAT_IDENTITY_FLOOR) / FLAT_DEGRADATION_SCALE)
-        return identity_value * (1.0 - blend) + worst_value * blend
+        return _flat_colour_degradation(
+            frame1, frame2, identity_value=identity_value, worst_value=worst_value
+        )
 
     # Exactly one side flat → unambiguous structural mismatch.
     return worst_value
@@ -1787,25 +1835,55 @@ def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
     """Texture-Histogram correlation using uniform LBP (0-1, higher is better).
 
     Compares two frames via a Local Binary Pattern histogram correlation.
-    LBP is a TRUE PAIR-COMPARISON metric, but it has known mathematical
-    INVARIANCES that make some "obviously different" pairs report near 1.0:
+    LBP (the local binary pattern) is a TRUE PAIR-COMPARISON metric, but it has
+    known mathematical INVARIANCES that make some "obviously different" pairs
+    report near 1.0:
 
     - Intensity inversion: a frame and its inverted-intensity counterpart
       produce nearly identical uniform-LBP histograms. White↔black
-      pathological pairs from the audit corpus report
+      pathological pairs from the audit corpus reported
       ``texture_similarity ≈ 0.9996`` for this reason.
     - Spatially-uniform regions: both frames being solid colours (any
-      colours) produce identical near-degenerate histograms and the
-      function returns 1.0 (see the ``np.std == 0`` early return).
+      colours) produce identical near-degenerate histograms, so the raw
+      corrcoef path reported ~1.0 regardless of colour.
     - Monotonic intensity transforms more generally: LBP encodes local
       ORDER relations between pixels, not absolute intensities, so any
       monotone intensity remapping preserves the pattern.
 
-    Despite these invariances the metric is NOT single-stream — both
-    frames are required and the LBP statistics are compared. See
-    docs/metrics-audit/2026-05-22/report.md for the audit context.
+    Despite these invariances the metric is NOT single-stream — both frames
+    are required and the LBP statistics are compared.
+
+    Flat- and near-flat-content handling (audit-fix, this metric was the last
+    structure-based pair metric missing it; fsim/gmsd/edge_similarity/
+    sharpness_similarity converted earlier):
+
+    - Both frames solid colour → ``_flat_content_fallback`` returns honest
+      smooth degradation by colour L2 (identity 1.0 for same-colour flats,
+      blending to worst 0.0 for different-colour flats such as white-vs-black).
+      This replaces the old ``np.std == 0 → return 1.0`` cliff that silently
+      treated every solid pair as identity.
+    - One flat, one textured → ``_flat_content_fallback`` returns worst (0.0).
+    - NEAR-flat residual escape — a frame with a tiny gradient (per-channel
+      std just above ``FLAT_STD_THRESHOLD``) passes the strict flat test yet
+      still carries no real structure. Because LBP is intensity-inversion
+      invariant, such a near-flat ramp and its 255-complement still collide at
+      ~0.9995. We blend the LBP score toward the colour-distance degradation
+      with a CONTINUOUS weight driven by the grayscale peak-to-peak (no cliff;
+      see ``_TEXTURE_NEAR_FLAT_PTP_CEILING``): the weight reaches full strength
+      only as both frames approach perfect flatness and is exactly zero for any
+      frame with visible structure, so real content is scored by the unchanged
+      LBP path.
+
+    See docs/metrics-audit/2026-05-22/report.md and task note
+    giflab-texture-similarity-flat-content-aggregation-and-cliff for context.
     """
     f1, f2 = _resize_if_needed(frame1, frame2)
+
+    # Solid-colour pairs (both flat, or exactly one flat) get honest
+    # smooth-degradation values — never the LBP-identity pathology.
+    fallback = _flat_content_fallback(f1, f2, identity_value=1.0, worst_value=0.0)
+    if fallback is not None:
+        return fallback
 
     if f1.ndim == 3:
         gray1 = cv2.cvtColor(f1, cv2.COLOR_RGB2GRAY)
@@ -1825,11 +1903,29 @@ def texture_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
         lbp2.ravel(), bins=10, range=(0, n_points + 2), density=True
     )
 
-    if np.std(hist1) == 0 or np.std(hist2) == 0:
-        return 1.0  # completely uniform textures
-
     corr = np.corrcoef(hist1, hist2)[0, 1]
-    return float(np.clip((corr + 1) / 2.0, 0.0, 1.0))
+    lbp_score = float(np.clip((corr + 1) / 2.0, 0.0, 1.0))
+
+    # Near-flat guard: neither frame is strictly flat (so _flat_content_fallback
+    # returned None), but if BOTH grayscale frames are near-flat the LBP score
+    # is corrupted by intensity-inversion invariance. Blend continuously toward
+    # the colour-distance degradation; the weight is 0 for any textured frame.
+    ptp_max = float(max(np.ptp(gray1), np.ptp(gray2)))
+    near_flat_weight = max(
+        0.0,
+        min(
+            1.0,
+            (_TEXTURE_NEAR_FLAT_PTP_CEILING - ptp_max)
+            / _TEXTURE_NEAR_FLAT_PTP_CEILING,
+        ),
+    )
+    if near_flat_weight <= 0.0:
+        return lbp_score
+
+    colour_score = _flat_colour_degradation(
+        f1, f2, identity_value=1.0, worst_value=0.0
+    )
+    return (1.0 - near_flat_weight) * lbp_score + near_flat_weight * colour_score
 
 
 def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
@@ -1873,23 +1969,33 @@ def sharpness_similarity(frame1: np.ndarray, frame2: np.ndarray) -> float:
 
 
 # Metrics whose per-frame distributions are heavy-tailed toward 1.0 on
-# sparse-edge content (Canny union==0 guard), causing ``np.max`` to be
-# INCONCLUSIVE and ``np.mean`` to be non-monotonic under palette reduction.
-# For these metrics, ``_aggregate_metric`` uses ``np.median`` as the primary
-# aggregation instead of ``np.mean``.
+# flat / sparse-edge content, causing ``np.max`` to be INCONCLUSIVE and
+# ``np.mean`` to be non-monotonic under palette reduction. For these metrics,
+# ``_aggregate_metric`` uses ``np.median`` as the primary aggregation instead
+# of ``np.mean``.
 #
-# Background: smooth-gradient GIFs quantized to few colours develop banding
-# edges in the compressed stream that aren't in the original, so most
-# frame pairs score near-zero Jaccard.  However, when *neither* stream has
-# any detectable edges (both flat colour patches within the Canny window),
-# the ``union == 0`` guard in ``edge_similarity()`` returns 1.0.  A ``mean``
-# aggregation is dragged upward by these 1.0 outliers and produces
-# non-monotonic scores as the palette shrinks further (scores go 1.0 →
-# ~0 → 0.02 → 0.04 at [256, 64, 16, 4] colours — audit 2026-05-22, report.md
-# line 105–106).  ``np.median`` ignores the outliers and faithfully reflects
-# the typical frame quality (task: giflab-edge-similarity-max-aggregation-
-# sparse-edges, Wave 2 of giflab-rollout-2026-05-26).
-_MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(["edge_similarity"])
+# - ``edge_similarity``: smooth-gradient GIFs quantized to few colours develop
+#   banding edges in the compressed stream that aren't in the original, so most
+#   frame pairs score near-zero Jaccard.  However, when *neither* stream has any
+#   detectable edges (both flat colour patches within the Canny window), the
+#   ``union == 0`` guard in ``edge_similarity()`` returns 1.0.  A ``mean``
+#   aggregation is dragged upward by these 1.0 outliers and produces
+#   non-monotonic scores as the palette shrinks further (scores go 1.0 → ~0 →
+#   0.02 → 0.04 at [256, 64, 16, 4] colours — audit 2026-05-22, report.md line
+#   105–106).  ``np.median`` ignores the outliers and faithfully reflects the
+#   typical frame quality (task: giflab-edge-similarity-max-aggregation-sparse-
+#   edges, Wave 2 of giflab-rollout-2026-05-26).
+# - ``texture_similarity``: LBP-histogram correlation is intensity-inversion
+#   invariant, so flat / near-flat frame pairs (including a frame vs its
+#   255-complement) collide near 1.0.  Even with the per-frame flat-content
+#   fallback, a clip whose frames alternate between flat and textured content
+#   produces a heavy 1.0 tail from the flat frames; ``np.mean`` is dragged
+#   upward exactly as for edge_similarity, so median is the robust central
+#   tendency here too (task: giflab-texture-similarity-flat-content-
+#   aggregation-and-cliff).
+_MEDIAN_AGGREGATED_METRICS: frozenset[str] = frozenset(
+    ["edge_similarity", "texture_similarity"]
+)
 
 
 def _nan_fallback_dict(keys: list[str]) -> dict[str, float]:
@@ -1944,8 +2050,8 @@ def _aggregate_metric(
         primary_agg: Callable that reduces a 1-D np.ndarray to a scalar.
             When ``None`` (default), the function resolves the aggregation
             automatically: metrics listed in ``_MEDIAN_AGGREGATED_METRICS``
-            (currently just ``edge_similarity``) use ``np.nanmedian``; all
-            others use ``np.nanmean``.
+            (``edge_similarity`` and ``texture_similarity``) use
+            ``np.nanmedian``; all others use ``np.nanmean``.
 
     Returns:
         Dictionary with primary (median or mean), std, min, max for the metric.
