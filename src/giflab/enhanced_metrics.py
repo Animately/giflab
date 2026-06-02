@@ -12,6 +12,82 @@ import numpy as np
 
 from .config import DEFAULT_METRICS_CONFIG, MetricsConfig
 
+# When at least this fraction of the PRESENT (contributing) weight is
+# unmeasurable (NaN / None), the composite is "majority-missing": a
+# redistributed number would be more misleading than honest, so
+# ``calculate_composite_quality`` returns ``float("nan")`` instead.
+#
+# The ratio is taken over PRESENT weight only — metrics whose keys are simply
+# absent from the input never contributed weight, so they don't count toward
+# the missing fraction (an input with only two finite metrics is not
+# "majority-missing" just because the other thirteen weren't supplied).
+#
+# The boundary is ``>=``: exactly-half-of-present-weight unmeasurable returns
+# NaN. This is a metric-formula constant, not a tunable weight, so it lives
+# here rather than in ``config.py`` (placing it there would re-trigger the
+# weight-sum-to-1.0 validation in ``MetricsConfig.__post_init__`` for no
+# reason).
+COMPOSITE_NAN_THRESHOLD = 0.5
+
+
+def _is_missing(value: Any) -> bool:
+    """Return True if *value* is unmeasurable (None or NaN).
+
+    Mirrors ``optimization_validation.validation_checker._is_missing`` — a
+    metric that could not be computed is propagated as ``float("nan")`` (or,
+    defensively, ``None``) by the upstream metrics paths and must be excluded
+    from the composite, not coerced through ``normalize_metric``'s clamp (which
+    turns NaN into the upper bound 1.0).
+    """
+    if value is None:
+        return True
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _resolve_composite_from_contributions(
+    contributions: list[tuple[float, float]],
+) -> float:
+    """Collapse per-metric ``(normalized_value, weight)`` pairs into the final
+    composite, filtering unmeasurable contributions and redistributing weight.
+
+    ``contributions`` contains an entry for every metric block that was PRESENT
+    in the input (key existed), whether or not its value was measurable. A
+    measurable contribution carries its finite normalized value; an
+    unmeasurable one carries ``float("nan")`` as its value (its weight still
+    counts toward "present weight" so the missing-fraction is honest).
+
+    Returns:
+        * ``0.0`` when no metric block was present (total present weight 0) —
+          preserves the historical "nothing to measure" contract.
+        * ``float("nan")`` when the unmeasurable fraction of present weight is
+          ``>= COMPOSITE_NAN_THRESHOLD`` (majority-missing).
+        * otherwise a finite redistributed score in ``[0.0, 1.0]``.
+    """
+    total_weight = sum(weight for _, weight in contributions)
+    if total_weight <= 0:
+        # No quality keys present at all — nothing to measure. Distinct from
+        # "keys present but all unmeasurable", which falls into the NaN branch
+        # below (that path has total_weight > 0).
+        return 0.0
+
+    missing_weight = sum(
+        weight for value, weight in contributions if _is_missing(value)
+    )
+
+    if missing_weight / total_weight >= COMPOSITE_NAN_THRESHOLD:
+        # Majority of the present weight is unmeasurable — an honest NaN beats a
+        # confident-looking redistributed number built from a minority signal.
+        return float("nan")
+
+    surviving_weight = total_weight - missing_weight
+    weighted_sum = sum(
+        value * weight for value, weight in contributions if not _is_missing(value)
+    )
+    # Redistribute: divide by surviving weight so the kept metrics fill the
+    # whole [0, 1] range exactly as if the missing keys had been absent.
+    composite = weighted_sum / surviving_weight
+    return max(0.0, min(1.0, composite))
+
 
 def normalize_metric(
     metric_name: str, value: float, min_val: float = 0.0, max_val: float = 1.0
@@ -94,81 +170,73 @@ def calculate_composite_quality(
         # Fall back to legacy 4-metric calculation
         return calculate_legacy_composite_quality(metrics, config)
 
-    composite_quality = 0.0
-    total_weight = 0.0  # Track actual weights used (for missing metrics)
+    # Build one ``(normalized_value, weight)`` contribution per PRESENT metric
+    # block. Unmeasurable values (NaN / None) keep their weight in the list with
+    # a NaN ``normalized_value`` — ``_resolve_composite_from_contributions``
+    # filters them and redistributes the surviving weight, returning NaN when
+    # the unmeasurable fraction reaches COMPOSITE_NAN_THRESHOLD.
+    #
+    # CRITICAL: a NaN must NOT flow through ``normalize_metric`` and the clamp
+    # ``max(0.0, min(1.0, nan))``, which returns the upper bound 1.0 in CPython
+    # (every comparison with NaN is False) — that fabricates a PERFECT
+    # contribution and inflates the weight. So we test ``_is_missing`` on the
+    # RAW value before normalizing and pass NaN straight through when missing.
+    contributions: list[tuple[float, float]] = []
+    debug_steps: list[str] = []
 
-    # DEBUG: Track calculation steps
-    debug_steps = []
+    def _add(metric_name: str, raw_value: Any, weight: float) -> None:
+        if _is_missing(raw_value):
+            contributions.append((float("nan"), weight))
+            return
+        normalized = normalize_metric(metric_name, raw_value)
+        contributions.append((normalized, weight))
+        debug_steps.append(f"{metric_name}: {raw_value} → {normalized:.3f} × {weight}")
 
     # Core structural similarity metrics (40% total)
     if "ssim_mean" in metrics:
-        raw_value = metrics["ssim_mean"]
-        normalized = normalize_metric("ssim_mean", raw_value)
-        contribution = config.ENHANCED_SSIM_WEIGHT * normalized
-        composite_quality += contribution
-        total_weight += config.ENHANCED_SSIM_WEIGHT
-        debug_steps.append(
-            f"SSIM: {raw_value:.3f} → {normalized:.3f} × {config.ENHANCED_SSIM_WEIGHT} = {contribution:.3f}"
-        )
+        _add("ssim_mean", metrics["ssim_mean"], config.ENHANCED_SSIM_WEIGHT)
 
     if "ms_ssim_mean" in metrics:
-        raw_value = metrics["ms_ssim_mean"]
-        normalized = normalize_metric("ms_ssim_mean", raw_value)
-        contribution = config.ENHANCED_MS_SSIM_WEIGHT * normalized
-        composite_quality += contribution
-        total_weight += config.ENHANCED_MS_SSIM_WEIGHT
-        debug_steps.append(
-            f"MS-SSIM: {raw_value:.3f} → {normalized:.3f} × {config.ENHANCED_MS_SSIM_WEIGHT} = {contribution:.3f}"
-        )
+        _add("ms_ssim_mean", metrics["ms_ssim_mean"], config.ENHANCED_MS_SSIM_WEIGHT)
 
     # Signal quality metrics (25% total)
     if "psnr_mean" in metrics:
-        normalized = normalize_metric("psnr_mean", metrics["psnr_mean"])
-        composite_quality += config.ENHANCED_PSNR_WEIGHT * normalized
-        total_weight += config.ENHANCED_PSNR_WEIGHT
+        _add("psnr_mean", metrics["psnr_mean"], config.ENHANCED_PSNR_WEIGHT)
 
     if "mse_mean" in metrics:
-        normalized = normalize_metric("mse_mean", metrics["mse_mean"])
-        composite_quality += config.ENHANCED_MSE_WEIGHT * normalized
-        total_weight += config.ENHANCED_MSE_WEIGHT
+        _add("mse_mean", metrics["mse_mean"], config.ENHANCED_MSE_WEIGHT)
 
     # Advanced structural metrics (20% total)
     if "fsim_mean" in metrics:
-        normalized = normalize_metric("fsim_mean", metrics["fsim_mean"])
-        composite_quality += config.ENHANCED_FSIM_WEIGHT * normalized
-        total_weight += config.ENHANCED_FSIM_WEIGHT
+        _add("fsim_mean", metrics["fsim_mean"], config.ENHANCED_FSIM_WEIGHT)
 
     if "edge_similarity_mean" in metrics:
-        normalized = normalize_metric(
-            "edge_similarity_mean", metrics["edge_similarity_mean"]
+        _add(
+            "edge_similarity_mean",
+            metrics["edge_similarity_mean"],
+            config.ENHANCED_EDGE_WEIGHT,
         )
-        composite_quality += config.ENHANCED_EDGE_WEIGHT * normalized
-        total_weight += config.ENHANCED_EDGE_WEIGHT
 
     if "gmsd_mean" in metrics:
-        normalized = normalize_metric("gmsd_mean", metrics["gmsd_mean"])
-        composite_quality += config.ENHANCED_GMSD_WEIGHT * normalized
-        total_weight += config.ENHANCED_GMSD_WEIGHT
+        _add("gmsd_mean", metrics["gmsd_mean"], config.ENHANCED_GMSD_WEIGHT)
 
     # Perceptual quality metrics (10% total)
     if "chist_mean" in metrics:
-        normalized = normalize_metric("chist_mean", metrics["chist_mean"])
-        composite_quality += config.ENHANCED_CHIST_WEIGHT * normalized
-        total_weight += config.ENHANCED_CHIST_WEIGHT
+        _add("chist_mean", metrics["chist_mean"], config.ENHANCED_CHIST_WEIGHT)
 
     if "sharpness_similarity_mean" in metrics:
-        normalized = normalize_metric(
-            "sharpness_similarity_mean", metrics["sharpness_similarity_mean"]
+        _add(
+            "sharpness_similarity_mean",
+            metrics["sharpness_similarity_mean"],
+            config.ENHANCED_SHARPNESS_WEIGHT,
         )
-        composite_quality += config.ENHANCED_SHARPNESS_WEIGHT * normalized
-        total_weight += config.ENHANCED_SHARPNESS_WEIGHT
 
     if "texture_similarity_mean" in metrics:
-        normalized = normalize_metric(
-            "texture_similarity_mean", metrics["texture_similarity_mean"]
+        _add(
+            "texture_similarity_mean",
+            metrics["texture_similarity_mean"],
+            config.ENHANCED_TEXTURE_WEIGHT,
         )
-        composite_quality += config.ENHANCED_TEXTURE_WEIGHT * normalized
-        total_weight += config.ENHANCED_TEXTURE_WEIGHT
 
     # Temporal consistency (5% total)
     #
@@ -183,99 +251,91 @@ def calculate_composite_quality(
     # Audit-fix (Wave 3): when ``USE_TEMPORAL_DELTA_FOR_COMPOSITE`` is True,
     # use ``temporal_consistency_delta = |post - pre|`` instead — a true
     # pair signal where 0 means "compression preserved temporal behaviour"
-    # and 1 means "temporal behaviour was destroyed". Falls back to the
-    # legacy post-only value if delta is unavailable.
-    use_temporal_delta = getattr(
-        config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True
-    )
+    # and 1 means "temporal behaviour was destroyed".
+    #
+    # NaN guard (this task): a NaN ``temporal_consistency_delta`` means the
+    # pair signal couldn't be computed. We record it as a missing contribution
+    # (weight present, value NaN) and DO NOT fall back to the single-stream
+    # ``temporal_consistency`` legacy value — falling back would silently
+    # re-introduce the static-black-wins bug the delta was added to fix.
+    use_temporal_delta = getattr(config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True)
     if use_temporal_delta and "temporal_consistency_delta" in metrics:
-        delta = float(metrics["temporal_consistency_delta"])
-        # Smaller delta = higher quality; clamp delta to [0, 1] before
-        # inverting so out-of-range values don't blow up the score.
-        normalized = max(0.0, min(1.0, 1.0 - max(0.0, min(1.0, delta))))
-        composite_quality += config.ENHANCED_TEMPORAL_WEIGHT * normalized
-        total_weight += config.ENHANCED_TEMPORAL_WEIGHT
+        delta = metrics["temporal_consistency_delta"]
+        if _is_missing(delta):
+            contributions.append((float("nan"), config.ENHANCED_TEMPORAL_WEIGHT))
+        else:
+            # Smaller delta = higher quality; clamp delta to [0, 1] before
+            # inverting so out-of-range values don't blow up the score.
+            delta = float(delta)
+            normalized = max(0.0, min(1.0, 1.0 - max(0.0, min(1.0, delta))))
+            contributions.append((normalized, config.ENHANCED_TEMPORAL_WEIGHT))
     elif "temporal_consistency" in metrics:
-        normalized = normalize_metric(
-            "temporal_consistency", metrics["temporal_consistency"]
+        _add(
+            "temporal_consistency",
+            metrics["temporal_consistency"],
+            config.ENHANCED_TEMPORAL_WEIGHT,
         )
-        composite_quality += config.ENHANCED_TEMPORAL_WEIGHT * normalized
-        total_weight += config.ENHANCED_TEMPORAL_WEIGHT
 
     # Deep perceptual metrics (3% total)
+    #
+    # LPIPS scores are inverted (lower = better). NaN means LPIPS couldn't be
+    # computed (model load failure, no scores, subprocess crash) — recorded as
+    # a missing contribution and redistributed by
+    # ``_resolve_composite_from_contributions`` rather than fabricated to 1.0.
     if "lpips_quality_mean" in metrics:
-        # LPIPS scores are inverted (lower = better), so we need to invert for quality
-        # Normalize LPIPS score: 0.0 (identical) -> 1.0, 1.0 (very different) -> 0.0
-        #
-        # NaN means LPIPS couldn't be computed (model load failure, no scores,
-        # subprocess crash) — skip the contribution rather than letting it
-        # through. ``max(0.0, min(1.0, 1.0 - nan))`` evaluates to 1.0 in
-        # Python's scalar min/max (every comparison with NaN is False, so the
-        # clamp returns its 1.0 upper bound), which would silently award the
-        # full LPIPS weight as PERFECT quality and corrupt total_weight.
-        # Mirrors the SSIMULACRA2 NaN guard below. (Full multi-metric weight
-        # redistribution is the separate giflab-composite-quality-nan-guard
-        # task; this is the minimal guard for the NaN this PR introduces.)
         lpips_score = metrics["lpips_quality_mean"]
-        if lpips_score is not None and not (
-            isinstance(lpips_score, float) and math.isnan(lpips_score)
-        ):
-            normalized_lpips = max(
-                0.0, min(1.0, 1.0 - lpips_score)
-            )  # Invert: lower LPIPS = higher quality
-            composite_quality += config.ENHANCED_LPIPS_WEIGHT * normalized_lpips
-            total_weight += config.ENHANCED_LPIPS_WEIGHT
+        if _is_missing(lpips_score):
+            contributions.append((float("nan"), config.ENHANCED_LPIPS_WEIGHT))
+        else:
+            # Invert: lower LPIPS = higher quality.
+            normalized_lpips = max(0.0, min(1.0, 1.0 - lpips_score))
+            contributions.append((normalized_lpips, config.ENHANCED_LPIPS_WEIGHT))
 
+    # SSIMULACRA2 scores are already normalized (0-1, higher = better quality).
+    # NaN means the metric couldn't be computed (binary missing, frame-export
+    # failure, etc.).
     if "ssimulacra2_mean" in metrics:
-        # SSIMULACRA2 scores are already normalized (0-1, higher = better quality).
-        # NaN means the metric couldn't be computed (binary missing, frame-export
-        # failure, etc.) — skip the contribution rather than clipping it into
-        # range, which used to turn the legacy 50.0 raw-scale sentinel into 1.0
-        # and inflate composite_quality.
         ssimulacra2_score = metrics["ssimulacra2_mean"]
-        if ssimulacra2_score is not None and not (
-            isinstance(ssimulacra2_score, float) and math.isnan(ssimulacra2_score)
-        ):
+        if _is_missing(ssimulacra2_score):
+            contributions.append((float("nan"), config.ENHANCED_SSIMULACRA2_WEIGHT))
+        else:
             normalized_ssimulacra2 = max(0.0, min(1.0, ssimulacra2_score))
-            composite_quality += (
-                config.ENHANCED_SSIMULACRA2_WEIGHT * normalized_ssimulacra2
+            contributions.append(
+                (normalized_ssimulacra2, config.ENHANCED_SSIMULACRA2_WEIGHT)
             )
-            total_weight += config.ENHANCED_SSIMULACRA2_WEIGHT
 
     # GIF-specific quality metrics (10% total)
     if "banding_score_mean" in metrics:
-        normalized = normalize_metric(
-            "banding_score_mean", metrics["banding_score_mean"]
+        _add(
+            "banding_score_mean",
+            metrics["banding_score_mean"],
+            config.ENHANCED_BANDING_WEIGHT,
         )
-        composite_quality += config.ENHANCED_BANDING_WEIGHT * normalized
-        total_weight += config.ENHANCED_BANDING_WEIGHT
 
     if "deltae_mean" in metrics:
-        normalized_deltae = normalize_metric("deltae_mean", metrics["deltae_mean"])
-        composite_quality += config.ENHANCED_DELTAE_WEIGHT * normalized_deltae
-        total_weight += config.ENHANCED_DELTAE_WEIGHT
+        _add("deltae_mean", metrics["deltae_mean"], config.ENHANCED_DELTAE_WEIGHT)
 
-    # Normalize by actual weights used (handles missing metrics gracefully)
-    raw_composite = composite_quality
-    if total_weight > 0:
-        composite_quality = composite_quality / total_weight
+    final_result = _resolve_composite_from_contributions(contributions)
 
-    # DEBUG: Log final calculation for debugging
-    final_result = max(0.0, min(1.0, composite_quality))
+    # DEBUG: Log final calculation for debugging (only for significant cases).
+    ssim_present = metrics.get("ssim_mean")
     if (
-        "ssim_mean" in metrics and metrics.get("ssim_mean", 0) > 0.5
-    ):  # Only log for significant cases
+        ssim_present is not None
+        and not _is_missing(ssim_present)
+        and ssim_present > 0.5
+    ):
         import logging
 
         logger = logging.getLogger(__name__)
         logger.info("Enhanced composite quality calculation:")
         for step in debug_steps[:3]:  # Log first few steps
             logger.info(f"  {step}")
+        present_weight = sum(w for _, w in contributions)
+        missing_weight = sum(w for v, w in contributions if _is_missing(v))
         logger.info(
-            f"  Raw total: {raw_composite:.3f}, Total weight: {total_weight:.3f}"
-        )
-        logger.info(
-            f"  Normalized: {composite_quality:.3f}, Final (clamped): {final_result:.3f}"
+            f"  Present weight: {present_weight:.3f}, "
+            f"Missing weight: {missing_weight:.3f}, "
+            f"Final: {final_result}"
         )
 
     return final_result
@@ -296,15 +356,24 @@ def calculate_legacy_composite_quality(
     if config is None:
         config = DEFAULT_METRICS_CONFIG
 
-    # Use existing logic from experimental runner
-    composite_quality = (
-        config.SSIM_WEIGHT * metrics.get("ssim_mean", 0.0)
-        + config.MS_SSIM_WEIGHT * metrics.get("ms_ssim_mean", 0.0)
-        + config.PSNR_WEIGHT * metrics.get("psnr_mean", 0.0)
-        + config.TEMPORAL_WEIGHT * metrics.get("temporal_consistency", 0.0)
-    )
+    # Same NaN anti-pattern as the enhanced path: ``weight * nan = nan`` poisons
+    # the sum and ``max(0.0, min(1.0, nan))`` returns 1.0 in CPython — a
+    # measurement failure would score as PERFECT quality. Build per-metric
+    # contributions and filter/redistribute uniformly via the shared resolver.
+    #
+    # NOTE: the legacy formula multiplies the RAW metric value by its weight
+    # (it does not run ``normalize_metric``), so we preserve that here — only
+    # the NaN handling changes. Missing keys default to 0.0 (the historical
+    # behaviour) and contribute their weight at the worst-case value; only
+    # genuinely-unmeasurable NaN/None values are filtered and redistributed.
+    contributions: list[tuple[float, float]] = [
+        (metrics.get("ssim_mean", 0.0), config.SSIM_WEIGHT),
+        (metrics.get("ms_ssim_mean", 0.0), config.MS_SSIM_WEIGHT),
+        (metrics.get("psnr_mean", 0.0), config.PSNR_WEIGHT),
+        (metrics.get("temporal_consistency", 0.0), config.TEMPORAL_WEIGHT),
+    ]
 
-    return max(0.0, min(1.0, composite_quality))
+    return _resolve_composite_from_contributions(contributions)
 
 
 def calculate_efficiency_metric(

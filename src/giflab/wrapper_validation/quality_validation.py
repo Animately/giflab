@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from ..config import DEFAULT_METRICS_CONFIG
-from ..enhanced_metrics import calculate_composite_quality
+from ..enhanced_metrics import (
+    _is_missing,
+    _resolve_composite_from_contributions,
+    calculate_composite_quality,
+)
 from ..metrics import calculate_comprehensive_metrics
 from .types import ValidationResult
 
@@ -204,35 +208,48 @@ class QualityThresholdValidator:
             "temporal_consistency": self.metrics_config.TEMPORAL_WEIGHT,
         }
 
-        composite_quality = 0.0
-        total_weight = 0.0
-
+        # Build per-metric ``(normalized_value, weight)`` contributions, then
+        # filter NaN/None and redistribute via the shared resolver. Same NaN
+        # anti-pattern fixed in ``enhanced_metrics`` applies here: an
+        # unmeasurable value passes ``isinstance(.., float)`` (NaN IS a float),
+        # so the old loop poisoned ``composite_quality`` with NaN and returned a
+        # fabricated 1.0 from the caller's ``max(0.0, min(1.0, nan))`` clamp.
+        # A present-but-unmeasurable metric records NaN (weight counted toward
+        # the missing fraction); a non-numeric or absent value is simply not a
+        # present contribution.
+        contributions: list[tuple[float, float]] = []
         for metric_name, weight in weights.items():
-            if metric_name in metrics:
-                value = metrics[metric_name]
+            if metric_name not in metrics:
+                continue
+            value = metrics[metric_name]
 
-                # Skip non-numeric values
-                if not isinstance(value, int | float):
-                    continue
+            # Non-numeric values (strings, etc.) are not a contribution at all.
+            if not isinstance(value, int | float):
+                continue
 
-                # Normalize metrics to 0-1 scale
-                if metric_name == "psnr_mean":
-                    # PSNR: normalize using configured max
-                    normalized_value = min(value / self.metrics_config.PSNR_MAX_DB, 1.0)
-                elif metric_name in [
-                    "ssim_mean",
-                    "ms_ssim_mean",
-                    "temporal_consistency",
-                ]:
-                    # These should already be 0-1
-                    normalized_value = max(0.0, min(value, 1.0))
-                else:
-                    normalized_value = value
+            # Genuinely-unmeasurable (NaN/None) — record as missing so its
+            # weight counts toward the redistribution / threshold decision.
+            if _is_missing(value):
+                contributions.append((float("nan"), weight))
+                continue
 
-                composite_quality += weight * normalized_value
-                total_weight += weight
+            # Normalize metrics to 0-1 scale.
+            if metric_name == "psnr_mean":
+                # PSNR: normalize using configured max
+                normalized_value = min(value / self.metrics_config.PSNR_MAX_DB, 1.0)
+            elif metric_name in [
+                "ssim_mean",
+                "ms_ssim_mean",
+                "temporal_consistency",
+            ]:
+                # These should already be 0-1
+                normalized_value = max(0.0, min(value, 1.0))
+            else:
+                normalized_value = value
 
-        return composite_quality / total_weight if total_weight > 0 else 0.0
+            contributions.append((float(normalized_value), weight))
+
+        return _resolve_composite_from_contributions(contributions)
 
     def _check_metric_outliers(
         self, metrics: dict[str, float | str], frame_reduction_context: bool = False

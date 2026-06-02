@@ -953,12 +953,8 @@ class TestTemporalArtifactsGate:
         # metrics (SSIM/MS-SSIM/etc) don't choke on degenerate inputs, small
         # enough to keep the test fast.
         rng = np.random.default_rng(42)
-        a = [
-            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
-        ]
-        b = [
-            rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)
-        ]
+        a = [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)]
+        b = [rng.integers(0, 256, (24, 24, 3), dtype=np.uint8) for _ in range(3)]
         return a, b
 
     def _isolated_config(self, *, temporal: bool) -> MetricsConfig:
@@ -991,9 +987,9 @@ class TestTemporalArtifactsGate:
             a, b, config=self._isolated_config(temporal=False), force_all_metrics=True
         )
 
-        assert calls == [], (
-            "ENABLE_TEMPORAL_ARTIFACTS=False did not short-circuit the call"
-        )
+        assert (
+            calls == []
+        ), "ENABLE_TEMPORAL_ARTIFACTS=False did not short-circuit the call"
         # The result must still expose zeroed temporal keys so downstream
         # consumers reading `result["flicker_excess"]` don't KeyError.
         assert result.get("flicker_excess") == 0.0
@@ -1028,9 +1024,9 @@ class TestTemporalArtifactsGate:
             a, b, config=self._isolated_config(temporal=True), force_all_metrics=True
         )
 
-        assert calls == [1], (
-            "ENABLE_TEMPORAL_ARTIFACTS=True did not invoke the temporal pipeline"
-        )
+        assert calls == [
+            1
+        ], "ENABLE_TEMPORAL_ARTIFACTS=True did not invoke the temporal pipeline"
 
 
 class TestDeepPerceptualGate:
@@ -1070,7 +1066,8 @@ class TestDeepPerceptualGate:
             )
 
         offending = [
-            r for r in caplog.records
+            r
+            for r in caplog.records
             if r.name == "giflab.deep_perceptual_metrics"
             and r.levelno >= logging.WARNING
             and "No LPIPS scores obtained" in r.getMessage()
@@ -1174,9 +1171,9 @@ class TestSsimulacra2Gate:
         selected = {"ssimulacra2": True}
         calculate_selected_metrics(a, b, selected, config=config)
 
-        assert calls == [], (
-            "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
-        )
+        assert (
+            calls == []
+        ), "ENABLE_SSIMULACRA2=False did not veto the conditional-path call"
 
 
 # =============================================================================
@@ -1229,9 +1226,7 @@ class TestAggregateMetricNaNAware:
         result = _aggregate_metric(values, "edge_similarity")
         # nanmedian of [0,0,1,0] = 0.0 (NaN dropped); proves median path is
         # NaN-aware too (preserves _MEDIAN_AGGREGATED_METRICS behaviour).
-        assert result["edge_similarity"] == pytest.approx(
-            float(np.nanmedian(values))
-        )
+        assert result["edge_similarity"] == pytest.approx(float(np.nanmedian(values)))
 
 
 class TestPerFrameExceptionNaNPropagation:
@@ -1281,7 +1276,10 @@ class TestPerFrameExceptionNaNPropagation:
         survivors_a = [f for i, f in enumerate(a) if i != fail_idx]
         survivors_b = [f for i, f in enumerate(b) if i != fail_idx]
         survivor_result = calculate_comprehensive_metrics_from_frames(
-            survivors_a, survivors_b, config=self._quiet_config(), force_all_metrics=True
+            survivors_a,
+            survivors_b,
+            config=self._quiet_config(),
+            force_all_metrics=True,
         )
         expected = survivor_result["gmsd"]
 
@@ -1366,9 +1364,9 @@ class TestMainPathMeanKeysForComposite:
         rng = np.random.default_rng(0)
         orig = [rng.integers(0, 256, (64, 64, 3), dtype=np.uint8) for _ in range(4)]
         comp = [
-            np.clip(
-                f.astype(int) + rng.integers(-30, 30, (64, 64, 3)), 0, 255
-            ).astype(np.uint8)
+            np.clip(f.astype(int) + rng.integers(-30, 30, (64, 64, 3)), 0, 255).astype(
+                np.uint8
+            )
             for f in orig
         ]
         return orig, comp
@@ -1412,9 +1410,9 @@ class TestMainPathMeanKeysForComposite:
         )
 
         for base in self._SAME_SCALE_PAIRS:
-            assert result[f"{base}_mean"] == pytest.approx(result[base]), (
-                f"{base}_mean must alias the same-scale bare {base} key"
-            )
+            assert result[f"{base}_mean"] == pytest.approx(
+                result[base]
+            ), f"{base}_mean must alias the same-scale bare {base} key"
 
         # PSNR: the trap. Bare psnr is normalised 0-1; psnr_mean is raw dB.
         psnr_bare = result["psnr"]
@@ -1469,9 +1467,7 @@ class TestMainPathMeanKeysForComposite:
             orig, bad, force_all_metrics=True
         )
 
-        assert (
-            good_metrics["composite_quality"] > bad_metrics["composite_quality"]
-        ), (
+        assert good_metrics["composite_quality"] > bad_metrics["composite_quality"], (
             "Structurally-destroyed compression must score lower composite_quality "
             "than a near-perfect one once the structural _mean keys are counted"
         )
@@ -1553,9 +1549,7 @@ class TestSsimulacra2ErrorPathKeyShape:
         config.ENABLE_SSIMULACRA2 = True
 
         a, b = self._frames()
-        result = calculate_selected_metrics(
-            a, b, {"ssimulacra2": True}, config=config
-        )
+        result = calculate_selected_metrics(a, b, {"ssimulacra2": True}, config=config)
 
         for key in self._KEYS:
             assert key in result, f"missing {key} on selected-metrics error path"
@@ -1620,6 +1614,256 @@ class TestCompositeQualityLpipsNaNSafety:
         assert score_low > score_high
 
 
+class TestCompositeQualityNaNRedistribution:
+    """``calculate_composite_quality`` must filter NaN inputs uniformly across
+    ALL metric blocks (not just LPIPS/SSIMULACRA2), redistribute the surviving
+    weight, and return ``float("nan")`` when the unmeasurable weight reaches
+    ``COMPOSITE_NAN_THRESHOLD``.
+
+    Without the fix a NaN metric flows through ``normalize_metric`` and the
+    clamp ``max(0.0, min(1.0, nan))`` returns its upper bound 1.0 in CPython,
+    fabricating a PERFECT contribution AND inflating ``total_weight`` — so a
+    total measurement failure scores as perfect quality.
+
+    Reference: giflab-composite-quality-nan-guard task note (accuracy-lens
+    audit, PR #16). This generalises the per-metric LPIPS/SSIMULACRA2 guards
+    (TestCompositeQualityLpipsNaNSafety) to every metric block.
+    """
+
+    def _base_metrics(self) -> dict:
+        # ~10 finite metrics so total_weight is well-defined and the redistribution
+        # behaviour is observable. Deliberately omits LPIPS/SSIMULACRA2 (already
+        # guarded) to isolate the previously-unguarded blocks.
+        return {
+            "ssim_mean": 0.8,
+            "ms_ssim_mean": 0.8,
+            "psnr_mean": 0.8,
+            "mse_mean": 100.0,
+            "fsim_mean": 0.8,
+            "gmsd_mean": 0.1,
+            "chist_mean": 0.9,
+            "sharpness_similarity_mean": 0.8,
+            "texture_similarity_mean": 0.8,
+            "temporal_consistency_delta": 0.1,
+        }
+
+    def test_one_metric_nan_behaves_like_absent_key(self):
+        """(a) A single NaN metric must be redistributed away — the composite
+        must EQUAL the composite of the same dict with that key absent, be
+        finite, and not be the inflated value the old code produced.
+
+        This is the assertion that fails on current main: today a NaN ssim
+        flows through as a fabricated 1.0 contribution, inflating the score
+        ABOVE the absent-key value rather than matching it.
+        """
+        metrics_with_nan = dict(self._base_metrics())
+        metrics_with_nan["ssim_mean"] = float("nan")
+
+        metrics_without = dict(self._base_metrics())
+        del metrics_without["ssim_mean"]
+
+        score_nan = calculate_composite_quality(metrics_with_nan)
+        score_without = calculate_composite_quality(metrics_without)
+
+        assert not math.isnan(score_nan)
+        assert score_nan != 0.0
+        assert 0.0 <= score_nan <= 1.0
+        # NaN metric must behave EXACTLY like an absent key (proves
+        # redistribution, not the current inflate-to-1.0 behaviour).
+        assert score_nan == pytest.approx(score_without)
+
+    def test_all_metrics_nan_returns_nan(self):
+        """(b) When every present metric is NaN the composite is wholly
+        unmeasurable and must return NaN — not a fabricated high score."""
+        all_nan = {k: float("nan") for k in self._base_metrics()}
+        result = calculate_composite_quality(all_nan)
+        assert math.isnan(result)
+
+    def test_missing_weight_at_or_above_threshold_returns_nan(self):
+        """(c) When the NaN weight is >= COMPOSITE_NAN_THRESHOLD of the present
+        weight, the composite is majority-missing and returns NaN rather than a
+        misleadingly confident number.
+
+        Present weights: ms_ssim 0.18 + ssim 0.15 + psnr 0.08 (NaN = 0.41)
+        against fsim 0.07 + edge 0.06 + gmsd 0.04 + chist 0.04 (finite = 0.21).
+        Missing fraction 0.41 / 0.62 ≈ 0.66 >= 0.5 → NaN.
+        """
+        metrics = {
+            "ms_ssim_mean": float("nan"),
+            "ssim_mean": float("nan"),
+            "psnr_mean": float("nan"),
+            "fsim_mean": 0.8,
+            "edge_similarity_mean": 0.8,
+            "gmsd_mean": 0.1,
+            "chist_mean": 0.9,
+        }
+        result = calculate_composite_quality(metrics)
+        assert math.isnan(result)
+
+    def test_missing_weight_just_below_threshold_returns_finite(self):
+        """Symmetric boundary pin: just under threshold → finite redistributed
+        score, NOT NaN.
+
+        Present weights: ssim 0.15 + psnr 0.08 (NaN = 0.23) against
+        ms_ssim 0.18 + fsim 0.07 + edge 0.06 + gmsd 0.04 + chist 0.04
+        (finite = 0.39). Missing fraction 0.23 / 0.62 ≈ 0.37 < 0.5 → finite.
+        """
+        metrics = {
+            "ssim_mean": float("nan"),
+            "psnr_mean": float("nan"),
+            "ms_ssim_mean": 0.8,
+            "fsim_mean": 0.8,
+            "edge_similarity_mean": 0.8,
+            "gmsd_mean": 0.1,
+            "chist_mean": 0.9,
+        }
+        result = calculate_composite_quality(metrics)
+        assert not math.isnan(result)
+        assert 0.0 <= result <= 1.0
+
+    def test_exactly_at_threshold_returns_nan(self):
+        """The boundary is ``>=`` — exactly-half-missing weight returns NaN.
+
+        Present weights: ssim 0.15 (NaN) against fsim 0.07 + edge 0.06 +
+        gmsd 0.02-equiv... use a symmetric 50/50 split: ssim 0.15 NaN against
+        edge 0.06 + gmsd 0.04 + chist 0.04 + sharpness 0.01-equiv. Simpler:
+        ssim 0.15 NaN vs a finite set summing to exactly 0.15 →
+        fsim 0.07 + chist 0.04 + gmsd 0.04 = 0.15. Missing fraction
+        0.15 / 0.30 == 0.5 == threshold → NaN.
+        """
+        metrics = {
+            "ssim_mean": float("nan"),
+            "fsim_mean": 0.8,
+            "chist_mean": 0.9,
+            "gmsd_mean": 0.1,
+        }
+        result = calculate_composite_quality(metrics)
+        assert math.isnan(result)
+
+    def test_deltae_nan_also_redistributed(self):
+        """``deltae_mean`` normalises NaN to 0.0 today (worst), unlike the other
+        blocks that inflate to 1.0 — the uniform filter must make it behave like
+        an absent key too, eliminating the asymmetry."""
+        metrics_with_nan = dict(self._base_metrics())
+        metrics_with_nan["deltae_mean"] = float("nan")
+
+        metrics_without = dict(self._base_metrics())  # no deltae key
+
+        score_nan = calculate_composite_quality(metrics_with_nan)
+        score_without = calculate_composite_quality(metrics_without)
+
+        assert not math.isnan(score_nan)
+        assert score_nan == pytest.approx(score_without)
+
+    def test_temporal_delta_nan_skips_temporal_does_not_fall_back(self):
+        """A NaN ``temporal_consistency_delta`` must skip the temporal block
+        entirely — NOT silently fall back to the single-stream
+        ``temporal_consistency`` legacy value, which would re-introduce the
+        static-black-wins bug the delta was added to fix."""
+        metrics = dict(self._base_metrics())
+        metrics["temporal_consistency_delta"] = float("nan")
+        # A deliberately perfect single-stream legacy value that would inflate
+        # the score if the code fell back to it.
+        metrics["temporal_consistency"] = 1.0
+
+        metrics_no_temporal = dict(self._base_metrics())
+        del metrics_no_temporal["temporal_consistency_delta"]
+
+        score = calculate_composite_quality(metrics)
+        score_no_temporal = calculate_composite_quality(metrics_no_temporal)
+
+        assert not math.isnan(score)
+        # NaN delta must behave as if temporal were absent, NOT as if the
+        # perfect legacy fallback contributed.
+        assert score == pytest.approx(score_no_temporal)
+
+    def test_none_value_treated_as_missing(self):
+        """Defensive: a ``None`` value (not just NaN) must be treated as missing
+        and redistributed, not crash the weighted sum."""
+        metrics = dict(self._base_metrics())
+        metrics["ssim_mean"] = None  # type: ignore[assignment]
+
+        metrics_without = dict(self._base_metrics())
+        del metrics_without["ssim_mean"]
+
+        score = calculate_composite_quality(metrics)
+        score_without = calculate_composite_quality(metrics_without)
+        assert not math.isnan(score)
+        assert score == pytest.approx(score_without)
+
+    def test_empty_input_stays_zero_not_nan(self):
+        """No quality keys present → total_weight 0 → return 0.0 (NOT NaN).
+
+        Distinguishes 'nothing to measure' (0.0, preserves the existing
+        ``test_process_metrics_edge_case_no_metrics`` contract) from 'keys
+        present but all unmeasurable' (NaN)."""
+        result = calculate_composite_quality({})
+        assert result == 0.0
+        assert not math.isnan(result)
+
+    def test_schema_round_trips_nan_composite(self):
+        """A NaN composite_quality must survive schema validation (CSV export
+        path) — the prior ``ge=0.0, le=1.0`` Field constraint rejected NaN,
+        which would crash every metrics export the moment a composite is
+        unmeasurable. Finite out-of-range values must still be rejected."""
+        from giflab.schema import validate_metric_record
+
+        rec = {
+            "render_ms": 10,
+            "kilobytes": 5.0,
+            "composite_quality": float("nan"),
+        }
+        model = validate_metric_record(rec)
+        assert math.isnan(model.composite_quality)
+
+        # Finite bounds still enforced.
+        with pytest.raises(Exception):
+            validate_metric_record(
+                {"render_ms": 10, "kilobytes": 5.0, "composite_quality": 1.5}
+            )
+
+
+class TestLegacyCompositeQualityNaNSafety:
+    """``calculate_legacy_composite_quality`` has the same anti-pattern:
+    ``weight * nan = nan`` poisons the sum and ``max(0.0, min(1.0, nan))``
+    returns 1.0 — a measurement failure scores as perfect. The fix filters NaN
+    and applies the same threshold.
+    """
+
+    def _legacy_config(self) -> MetricsConfig:
+        return MetricsConfig(USE_ENHANCED_COMPOSITE_QUALITY=False)
+
+    def test_all_nan_legacy_returns_nan(self):
+        config = self._legacy_config()
+        metrics = {
+            "ssim_mean": float("nan"),
+            "ms_ssim_mean": float("nan"),
+            "psnr_mean": float("nan"),
+            "temporal_consistency": float("nan"),
+        }
+        from giflab.enhanced_metrics import calculate_legacy_composite_quality
+
+        result = calculate_legacy_composite_quality(metrics, config)
+        assert math.isnan(result)
+
+    def test_one_nan_legacy_redistributes(self):
+        """A single NaN (ssim, weight 0.30) against the rest finite is below the
+        0.5 threshold of present weight → finite redistributed score, not the
+        old fabricated 1.0."""
+        config = self._legacy_config()
+        from giflab.enhanced_metrics import calculate_legacy_composite_quality
+
+        metrics = {
+            "ssim_mean": float("nan"),
+            "ms_ssim_mean": 0.8,
+            "psnr_mean": 0.8,
+            "temporal_consistency": 0.9,
+        }
+        result = calculate_legacy_composite_quality(metrics, config)
+        assert not math.isnan(result)
+        assert 0.0 <= result <= 1.0
+
+
 # =============================================================================
 # Edge similarity sparse-edge / smooth-gradient aggregation tests
 # =============================================================================
@@ -1644,7 +1888,9 @@ class TestEdgeSimilaritySparseEdgeAggregation:
     2026-05-22 sanity audit (report.md line 106: edge_similarity_max FLAT).
     """
 
-    def _make_smooth_gradient_frame(self, width: int = 64, height: int = 64) -> np.ndarray:
+    def _make_smooth_gradient_frame(
+        self, width: int = 64, height: int = 64
+    ) -> np.ndarray:
         """Return an RGB frame that is a smooth horizontal gradient (very few real edges)."""
         row = np.linspace(0, 255, width, dtype=np.float32)
         frame = np.stack([row] * height, axis=0)  # (H, W)
@@ -1680,12 +1926,8 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
         frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
 
-        scores_256: list[float] = [
-            edge_similarity(frame, q) for q in frames_256_col
-        ]
-        scores_4: list[float] = [
-            edge_similarity(frame, q) for q in frames_4_col
-        ]
+        scores_256: list[float] = [edge_similarity(frame, q) for q in frames_256_col]
+        scores_4: list[float] = [edge_similarity(frame, q) for q in frames_4_col]
 
         # At 4 colours, at least some frames should detect banding → near-zero scores
         # (i.e., the metric IS sensitive at the frame level).
@@ -1719,12 +1961,8 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
         frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
 
-        scores_256: list[float] = [
-            edge_similarity(frame, q) for q in frames_256_col
-        ]
-        scores_4: list[float] = [
-            edge_similarity(frame, q) for q in frames_4_col
-        ]
+        scores_256: list[float] = [edge_similarity(frame, q) for q in frames_256_col]
+        scores_4: list[float] = [edge_similarity(frame, q) for q in frames_4_col]
 
         median_256 = float(np.median(scores_256))
         median_4 = float(np.median(scores_4))
@@ -1758,7 +1996,7 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         result = _aggregate_metric(scores, "edge_similarity")
 
         expected_median = float(np.median(scores))  # 0.0
-        expected_mean = float(np.mean(scores))       # 0.25
+        expected_mean = float(np.mean(scores))  # 0.25
 
         # The primary key must equal median, not mean.
         assert result["edge_similarity"] == pytest.approx(expected_median, abs=1e-6), (
@@ -1819,9 +2057,9 @@ class TestEdgeSimilaritySparseEdgeAggregation:
         result = _aggregate_metric(scores, "ssim")
 
         expected_mean = float(np.mean(scores))
-        assert result["ssim"] == pytest.approx(expected_mean, abs=1e-6), (
-            "ssim primary key should still use mean aggregation"
-        )
+        assert result["ssim"] == pytest.approx(
+            expected_mean, abs=1e-6
+        ), "ssim primary key should still use mean aggregation"
 
 
 class TestExtractGifFramesAlphaCompositing:
@@ -1867,10 +2105,18 @@ class TestExtractGifFramesAlphaCompositing:
         # green / blue / yellow" between the two GIFs even though the
         # visible (non-transparent) content is the same.
         palette = [
-            255, 0, 0,    # 0 = red
-            0, 255, 0,    # 1 = green
-            0, 0, 255,    # 2 = blue
-            255, 255, 0,  # 3 = yellow
+            255,
+            0,
+            0,  # 0 = red
+            0,
+            255,
+            0,  # 1 = green
+            0,
+            0,
+            255,  # 2 = blue
+            255,
+            255,
+            0,  # 3 = yellow
         ] + [0] * (256 * 3 - 12)
 
         frames = []
