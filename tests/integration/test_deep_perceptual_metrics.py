@@ -5,6 +5,7 @@ This module tests the LPIPS-based spatial perceptual quality metrics that catch
 perceptual issues traditional metrics miss.
 """
 
+import math
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -135,11 +136,13 @@ class TestDeepPerceptualValidator:
             original_frames, compressed_frames
         )
 
-        # Should return fallback values
+        # Should return fallback values. Audit-fix (NaN over sentinels): the
+        # fallback path now reports NaN score keys ("not measured") rather than
+        # the old 0.5 midpoint, which silently inflated composite_quality.
         assert isinstance(metrics, DeepPerceptualMetrics)
-        assert metrics.lpips_quality_mean == 0.5
-        assert metrics.lpips_quality_p95 == 0.5
-        assert metrics.lpips_quality_max == 0.5
+        assert math.isnan(metrics.lpips_quality_mean)
+        assert math.isnan(metrics.lpips_quality_p95)
+        assert math.isnan(metrics.lpips_quality_max)
         assert metrics.frame_count == len(original_frames)
         assert metrics.device_used == "fallback"
 
@@ -154,8 +157,12 @@ class TestDeepPerceptualValidator:
         )
 
         assert isinstance(result, PerceptualValidationResult)
-        assert result.lpips_quality_mean == 0.5
-        assert not result.quality_acceptable  # 0.5 > 0.3 threshold
+        # NaN ("not measured") rather than the old 0.5 sentinel.
+        assert math.isnan(result.lpips_quality_mean)
+        # quality_acceptable stays False, but now for the honest reason that
+        # LPIPS was unassessable: ``nan <= 0.3`` is False (every comparison
+        # with NaN is False), so we cannot confirm the quality is acceptable.
+        assert not result.quality_acceptable
         assert result.frames_processed == len(original_frames)
 
     def test_frame_sampling(self, validator, test_frames):
@@ -182,8 +189,8 @@ class TestDeepPerceptualValidator:
             original_frames, compressed_frames
         )
 
-        # Should return fallback metrics
-        assert metrics.lpips_quality_mean == 0.5
+        # Should return fallback metrics (NaN score, not 0.5 sentinel).
+        assert math.isnan(metrics.lpips_quality_mean)
         assert metrics.device_used == "fallback"
 
 
@@ -252,8 +259,8 @@ class TestCalculateDeepPerceptualQualityMetrics:
             original_frames, compressed_frames, config
         )
 
-        # Should return fallback values
-        assert result["lpips_quality_mean"] == 0.5
+        # Should return fallback values (NaN score, not 0.5 sentinel).
+        assert math.isnan(result["lpips_quality_mean"])
         assert result["deep_perceptual_device"] == "fallback"
 
     def test_error_handling(self, test_frames):
@@ -270,8 +277,8 @@ class TestCalculateDeepPerceptualQualityMetrics:
                 original_frames, compressed_frames
             )
 
-            # Should return fallback values on error
-            assert result["lpips_quality_mean"] == 0.5
+            # Should return fallback values on error (NaN score, not 0.5).
+            assert math.isnan(result["lpips_quality_mean"])
             assert result["deep_perceptual_device"] == "fallback"
 
 
@@ -373,7 +380,7 @@ class TestErrorHandling:
         metrics = validator.calculate_deep_perceptual_metrics([], [])
 
         assert metrics.frame_count == 0
-        assert metrics.lpips_quality_mean == 0.5  # Fallback value
+        assert math.isnan(metrics.lpips_quality_mean)  # Fallback: not measured
 
     def test_mismatched_frame_counts(self):
         """Test handling of mismatched frame counts."""
