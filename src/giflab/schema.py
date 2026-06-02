@@ -23,7 +23,9 @@ _BASE_METRICS: list[str] = [
     "edge_similarity",
     "texture_similarity",
     "sharpness_similarity",
-    "temporal_consistency",
+    # Wave 7: bare ``temporal_consistency`` removed — it read like a pair
+    # signal but only ever measured the compressed stream. The honest
+    # ``temporal_consistency_compressed`` key replaces it in result/CSV/DB.
 ]
 
 

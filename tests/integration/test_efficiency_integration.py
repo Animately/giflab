@@ -265,7 +265,7 @@ class TestEfficiencyIntegrationWorkflows:
             "ssim_mean": 0.85,
             "ms_ssim_mean": 0.82,
             "psnr_mean": 0.78,
-            "temporal_consistency": 0.88,
+            "temporal_consistency_compressed": 0.88,
             "mse_mean": 45.2,
             "fsim_mean": 0.81,
             "edge_similarity_mean": 0.79,

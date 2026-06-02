@@ -240,23 +240,24 @@ def calculate_composite_quality(
 
     # Temporal consistency (5% total)
     #
-    # The bare ``temporal_consistency`` key is set to the post-compression
-    # value of a metric computed on the COMPRESSED STREAM ONLY (see
-    # ``metrics.py``: ``calculate_temporal_consistency`` runs on
-    # ``compressed_frames_resized``). Using it as a composite contribution
-    # treats single-stream content stability as if it were a quality-vs-
-    # reference signal. A static-black output scores 1.0 here regardless of
-    # the original, lifting composite_quality by the full temporal weight.
+    # The ``temporal_consistency_compressed`` key (Wave 7 renamed the bare
+    # ``temporal_consistency``) is the post-compression value of a metric
+    # computed on the COMPRESSED STREAM ONLY (see ``metrics.py``:
+    # ``calculate_temporal_consistency`` runs on ``compressed_frames_resized``).
+    # Using it as a composite contribution treats single-stream content
+    # stability as if it were a quality-vs-reference signal. A static-black
+    # output scores 1.0 here regardless of the original, lifting
+    # composite_quality by the full temporal weight.
     #
     # Audit-fix (Wave 3): when ``USE_TEMPORAL_DELTA_FOR_COMPOSITE`` is True,
     # use ``temporal_consistency_delta = |post - pre|`` instead — a true
     # pair signal where 0 means "compression preserved temporal behaviour"
     # and 1 means "temporal behaviour was destroyed".
     #
-    # NaN guard (this task): a NaN ``temporal_consistency_delta`` means the
-    # pair signal couldn't be computed. We record it as a missing contribution
-    # (weight present, value NaN) and DO NOT fall back to the single-stream
-    # ``temporal_consistency`` legacy value — falling back would silently
+    # NaN guard: a NaN ``temporal_consistency_delta`` means the pair signal
+    # couldn't be computed. We record it as a missing contribution (weight
+    # present, value NaN) and DO NOT fall back to the single-stream
+    # ``temporal_consistency_compressed`` value — falling back would silently
     # re-introduce the static-black-wins bug the delta was added to fix.
     use_temporal_delta = getattr(config, "USE_TEMPORAL_DELTA_FOR_COMPOSITE", True)
     if use_temporal_delta and "temporal_consistency_delta" in metrics:
@@ -269,10 +270,10 @@ def calculate_composite_quality(
             delta = float(delta)
             normalized = max(0.0, min(1.0, 1.0 - max(0.0, min(1.0, delta))))
             contributions.append((normalized, config.ENHANCED_TEMPORAL_WEIGHT))
-    elif "temporal_consistency" in metrics:
+    elif "temporal_consistency_compressed" in metrics:
         _add(
-            "temporal_consistency",
-            metrics["temporal_consistency"],
+            "temporal_consistency_compressed",
+            metrics["temporal_consistency_compressed"],
             config.ENHANCED_TEMPORAL_WEIGHT,
         )
 
@@ -370,7 +371,8 @@ def calculate_legacy_composite_quality(
         (metrics.get("ssim_mean", 0.0), config.SSIM_WEIGHT),
         (metrics.get("ms_ssim_mean", 0.0), config.MS_SSIM_WEIGHT),
         (metrics.get("psnr_mean", 0.0), config.PSNR_WEIGHT),
-        (metrics.get("temporal_consistency", 0.0), config.TEMPORAL_WEIGHT),
+        # Wave 7: bare ``temporal_consistency`` renamed to ``_compressed``.
+        (metrics.get("temporal_consistency_compressed", 0.0), config.TEMPORAL_WEIGHT),
     ]
 
     return _resolve_composite_from_contributions(contributions)

@@ -52,7 +52,8 @@ def test_sample_calculation():
         'edge_similarity_mean': 0.8,
         'texture_similarity_mean': 0.75,
         'sharpness_similarity_mean': 0.7,
-        'temporal_consistency': 0.95,
+        # Wave 7: composite reads the honest single-stream ``_compressed`` key.
+        'temporal_consistency_compressed': 0.95,
         'compression_ratio': 2.5
     }
     

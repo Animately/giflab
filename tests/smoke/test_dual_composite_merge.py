@@ -52,10 +52,15 @@ class TestPolarityDirectionContract:
         assert set(polarity) == expected
 
     def test_derived_keys_match_composite_inputs_legacy_temporal_mode(self):
-        """Legacy mode varies bare temporal_consistency, not the delta."""
+        """Legacy mode varies temporal_consistency_compressed, not the delta.
+
+        Wave 7 renamed the bare ``temporal_consistency`` candidate key to the
+        honest ``_compressed`` form.
+        """
         config = MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=False)
         polarity = _composite_metric_polarity(config)
-        assert "temporal_consistency" in polarity
+        assert "temporal_consistency_compressed" in polarity
+        assert "temporal_consistency" not in polarity
         assert "temporal_consistency_delta" not in polarity
 
     def test_three_inline_transformed_metrics_get_correct_direction(self):
@@ -184,7 +189,8 @@ class TestPolarityMemoisation:
             MetricsConfig(USE_TEMPORAL_DELTA_FOR_COMPOSITE=False)
         )
         assert "temporal_consistency_delta" in delta
-        assert "temporal_consistency" in legacy
+        # Wave 7: legacy mode probes the honest ``_compressed`` key.
+        assert "temporal_consistency_compressed" in legacy
         assert len(metrics_mod._POLARITY_CACHE) >= 2
 
 
@@ -365,7 +371,6 @@ class TestMergeWorstOfDualComposite:
             "ssimulacra2_p95": 95.0,
             "ssimulacra2_min": 85.0,
             "temporal_consistency_delta": 0.01,
-            "temporal_consistency": 0.99,
             "temporal_consistency_pre": 0.99,
             "temporal_consistency_post": 0.99,
             "temporal_consistency_original": 0.99,
@@ -382,7 +387,6 @@ class TestMergeWorstOfDualComposite:
             "ssimulacra2_p95": 60.0,
             "ssimulacra2_min": 30.0,
             "temporal_consistency_delta": 0.30,  # delta higher = worse -> black worse
-            "temporal_consistency": 0.70,
             "temporal_consistency_pre": 0.90,
             "temporal_consistency_post": 0.70,
             "temporal_consistency_original": 0.90,
@@ -403,7 +407,8 @@ class TestMergeWorstOfDualComposite:
         assert merged["temporal_consistency_post"] == 0.70
         assert merged["temporal_consistency_original"] == 0.90
         assert merged["temporal_consistency_compressed"] == 0.70
-        assert merged["temporal_consistency"] == 0.70
+        # Wave 7: bare ``temporal_consistency`` removed — must not reappear.
+        assert "temporal_consistency" not in merged
         # positional ssim stats from black.
         assert merged["ssim_first"] == 0.55
         assert merged["ssim_last"] == 0.65

@@ -72,18 +72,19 @@ QUALITY_METRIC_COLUMNS: list[str] = [
     "edge_similarity_mean",
     "texture_similarity_mean",
     "sharpness_similarity_mean",
-    # Temporal
-    "temporal_consistency",
+    # Temporal (Wave 7: bare ``temporal_consistency`` replaced by ``_compressed``
+    # — the single-stream value computed on the compressed frames only).
+    "temporal_consistency_compressed",
     "temporal_consistency_pre",
     "temporal_consistency_post",
     "temporal_consistency_delta",
     # Disposal artifacts
-    "disposal_artifacts",
+    "disposal_artifacts_compressed",
     "disposal_artifacts_delta",
-    # Enhanced temporal
-    "flicker_excess",
-    "flicker_frame_ratio",
-    "temporal_pumping_score",
+    # Enhanced temporal (single-stream, compressed-only — Wave 7 ``_compressed``)
+    "flicker_excess_compressed",
+    "flicker_frame_ratio_compressed",
+    "temporal_pumping_score_compressed",
     # Gradient/color
     "banding_score_mean",
     "banding_score_p95",
@@ -104,7 +105,8 @@ QUALITY_METRIC_COLUMNS: list[str] = [
     "dither_ratio_mean",
     "dither_ratio_p95",
     "dither_quality_score",
-    "flat_region_count",
+    # Wave 7: single-stream count, compressed-only — ``_compressed`` suffix.
+    "flat_region_count_compressed",
     # Extended gradient/color stats (computed in gradient_color_artifacts.py)
     "deltae_pct_gt1",
     "deltae_pct_gt2",
@@ -288,7 +290,14 @@ class GifLabStorage:
                     ssim_max REAL,
                     ms_ssim_mean REAL,
                     psnr_mean REAL,
-                    temporal_consistency REAL,
+                    -- Wave 7: single-stream temporal/disposal signals are keyed
+                    -- with the ``_compressed`` suffix (compressed-stream only).
+                    -- The remaining ``_compressed`` columns in
+                    -- QUALITY_METRIC_COLUMNS are added by the idempotent ALTER
+                    -- loop below. (Stale bare columns in pre-Wave-7 DBs persist
+                    -- — SQLite has no DROP COLUMN here — but are never written
+                    -- and never read via QUALITY_METRIC_COLUMNS.)
+                    temporal_consistency_compressed REAL,
                     mse_mean REAL,
                     fsim_mean REAL,
                     gmsd_mean REAL,

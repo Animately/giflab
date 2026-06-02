@@ -60,7 +60,7 @@ class TestQualityThresholdValidator:
             "ssim_mean": 0.8,
             "mse_mean": 500.0,
             "psnr_mean": 30.0,
-            "temporal_consistency": 0.15,  # Above 0.1 floor
+            "temporal_consistency_compressed": 0.15,  # Above 0.1 floor
         }
         # Must not raise; threshold must be found via the renamed key.
         checks = validator._check_metric_outliers(metrics)
@@ -72,7 +72,7 @@ class TestQualityThresholdValidator:
         """Compressed-stream instability below floor must be flagged as unacceptable."""
         validator = QualityThresholdValidator()
         metrics = {
-            "temporal_consistency": 0.05,  # Below 0.1 floor
+            "temporal_consistency_compressed": 0.05,  # Below 0.1 floor
         }
         checks = validator._check_metric_outliers(metrics)
         assert checks["temporal"]["acceptable"] is False
@@ -90,7 +90,7 @@ class TestQualityThresholdValidator:
         and (b) the rename only affected the non-frame-reduction lookup.
         """
         validator = QualityThresholdValidator()
-        metrics = {"temporal_consistency": 0.07}  # Above 0.05, below 0.10
+        metrics = {"temporal_consistency_compressed": 0.07}  # Above 0.05, below 0.10
 
         # Frame-reduction branch: 0.07 >= 0.05 lenient literal → acceptable
         lenient = validator._check_metric_outliers(metrics, frame_reduction_context=True)
@@ -125,7 +125,7 @@ class TestQualityThresholdValidator:
             "ssim_mean": 0.85,
             "psnr_mean": 25.0,
             "mse_mean": 150.0,
-            "temporal_consistency": 0.9,
+            "temporal_consistency_compressed": 0.9,
         }
         mock_enhanced_quality.return_value = 0.75  # Well above 0.1 threshold
 
@@ -158,7 +158,7 @@ class TestQualityThresholdValidator:
             "ssim_mean": 0.05,  # Very poor structural similarity
             "psnr_mean": 8.0,  # Below 10dB threshold
             "mse_mean": 15000.0,  # Above 10000 threshold
-            "temporal_consistency": 0.05,
+            "temporal_consistency_compressed": 0.05,
         }
         mock_enhanced_quality.return_value = 0.02  # Well below 0.1 threshold
 
@@ -194,7 +194,7 @@ class TestQualityThresholdValidator:
             "ssim_mean": 0.7,
             "ms_ssim_mean": 0.75,
             "psnr_mean": 20.0,
-            "temporal_consistency": 0.8,
+            "temporal_consistency_compressed": 0.8,
         }
 
         result = validator.validate_quality_degradation(
@@ -217,7 +217,7 @@ class TestQualityThresholdValidator:
             "ssim_mean": 0.3,  # Above threshold (0.2)
             "mse_mean": 8000.0,  # Below threshold (10000)
             "psnr_mean": 5.0,  # Below threshold (10.0)
-            "temporal_consistency": 0.15,  # Above threshold (0.1)
+            "temporal_consistency_compressed": 0.15,  # Above threshold (0.1)
         }
 
         outlier_checks = validator._check_metric_outliers(metrics)

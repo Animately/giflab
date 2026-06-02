@@ -47,11 +47,11 @@ class QualityThresholdValidator:
             "max_mse_mean": 10000.0,  # MSE above 10000 indicates major corruption
             "min_psnr_mean": 10.0,  # PSNR below 10dB is extremely poor
             # Compressed-stream stability floor (animation-specific).
-            # NB: the underlying metric (temporal_consistency) is computed only
-            # on the *compressed* stream (temporal_consistency_post), NOT as an
-            # original-vs-compressed pair.  The name reflects that single-stream
-            # reality — see CLAUDE.md "Pair-wise over single-stream — and
-            # labelled honestly".
+            # NB: the underlying metric (temporal_consistency_compressed) is
+            # computed only on the *compressed* stream (== temporal_consistency_post),
+            # NOT as an original-vs-compressed pair.  The name reflects that
+            # single-stream reality — see CLAUDE.md "Pair-wise over single-stream
+            # — and labelled honestly". (Wave 7 removed the bare alias.)
             "min_compressed_temporal_consistency": 0.1,  # Severe compressed-stream instability
             # Edge case protections
             "max_quality_variance": 0.9,  # Quality shouldn't vary wildly between frames
@@ -143,7 +143,12 @@ class QualityThresholdValidator:
                     "ssim_mean": metrics.get("ssim_mean"),
                     "psnr_mean": metrics.get("psnr_mean"),
                     "mse_mean": metrics.get("mse_mean"),
-                    "temporal_consistency": metrics.get("temporal_consistency"),
+                    # Wave 7: bare ``temporal_consistency`` renamed to
+                    # ``_compressed`` (it only ever measured the compressed
+                    # stream — see the threshold name below).
+                    "temporal_consistency_compressed": metrics.get(
+                        "temporal_consistency_compressed"
+                    ),
                 },
             }
 
@@ -205,7 +210,8 @@ class QualityThresholdValidator:
             "ssim_mean": self.metrics_config.SSIM_WEIGHT,
             "ms_ssim_mean": self.metrics_config.MS_SSIM_WEIGHT,
             "psnr_mean": self.metrics_config.PSNR_WEIGHT,
-            "temporal_consistency": self.metrics_config.TEMPORAL_WEIGHT,
+            # Wave 7: bare ``temporal_consistency`` renamed to ``_compressed``.
+            "temporal_consistency_compressed": self.metrics_config.TEMPORAL_WEIGHT,
         }
 
         # Build per-metric ``(normalized_value, weight)`` contributions, then
@@ -240,7 +246,7 @@ class QualityThresholdValidator:
             elif metric_name in [
                 "ssim_mean",
                 "ms_ssim_mean",
-                "temporal_consistency",
+                "temporal_consistency_compressed",
             ]:
                 # These should already be 0-1
                 normalized_value = max(0.0, min(value, 1.0))
@@ -305,9 +311,12 @@ class QualityThresholdValidator:
                 "description": "Peak signal-to-noise ratio",
             }
 
-        # Temporal consistency check (for animations)
-        if "temporal_consistency" in metrics:
-            temporal_value = metrics["temporal_consistency"]
+        # Temporal consistency check (for animations).
+        # Wave 7: bare ``temporal_consistency`` renamed to ``_compressed`` — the
+        # threshold ``min_compressed_temporal_consistency`` already names the
+        # single-stream reality.
+        if "temporal_consistency_compressed" in metrics:
+            temporal_value = metrics["temporal_consistency_compressed"]
 
             # Use context-aware threshold for frame reduction operations
             if frame_reduction_context:

@@ -340,10 +340,10 @@ class TestTemporalArtifactAllNanSilentPass:
         """All-NaN temporal metrics must produce the 'unavailable' warning, not silently pass."""
         result = self._run(
             {
-                "flicker_excess": NAN,
-                "flat_flicker_ratio": NAN,
-                "temporal_pumping_score": NAN,
-                "lpips_t_mean": NAN,
+                "flicker_excess_compressed": NAN,
+                "flat_flicker_ratio_compressed": NAN,
+                "temporal_pumping_score_compressed": NAN,
+                "lpips_t_mean_compressed": NAN,
             }
         )
         warning_categories = [w.category for w in result.warnings]
@@ -358,10 +358,10 @@ class TestTemporalArtifactAllNanSilentPass:
         """All-None temporal metrics (the original pre-NaN path) also must warn."""
         result = self._run(
             {
-                "flicker_excess": None,
-                "flat_flicker_ratio": None,
-                "temporal_pumping_score": None,
-                "lpips_t_mean": None,
+                "flicker_excess_compressed": None,
+                "flat_flicker_ratio_compressed": None,
+                "temporal_pumping_score_compressed": None,
+                "lpips_t_mean_compressed": None,
             }
         )
         warning_categories = [w.category for w in result.warnings]
@@ -371,10 +371,10 @@ class TestTemporalArtifactAllNanSilentPass:
         """Positive control: a real high flicker_excess must still produce an issue."""
         result = self._run(
             {
-                "flicker_excess": 0.10,    # well above default threshold 0.02
-                "flat_flicker_ratio": None,
-                "temporal_pumping_score": None,
-                "lpips_t_mean": None,
+                "flicker_excess_compressed": 0.10,  # well above default threshold 0.02
+                "flat_flicker_ratio_compressed": None,
+                "temporal_pumping_score_compressed": None,
+                "lpips_t_mean_compressed": None,
             }
         )
         issue_categories = [i.category for i in result.issues]

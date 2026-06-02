@@ -104,7 +104,8 @@ def quality_metrics_breakdown(df):
         ("ssim_mean", "SSIM"),
         ("ms_ssim_mean", "MS-SSIM"),
         ("psnr_mean", "PSNR"),
-        ("temporal_consistency", "Temporal"),
+        # Wave 7: storage CSV column renamed to ``_compressed``.
+        ("temporal_consistency_compressed", "Temporal"),
         ("fsim_mean", "FSIM"),
         ("gmsd_mean", "GMSD"),
         ("chist_mean", "Color Hist"),

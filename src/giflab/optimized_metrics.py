@@ -26,16 +26,14 @@ Keys ABSENT from the Phase 6 output
 The following keys are emitted by the main paths but are intentionally
 **absent** from the Phase 6 result dict:
 
-* ``temporal_consistency_compressed`` — main path: temporal consistency of
-  compressed frames only (post-compression stream).
 * ``temporal_consistency_original`` — main path: temporal consistency of
   original frames only (pre-compression stream).
 * ``disposal_artifacts_compressed`` and ``disposal_artifacts_original`` —
   main path: disposal artifact score on compressed vs original stream.
 * ``<temporal_key>_compressed`` aliases (``flicker_excess_compressed``,
   ``flicker_frame_ratio_compressed``, etc.) — main path: enhanced temporal
-  metrics measured on the compressed stream only, aliased with ``_compressed``
-  suffix to document the single-stream limitation.
+  metrics measured on the compressed stream only, suffixed with ``_compressed``
+  to document the single-stream limitation.
 
 Why they are absent
 -------------------
@@ -50,17 +48,21 @@ Per the "Same key shape across paths" rule in ``CLAUDE.md``::
     document that prominently rather than silently aliasing — silent
     equivalence lies to the consumer about what was actually measured.
 
-Emitting ``temporal_consistency_compressed = temporal_consistency_original =
-temporal_consistency`` would fabricate a measurement that never happened.
-Consumers reading two keys named ``_compressed`` and ``_original`` reasonably
-expect them to describe different streams.
+Phase 6 DOES emit ``temporal_consistency_compressed`` (Wave 7): this is the
+honest, correctly-labelled compressed-stream value — emitting it names exactly
+what was measured. What it must NOT do is fabricate
+``temporal_consistency_original`` (the original stream is never measured here),
+nor claim a pair comparison happened. Consumers reading two keys named
+``_compressed`` and ``_original`` reasonably expect them to describe different
+streams, so only the measured one (``_compressed``) is emitted.
 
 Keys PRESENT that differ in semantics
 --------------------------------------
 ``temporal_consistency_pre`` and ``temporal_consistency_post`` are both set
-to the same value as ``temporal_consistency`` (compressed-stream score)
-because Phase 6 cannot separate the two.  This is a legacy shape retained
-for structural compatibility; the comment in the code marks the limitation.
+to the same value as ``temporal_consistency_compressed`` (compressed-stream
+score) because Phase 6 cannot separate the two.  This is a legacy shape
+retained for structural compatibility; the comment in the code marks the
+limitation.
 
 Consumer guidance
 -----------------
@@ -533,11 +535,19 @@ def calculate_optimized_comprehensive_metrics(
 
     if not aligned_pairs:
         logger.warning("No frame pairs could be aligned")
+        # Emit the FULL Phase 6 temporal key set (Wave 7) so the required-keys
+        # contract holds for this branch too — previously this fallback emitted
+        # only the bare ``temporal_consistency`` key and none of the
+        # ``_compressed`` / ``_pre`` / ``_post`` / ``_delta`` siblings, a shape
+        # divergence from the normal path. The bare key is now removed.
         return {
             "ssim_mean": 0.0,
             "mse_mean": 0.0,
             "psnr_mean": 0.0,
-            "temporal_consistency": 1.0,
+            "temporal_consistency_compressed": 1.0,
+            "temporal_consistency_pre": 1.0,
+            "temporal_consistency_post": 1.0,
+            "temporal_consistency_delta": 0.0,
             "frame_count": len(original_frames),
             "compressed_frame_count": len(compressed_frames),
             "render_ms": 0,
@@ -577,21 +587,25 @@ def calculate_optimized_comprehensive_metrics(
 
     # Add temporal consistency.
     #
-    # SCHEMA LIMITATION: Phase 6 measures temporal consistency on the
-    # compressed stream only (FastTemporalConsistency.calculate_optimized
-    # receives compressed_resized, not a pair).  Therefore:
+    # SCHEMA: Phase 6 measures temporal consistency on the compressed stream
+    # only (FastTemporalConsistency.calculate_optimized receives
+    # compressed_resized, not a pair).  Therefore:
     #
-    #   - temporal_consistency_compressed   NOT emitted (would fabricate)
-    #   - temporal_consistency_original     NOT emitted (would fabricate)
+    #   - temporal_consistency_compressed   EMITTED — this IS the honest
+    #     compressed-stream value, correctly labelled. Emitting ONLY this is
+    #     not fabrication (it names exactly what was measured); emitting BOTH
+    #     _compressed AND _original would fabricate the original-stream value.
+    #   - temporal_consistency_original     NOT emitted (would fabricate — Phase
+    #     6 never runs the calculation on the original stream).
     #
     # _pre and _post are both set to the same compressed-stream score for
     # structural shape compatibility only; they do NOT represent independent
     # stream measurements.  See the module docstring "SCHEMA DIVERGENCE"
     # section and CLAUDE.md "Same key shape across paths" rule.
     #
-    # To get the _compressed/_original distinction, disable Phase 6 and
-    # use calculate_comprehensive_metrics_from_frames in giflab.metrics.
-    result["temporal_consistency"] = float(temporal_consistency)
+    # The bare ``temporal_consistency`` key was removed in Wave 7 — it read
+    # like a pair signal but only ever carried the compressed-stream value.
+    result["temporal_consistency_compressed"] = float(temporal_consistency)
     result["temporal_consistency_pre"] = float(
         temporal_consistency
     )  # Same as _post — compressed stream only; see above.

@@ -27,7 +27,11 @@ from giflab.enhanced_metrics import (
     calculate_composite_quality,
     process_metrics_with_enhanced_quality,
 )
-from giflab.metrics import calculate_comprehensive_metrics_from_frames
+from giflab.metrics import (
+    _SINGLE_STREAM_TEMPORAL_KEYS,
+    calculate_comprehensive_metrics_from_frames,
+    calculate_selected_metrics,
+)
 
 
 def _solid_frames(
@@ -92,7 +96,7 @@ def _outlier3_isolation_row() -> dict[str, float]:
         "temporal_consistency_pre": 2.28e-8,
         "temporal_consistency_post": 2.28e-8,
         "temporal_consistency_delta": abs(2.28e-8 - 2.28e-8),
-        "temporal_consistency": 2.28e-8,
+        "temporal_consistency_compressed": 2.28e-8,
     }
 
 
@@ -162,14 +166,14 @@ class TestCompositeIgnoresSingleStreamTemporalConsistency:
         # they differ.
         metrics_a = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.8,
+            "temporal_consistency_compressed": 0.8,
             "temporal_consistency_pre": 0.8,
             "temporal_consistency_post": 0.8,
             "temporal_consistency_delta": 0.0,
         }
         metrics_b = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.8,
+            "temporal_consistency_compressed": 0.8,
             "temporal_consistency_pre": 0.2,
             "temporal_consistency_post": 0.8,
             "temporal_consistency_delta": 0.6,
@@ -192,14 +196,14 @@ class TestCompositeIgnoresSingleStreamTemporalConsistency:
 
         metrics_high_post = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.95,
+            "temporal_consistency_compressed": 0.95,
             "temporal_consistency_pre": 0.10,
             "temporal_consistency_post": 0.95,
             "temporal_consistency_delta": 0.85,
         }
         metrics_low_post = {
             "ssim_mean": 0.5,
-            "temporal_consistency": 0.10,
+            "temporal_consistency_compressed": 0.10,
             "temporal_consistency_pre": 0.95,
             "temporal_consistency_post": 0.10,
             "temporal_consistency_delta": 0.85,
@@ -349,8 +353,15 @@ class TestCompositeQualityDefensiveClamps:
 
 
 class TestSingleStreamMetricAliases:
-    """Renamed _compressed / _original alias keys must be emitted alongside
-    the legacy bare keys."""
+    """The honest _compressed / _original keys must be emitted and the legacy
+    bare single-stream keys (which read like pair signals) must be ABSENT.
+
+    Wave 7 removed the bare aliases entirely: a single-stream value computed on
+    the compressed frames only must NOT appear under a name like
+    ``temporal_consistency`` / ``disposal_artifacts`` / ``flicker_excess`` that
+    reads as an original-vs-compressed pair signal. The honest ``_compressed``
+    (and ``_original`` / ``_pre`` / ``_post`` / ``_delta`` provenance) keys stay.
+    """
 
     def _run(self) -> dict[str, float | str]:
         config = MetricsConfig()
@@ -360,11 +371,11 @@ class TestSingleStreamMetricAliases:
             original, compressed, config=config
         )
 
-    def test_temporal_consistency_aliases_present(self) -> None:
+    def test_temporal_consistency_compressed_present_bare_absent(self) -> None:
         result = self._run()
         assert "temporal_consistency_compressed" in result
         assert "temporal_consistency_original" in result
-        # Aliases mirror the legacy keys.
+        # The honest _compressed/_original keys mirror the provenance siblings.
         assert (
             result["temporal_consistency_compressed"]
             == result["temporal_consistency_post"]
@@ -373,10 +384,18 @@ class TestSingleStreamMetricAliases:
             result["temporal_consistency_original"]
             == result["temporal_consistency_pre"]
         )
-        # Legacy bare key still present for backward compatibility.
-        assert "temporal_consistency" in result
+        # The legacy bare single-stream key (reads like a pair signal) is GONE.
+        assert "temporal_consistency" not in result
+        # Re-rooted statistical siblings live under _compressed now.
+        assert "temporal_consistency_compressed_std" in result
+        assert "temporal_consistency_compressed_min" in result
+        assert "temporal_consistency_compressed_max" in result
+        # The bare-key statistical siblings must NOT survive.
+        assert "temporal_consistency_std" not in result
+        assert "temporal_consistency_min" not in result
+        assert "temporal_consistency_max" not in result
 
-    def test_disposal_artifacts_aliases_present(self) -> None:
+    def test_disposal_artifacts_compressed_present_bare_absent(self) -> None:
         result = self._run()
         assert "disposal_artifacts_compressed" in result
         assert "disposal_artifacts_original" in result
@@ -384,28 +403,36 @@ class TestSingleStreamMetricAliases:
             result["disposal_artifacts_compressed"] == result["disposal_artifacts_post"]
         )
         assert result["disposal_artifacts_original"] == result["disposal_artifacts_pre"]
-        # Legacy bare key still present.
-        assert "disposal_artifacts" in result
+        # Legacy bare key GONE.
+        assert "disposal_artifacts" not in result
+        # Re-rooted statistical siblings.
+        assert "disposal_artifacts_compressed_std" in result
+        assert "disposal_artifacts_compressed_min" in result
+        assert "disposal_artifacts_compressed_max" in result
+        assert "disposal_artifacts_std" not in result
+        assert "disposal_artifacts_min" not in result
+        assert "disposal_artifacts_max" not in result
 
-    def test_temporal_artifact_aliases_present(self) -> None:
+    def test_temporal_artifact_compressed_present_bare_absent(self) -> None:
         # ENABLE_TEMPORAL_ARTIFACTS defaults to True in MetricsConfig.
         result = self._run()
-        # Only assert when the legacy keys actually made it into the dict
-        # (the temporal-artifacts module is gated and may emit the
-        # zero-fallback shape, which still includes these keys).
+        # Each single-stream enhanced-temporal signal must now appear ONLY under
+        # its _compressed alias; the bare key (reads like a pair signal) is gone.
         for legacy, alias in [
             ("flicker_excess", "flicker_excess_compressed"),
             ("flicker_frame_ratio", "flicker_frame_ratio_compressed"),
             ("flat_flicker_ratio", "flat_flicker_ratio_compressed"),
+            ("flat_region_count", "flat_region_count_compressed"),
             ("temporal_pumping_score", "temporal_pumping_score_compressed"),
+            ("quality_oscillation_frequency", "quality_oscillation_frequency_compressed"),
             ("lpips_t_mean", "lpips_t_mean_compressed"),
             ("lpips_t_p95", "lpips_t_p95_compressed"),
         ]:
-            assert legacy in result, f"legacy key {legacy} missing"
-            assert alias in result, f"alias {alias} missing"
-            assert (
-                result[alias] == result[legacy]
-            ), f"{alias} should mirror {legacy}: {result[alias]} vs {result[legacy]}"
+            # The bare single-stream key must NOT be in the result dict.
+            assert legacy not in result, f"bare key {legacy} should be absent"
+            # When the signal was computed, only the _compressed alias carries it.
+            if alias in result:
+                assert result[alias] is not None
 
 
 class TestSingleStreamMetricsDocumented:
@@ -508,7 +535,7 @@ def _colour_failure_row(texture_value: float) -> dict[str, float]:
         "temporal_consistency_pre": 0.5,
         "temporal_consistency_post": 0.5,
         "temporal_consistency_delta": 0.0,
-        "temporal_consistency": 0.5,
+        "temporal_consistency_compressed": 0.5,
     }
 
 
@@ -573,3 +600,133 @@ class TestTextureSimilarityCannotMaskColourFailure:
             f"composite={composite:.4f}; it must stay well below acceptance. If "
             f"this rises above 0.5 the texture weight is masking a colour failure."
         )
+
+
+def _single_stream_aliases() -> tuple[str, ...]:
+    """The ``_compressed`` suffixed names for every single-stream key."""
+    return tuple(f"{key}_compressed" for key in _SINGLE_STREAM_TEMPORAL_KEYS)
+
+
+def _noisy_pair(
+    n: int = 5, size: tuple[int, int] = (40, 40), seed: int = 7
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Build a distinct original/compressed pair that exercises the temporal
+    and gradient-colour detectors (non-trivial, non-identical content)."""
+    rng = np.random.default_rng(seed)
+    orig = [rng.integers(0, 255, (*size, 3), dtype=np.uint8) for _ in range(n)]
+    comp = [rng.integers(0, 255, (*size, 3), dtype=np.uint8) for _ in range(n)]
+    return orig, comp
+
+
+class TestSelectedMetricsPathSingleStreamKeys:
+    """Regression for the optimized / conditional metric paths (Wave 7 round 2).
+
+    ``calculate_selected_metrics`` — and the high-tier fast branch in
+    ``calculate_comprehensive_metrics_from_frames`` plus
+    ``ConditionalMetricsCalculator.calculate_progressive`` that delegate to it —
+    merge the temporal and gradient-colour producer dicts. Before the fix they
+    merged them WHOLESALE (``results.update(...)``), so they emitted the bare
+    single-stream keys (``flicker_excess`` etc.) and NO ``_compressed`` variants.
+
+    That produced a cross-path schema inconsistency: a high-tier GIF written via
+    this path would leave the storage CSV ``*_compressed`` columns empty and make
+    ``validation_checker._validate_temporal_artifacts`` read ``None`` and silently
+    classify temporal artifacts as 'unavailable' — disabling flicker/pumping
+    validation. These tests assert the optimized path emits the SAME
+    ``_compressed`` schema (and ABSENCE of bare keys) as the main path.
+    """
+
+    def test_selected_metrics_temporal_and_gradient_rekeyed(self) -> None:
+        config = MetricsConfig()
+        orig, comp = _noisy_pair()
+        selected = {"temporal_artifacts": True, "color_gradients": True}
+
+        result = calculate_selected_metrics(orig, comp, selected, config=config)
+
+        # No bare single-stream key may survive on this path.
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from "
+                f"calculate_selected_metrics"
+            )
+
+        # The temporal producer actually emits the flicker/pumping signals on
+        # this content, so their _compressed aliases must be present (not merely
+        # 'no bare key because nothing was produced').
+        for alias in (
+            "flicker_excess_compressed",
+            "flicker_frame_ratio_compressed",
+            "flat_flicker_ratio_compressed",
+            "flat_region_count_compressed",
+            "temporal_pumping_score_compressed",
+            "quality_oscillation_frequency_compressed",
+        ):
+            assert alias in result, (
+                f"{alias} missing — calculate_selected_metrics must re-key "
+                f"single-stream temporal/gradient signals to _compressed"
+            )
+
+    def test_selected_metrics_gradient_only_flat_region_count_rekeyed(self) -> None:
+        """``flat_region_count`` is produced by the gradient-colour detector too.
+        With only ``color_gradients`` selected (temporal off), it must STILL be
+        re-keyed to ``flat_region_count_compressed`` rather than land bare."""
+        config = MetricsConfig()
+        orig, comp = _noisy_pair(seed=11)
+        selected = {"color_gradients": True}
+
+        result = calculate_selected_metrics(orig, comp, selected, config=config)
+
+        assert (
+            "flat_region_count" not in result
+        ), "gradient-sourced flat_region_count leaked as a bare key"
+        assert "flat_region_count_compressed" in result
+
+    def test_high_tier_optimized_branch_rekeys_flat_region_count(
+        self, monkeypatch
+    ) -> None:
+        """End-to-end: a high-quality (near-identical) compression triggers the
+        high-tier optimized branch, which merges gradient-colour metrics into
+        ``optimized_results`` separately. That second merge must also re-key the
+        single-stream ``flat_region_count`` — otherwise the bare key reappears
+        only on the fast path (cross-path schema drift)."""
+        # Force the gradient/colour metrics to run inside the high-tier branch
+        # (otherwise they are skipped for high quality and we never exercise the
+        # branch's gradient merge at all).
+        monkeypatch.setenv("GIFLAB_ENABLE_CONDITIONAL_METRICS", "true")
+        monkeypatch.setenv("GIFLAB_FORCE_GRADIENT_METRICS", "true")
+
+        # Near-identical frames → high PSNR → high quality tier → optimized path.
+        grad = _gradient_frames(n=6, size=(48, 48))
+        result = calculate_comprehensive_metrics_from_frames(grad, list(grad))
+
+        meta = result.get("_optimization_metadata", {})
+        assert meta.get("optimization_applied") is True, (
+            "test did not exercise the high-tier optimized branch "
+            f"(metadata={meta!r})"
+        )
+
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from the high-tier "
+                f"optimized branch"
+            )
+        assert (
+            "flat_region_count_compressed" in result
+        ), "high-tier branch must emit flat_region_count_compressed"
+
+    def test_conditional_calculator_progressive_rekeys(self) -> None:
+        """``ConditionalMetricsCalculator.calculate_progressive`` returns the
+        ``calculate_selected_metrics`` result directly; assert the live entry
+        point used by the quality-tier optimization emits no bare keys."""
+        import giflab.metrics as metrics_module
+        from giflab.conditional_metrics import ConditionalMetricsCalculator
+
+        orig, comp = _noisy_pair(seed=23)
+        calc = ConditionalMetricsCalculator()
+        result = calc.calculate_progressive(orig, comp, metrics_module)
+
+        for bare in _SINGLE_STREAM_TEMPORAL_KEYS:
+            assert bare not in result, (
+                f"bare single-stream key {bare!r} leaked from "
+                f"ConditionalMetricsCalculator.calculate_progressive"
+            )
