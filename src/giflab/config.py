@@ -249,6 +249,27 @@ class MetricsConfig:
         if self.EDGE_CANNY_THRESHOLD1 >= self.EDGE_CANNY_THRESHOLD2:
             raise ValueError("EDGE_CANNY_THRESHOLD1 must be < EDGE_CANNY_THRESHOLD2")
 
+        # Validate ALPHA_BACKGROUND: arity FIRST (so a 2-tuple raises a clear
+        # ValueError rather than an IndexError on element access), then per-
+        # element type and 0..255 range. A bool is an int subclass; reject it
+        # explicitly so True/False can't slip through as 1/0.
+        bg = self.ALPHA_BACKGROUND
+        if not isinstance(bg, tuple | list) or len(bg) != 3:
+            raise ValueError(
+                "ALPHA_BACKGROUND must be a 3-tuple of ints (r, g, b), " f"got {bg!r}"
+            )
+        for component in bg:
+            if isinstance(component, bool) or not isinstance(component, int):
+                raise ValueError(
+                    "ALPHA_BACKGROUND components must be ints in 0..255, "
+                    f"got {component!r} in {bg!r}"
+                )
+            if not 0 <= component <= 255:
+                raise ValueError(
+                    "ALPHA_BACKGROUND components must be in 0..255, "
+                    f"got {component!r} in {bg!r}"
+                )
+
         # Set default positional metrics if not provided
         if self.POSITIONAL_METRICS is None:
             self.POSITIONAL_METRICS = ["ssim", "mse", "fsim", "chist"]

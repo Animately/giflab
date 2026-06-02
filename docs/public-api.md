@@ -138,6 +138,61 @@ def measure(
 
 **Thread safety**: Safe to call concurrently.
 
+### Transparency handling — dual (white + black) composite
+
+GIF/PNG inputs that carry transparency are scored against **two** background
+composites and merged pessimistically. The motivation is a measurement bias:
+compositing transparent pixels onto a single fixed white background swamps
+differences in **dark content** (near-black detail on a transparent field is
+high-contrast against white, so a perturbation that would be obvious against a
+dark background is nearly invisible). White-only scoring therefore
+systematically over-rates dark-content GIFs.
+
+Behaviour:
+
+- **Opaque inputs** (no transparency) are scored with a single white-composite
+  pass exactly as before — **zero added cost** (the second pass is never run).
+- **Transparent inputs** are composited onto white **and** black; each pass
+  runs the full metrics pipeline, then the results are merged **per metric** by
+  taking the value that is **worse for quality** (direction derived live from
+  the composite formula). The merged `composite_quality` **and** `efficiency`
+  are then recomputed from the worst-of values. Because the worst metric can
+  come from a different background per metric, the merged composite can fall
+  below *either* single-background composite — a compressor cannot game the
+  score by being friendly to one background. `compression_ratio` is identical
+  across passes (it is file-size-derived), so `efficiency` stays consistent and
+  reflects the lower composite.
+- Internal `render_ms` for the metrics dict is re-timed at the file level, so
+  it roughly **doubles** on transparent inputs (it covers both extractions and
+  both metric passes). This is the internal metrics-dict `render_ms`, **not**
+  `CompressResult.render_ms` (which is engine subprocess time, see below) — and
+  it is **not** projected onto the public `MeasureResult` (which carries no
+  `render_ms`).
+- The **public `measure()` surface is unaffected**: it projects only the seven
+  metric fields; the worst-of merge happens beneath that projection, so a caller
+  requesting e.g. `ssim` simply receives the (worst-of, transparency-aware)
+  value with the same field shape. The public surface reads the **bare** metric
+  keys (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`), so when a stem's
+  worst-of value comes from the black pass the merge overwrites the **entire key
+  family** for that stem — the bare alias, the `_std`/`_min`/`_max`/`_raw`
+  siblings, **and** every non-sibling companion (`ssimulacra2_p95`, the
+  `temporal_consistency` pre/post/original/compressed cluster, the positional
+  `ssim_first`/`_last`/`_middle`/`_positional_variance` stats) — from the winning
+  pass. This keeps the documented same-scale `bare == _mean` alias intact and
+  ensures no companion silently retains white provenance. PSNR's scale split is
+  preserved: bare `psnr` stays normalised `[0, 1]` and `psnr_mean` stays raw dB,
+  because each pass's bare `psnr` is that pass's own normalised value, so copying
+  black's family carries both consistently.
+
+> Note (out of scope, follow-up): under the experimental Phase 6 optimized
+> metrics path (`GIFLAB_ENABLE_PHASE6_OPTIMIZATION=true`), a temporal-metric
+> *failure* currently emits a `0.0` best-case sentinel rather than `NaN`. Both
+> dual-composite passes go through that same path, so the worst-of merge
+> faithfully propagates that pre-existing fabrication **without amplifying it**
+> (picking `0.0` from both passes yields `0.0`, identical to single-pass Phase
+> 6). Fixing the sentinel to emit `NaN` per the metrics-accuracy policy is a
+> separate follow-up, not part of this change.
+
 ---
 
 ## Result types
