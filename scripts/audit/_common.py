@@ -53,10 +53,20 @@ def run_metrics(original: Path, compressed: Path, gl: dict[str, Any]) -> dict[st
 def compress_animately(
     input_path: Path, output_path: Path, lossy_level: int, gl: dict[str, Any]
 ) -> tuple[bool, str]:
-    """Compress with animately. Returns (ok, error_message)."""
+    """Compress with animately. Returns (ok, error_message).
+
+    Bypasses the content-aware lossy ceiling (``apply_content_ceiling=False``):
+    the monotonicity sweep / corpus sweeps need the requested lossy grid to run
+    verbatim. Silently clamping photographic content to 20 would corrupt the
+    very audit that calibrates the ceilings (see ``public_api.compress``).
+    """
     try:
         gl["compress"](
-            input_path, output_path, "animately", {"lossy_level": int(lossy_level)}
+            input_path,
+            output_path,
+            "animately",
+            {"lossy_level": int(lossy_level)},
+            apply_content_ceiling=False,
         )
         return True, ""
     except Exception as e:

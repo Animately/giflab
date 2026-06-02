@@ -175,11 +175,15 @@ class CompressResult:
     engine: str
     engine_version: str
     params: dict[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # Store params as an immutable shallow copy so the caller can mutate
         # their own dict after the call without affecting this result.
         object.__setattr__(self, "params", dict(self.params))
+        # Normalise warnings to an immutable tuple regardless of how it was
+        # passed (list, tuple, generator).
+        object.__setattr__(self, "warnings", tuple(self.warnings))
 
 
 @dataclass(frozen=True)
@@ -209,6 +213,8 @@ def compress(
     output_path: Path,
     engine: EngineIdentifier,
     params: dict[str, Any] | None = None,
+    *,
+    apply_content_ceiling: bool = True,
 ) -> CompressResult:
     """Run a single compression engine on ``input_path``, writing ``output_path``.
 
@@ -225,6 +231,20 @@ def compress(
       default of 10s. Surfaced for batch / audit workflows where the default
       cuts off legitimate ~10 MB+ inputs (see audit
       ``docs/metrics-audit/2026-05-22/report.md``). Must be a positive integer.
+
+    Content-aware lossy ceiling (``apply_content_ceiling``, default ``True``):
+        When the engine is ``animately`` and ``params`` carries a positive
+        ``lossy_level``, the input's original frames are classified
+        (data-viz / photographic / film-grain) and the requested level is
+        clamped DOWN to a per-class ceiling (never raised) — flat categorical
+        charts band at any lossy level and near-256-colour content posterises
+        above modest levels (2026-05-26 outlier deep-dive). When a clamp
+        happens, a human-readable warning is added to
+        :attr:`CompressResult.warnings`. The ceilings are animately-calibrated
+        only; other lossy engines skip classification entirely. Pass
+        ``apply_content_ceiling=False`` to bypass the ceiling — the audit
+        monotonicity / corpus sweeps MUST set this so their lossy grid is never
+        silently clamped (see ``scripts/audit/_common.py``).
 
     Raises:
         UnknownEngineError: ``engine`` is not in :data:`SUPPORTED_ENGINES`.
@@ -244,9 +264,45 @@ def compress(
     if not input_path.exists():
         raise FileNotFoundError(f"input_path does not exist: {input_path}")
 
-    effective_params = params if params is not None else {}
+    # Copy the caller's params so the content-ceiling clamp never mutates the
+    # caller's dict (params-no-leak contract). A shallow copy is enough — only
+    # the scalar ``lossy_level`` is rewritten.
+    effective_params: dict[str, Any] = dict(params) if params is not None else {}
+    result_warnings: list[str] = []
+
+    # Content-aware lossy ceiling: animately only (the ceilings are
+    # animately-calibrated; gifsicle's 3x native mapping is uncalibrated). Skip
+    # for lossless / colour-only calls (no positive lossy_level), and when the
+    # caller opts out (audit sweeps).
+    if (
+        apply_content_ceiling
+        and engine == "animately"
+        and isinstance(effective_params.get("lossy_level"), int)
+        and effective_params["lossy_level"] > 0
+    ):
+        clamp_warning = _maybe_clamp_lossy_level(input_path, effective_params)
+        if clamp_warning is not None:
+            result_warnings.append(clamp_warning)
+
+    # Count input frames before dispatch so we can flag a frame drop without
+    # needing the metrics pipeline (which compress() does not run). Cheap, and
+    # avoids duplicating the alignment-accuracy threshold owned by the Wave-5
+    # alignment-warning task.
+    input_frame_count = _safe_frame_count(input_path)
+
     wrapper = wrapper_cls()
     wrapper_result = wrapper.apply(input_path, output_path, params=effective_params)
+
+    output_frame_count = _safe_frame_count(output_path)
+    if (
+        input_frame_count is not None
+        and output_frame_count is not None
+        and output_frame_count < input_frame_count
+    ):
+        result_warnings.append(
+            f"frame drop: output has {output_frame_count} frames vs "
+            f"{input_frame_count} in the input"
+        )
 
     return CompressResult(
         output_path=output_path,
@@ -255,7 +311,47 @@ def compress(
         engine=engine,
         engine_version=wrapper_cls.version(),
         params=effective_params,
+        warnings=tuple(result_warnings),
     )
+
+
+def _maybe_clamp_lossy_level(
+    input_path: Path, effective_params: dict[str, Any]
+) -> str | None:
+    """Clamp ``effective_params['lossy_level']`` DOWN to the content ceiling.
+
+    Mutates ``effective_params`` in place (it is already a private copy). Returns
+    a warning string when a clamp happened, else ``None``. Classification fails
+    soft inside ``classify_content_from_path``, so this never raises.
+    """
+    # Lazy import keeps the no-torch lightweight-import contract: importing
+    # content_classifier here (not at module top) means the metrics import graph
+    # is only touched when a real lossy animately compress runs.
+    from giflab.content_classifier import classify_content_from_path
+
+    requested = int(effective_params["lossy_level"])
+    classification = classify_content_from_path(input_path)
+    ceiling = classification.lossy_max
+    if ceiling is None or requested <= ceiling:
+        return None
+
+    effective_params["lossy_level"] = ceiling
+    return f"lossy_level clamped {requested} → {ceiling}: {classification.reason}"
+
+
+def _safe_frame_count(gif_path: Path) -> int | None:
+    """Return the GIF's frame count, or ``None`` if it cannot be determined.
+
+    Used only for the frame-drop warning; a failure here must never block a
+    legitimate compress, so it fails soft.
+    """
+    try:
+        from PIL import Image, ImageSequence
+
+        with Image.open(gif_path) as img:
+            return sum(1 for _ in ImageSequence.Iterator(img))
+    except Exception:  # noqa: BLE001 — frame-drop warning is best-effort
+        return None
 
 
 def measure(

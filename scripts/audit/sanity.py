@@ -498,8 +498,18 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
             for level in LOSSY_LEVELS:
                 degraded_path = workdir / f"{base_name}_lossy_{level}.gif"
                 try:
+                    # apply_content_ceiling=False: this IS the monotonicity
+                    # lossy sweep that calibrates the ceilings. Clamping
+                    # photographic bases (smooth_gradient, photographic_noise)
+                    # down to 20/30 would collapse levels 60/100/160 into
+                    # byte-identical outputs and degenerate the curve to a
+                    # single point. See scripts/audit/_common.py docstring.
                     gl["compress"](
-                        base_path, degraded_path, "animately", {"lossy_level": level}
+                        base_path,
+                        degraded_path,
+                        "animately",
+                        {"lossy_level": level},
+                        apply_content_ceiling=False,
                     )
                 except Exception as e:
                     print(f"[sanity]     animately --lossy {level} failed on {base_name}: {e}", flush=True)
@@ -600,8 +610,16 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                 for level in LOSSY_LEVELS:
                     degraded_path = workdir / f"{logical_name}_lossy_{level}.gif"
                     try:
+                        # apply_content_ceiling=False: same audit-bypass
+                        # contract as the synthetic lossy sweep above — the
+                        # fixture monotonicity sweep must run the requested
+                        # lossy grid verbatim (see _common.py docstring).
                         gl["compress"](
-                            base_path, degraded_path, "animately", {"lossy_level": level}
+                            base_path,
+                            degraded_path,
+                            "animately",
+                            {"lossy_level": level},
+                            apply_content_ceiling=False,
                         )
                     except Exception as e:
                         print(

@@ -35,6 +35,8 @@ def compress(
     output_path: Path,
     engine: EngineIdentifier,
     params: dict[str, Any] | None = None,
+    *,
+    apply_content_ceiling: bool = True,
 ) -> CompressResult: ...
 ```
 
@@ -44,6 +46,7 @@ def compress(
 - Returns a `CompressResult` describing the produced file.
 - Overwrites `output_path` if a file already exists there.
 - Does not mutate `input_path`.
+- May clamp the requested lossy level down for certain content (see [Content-aware lossy ceiling](#content-aware-lossy-ceiling) below) and may surface non-fatal warnings on `CompressResult.warnings`.
 
 **Parameters**:
 
@@ -53,6 +56,26 @@ def compress(
 | `output_path` | `pathlib.Path` | yes | Parent directory must exist and be writable. File at this path will be overwritten. |
 | `engine` | `str` (one of `SUPPORTED_ENGINES`) | yes | Engine identifier. |
 | `params` | `dict[str, Any] \| None` | no (default `None`) | Engine-specific parameter mapping. `None` is treated as empty dict (engine defaults). Schema is engine-specific — engines that require `lossy_level` will raise `ValueError` if it is missing. |
+| `apply_content_ceiling` | `bool` (keyword-only) | no (default `True`) | When `True`, apply the [content-aware lossy ceiling](#content-aware-lossy-ceiling). Pass `False` to bypass it (audit sweeps that need their lossy grid run verbatim). |
+
+#### Content-aware lossy ceiling
+
+When the engine is `animately` and `params` carries a positive `lossy_level`, `compress()` classifies the input's **original** frames (data-viz / photographic / film-grain) and clamps the requested `lossy_level` **down** to a per-class maximum — it never raises the level. This protects content the 2026-05-26 outlier deep-dive identified as fragile: flat-colour animations band under heavy lossy, and near-256-colour photographic / film-grain content posterises above modest levels.
+
+| Content class | Ceiling | Config field (`giflab.config.ClassifierConfig`) |
+|---|---|---|
+| data-viz / flat-colour animation | `40` (conservative; non-lossless) | `MAX_LOSSY_DATA_VIZ` |
+| photographic gradient/image | `20` | `MAX_LOSSY_PHOTOGRAPHIC` |
+| film grain / sensor noise | `30` | `MAX_LOSSY_FILM_GRAIN` |
+| other / unclassified | none | — |
+
+- When a clamp happens, a human-readable warning string is appended to `CompressResult.warnings`.
+- If the requested level is already at or below the ceiling, nothing is clamped and no warning is emitted.
+- **Data-viz scope & the conservative ceiling.** Pre-compression *single-frame* primitives cannot reliably isolate a categorical chart from a flat logo / cartoon / UI / line-art frame — they are numerically identical (a 4-colour synthetic chart equals a 4-colour flat cartoon). The classifier therefore treats `data-viz` as a broad "flat-colour animation" class. Forcing that whole population to lossless (the original `0` ceiling) silently defeated lossy compression for the single most common GIF category, so the data-viz ceiling is a **conservative `40`**: ordinary flat content at typical lossy levels (≤40) passes through untouched, and only genuinely extreme requests are clamped where flat-colour banding becomes severe. The detection score is a strict conjunction (geometric mean of flat-structure × limited-palette × low-grain × animation-length), so photographic and film-grain content can never trip it. Set `MAX_LOSSY_DATA_VIZ` lower only with a discriminating signal (e.g. a palette-histogram or pair-metric) that actually isolates categorical charts.
+- The ceilings are **animately-calibrated only**. Other lossy engines (`gifsicle`, etc.) skip classification entirely — `gifsicle`'s native lossy scale is a 3× multiple of the public scale and has not been calibrated. (TODO: calibrate per-engine ceilings.)
+- Classification is **fail-soft**: a corrupt or unreadable input is classified `other`, applies no ceiling, and never blocks the compress.
+- `compress()` also emits a frame-drop warning on `CompressResult.warnings` when the engine output has fewer frames than the input (a cheap input-vs-output frame-count comparison; it does not run the metrics pipeline).
+- Pass `apply_content_ceiling=False` to bypass the ceiling entirely. Audit sweeps (`scripts/audit/`) set this so their monotonicity / corpus lossy grids run at the exact requested levels.
 
 **Returns**: `CompressResult` (see [Result types](#result-types) below).
 
@@ -66,7 +89,7 @@ def compress(
 | `ValueError` | `params` is missing keys the engine wrapper requires. |
 | Subclass of `GifLabError` | Any other engine-side failure (subprocess non-zero exit, etc.). |
 
-**Determinism**: For a given (input file bytes, engine, params) tuple, the output bytes are deterministic to the extent the underlying engine is deterministic. The public wrapper introduces no nondeterminism of its own.
+**Determinism**: For a given (input file bytes, engine, params, `apply_content_ceiling`) tuple, the output bytes are deterministic to the extent the underlying engine is deterministic. The content-aware lossy ceiling is itself deterministic — the classifier samples frames at fixed `np.linspace` indices (never random) and the clamp is a pure function of the classification and the requested level. The public wrapper introduces no nondeterminism of its own.
 
 **Thread safety**: Safe to call concurrently from multiple threads or processes, provided the `input_path` and `output_path` arguments do not collide across calls.
 
@@ -130,7 +153,8 @@ Both result types are `@dataclass(frozen=True)`. Hash-equal results compare equa
 | `render_ms` | `int` | Engine subprocess duration in milliseconds. |
 | `engine` | `str` | Echoed from the call. |
 | `engine_version` | `str` | Version string the engine binary reports, or `"unknown"`. |
-| `params` | `dict[str, Any]` | Shallow copy of the params passed in. Mutation of the caller's dict after the call does not affect this result. |
+| `params` | `dict[str, Any]` | Shallow copy of the **effective** params used. Mutation of the caller's dict after the call does not affect this result. If the [content-aware lossy ceiling](#content-aware-lossy-ceiling) clamped `lossy_level`, this dict reflects the clamped value, not the requested one. |
+| `warnings` | `tuple[str, ...]` | Non-fatal advisories about the compression. Empty when nothing noteworthy happened. Currently carries the lossy-ceiling clamp message and the frame-drop message (see [`compress`](#compress)). Consumers should treat the contents as human-readable strings, not a stable machine schema. |
 
 ### `MeasureResult`
 

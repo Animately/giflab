@@ -1,7 +1,13 @@
 """Configuration settings for GifLab."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from giflab.content_classifier import ContentClass
 
 
 @dataclass
@@ -246,6 +252,62 @@ class MetricsConfig:
         # Set default positional metrics if not provided
         if self.POSITIONAL_METRICS is None:
             self.POSITIONAL_METRICS = ["ssim", "mse", "fsim", "chist"]
+
+
+@dataclass
+class ClassifierConfig:
+    """Per-content-type lossy ceilings for the pre-compression classifier.
+
+    See ``src/giflab/content_classifier.py`` and the 2026-05-26 outlier
+    deep-dive. ``compress`` consults the classifier and clamps the requested
+    animately ``lossy_level`` DOWN to the per-class ceiling. The values are
+    animately-calibrated only — other engines skip the ceiling (see
+    ``content_classifier`` and ``docs/public-api.md``).
+    """
+
+    # Flat-colour content (categorical charts AND flat logos / cartoons / UI /
+    # line-art) — these are *not* separable from each other using
+    # pre-compression single-frame primitives (a 4-colour synthetic chart and a
+    # 4-colour flat cartoon are numerically identical; the real outlier-2
+    # GrowthLab chart had a *moderate* palette, but typical flat content does
+    # not). Forcing lossless on this whole population would defeat lossy
+    # compression for the single most common GIF category, so the ceiling is a
+    # CONSERVATIVE non-zero value: it leaves the common lossy range (<=40)
+    # untouched and only clamps genuinely extreme requests where flat-colour
+    # banding becomes severe. The previous value (0 / lossless) over-triggered
+    # catastrophically — see the round-3 review on PR #40. Set lower only with
+    # a discriminating signal that actually isolates categorical charts.
+    MAX_LOSSY_DATA_VIZ: int = 40
+
+    # Near-256-colour photographic gradients posterise above a modest ceiling.
+    MAX_LOSSY_PHOTOGRAPHIC: int = 20
+
+    # Film grain tolerates slightly more lossy than smooth gradients.
+    MAX_LOSSY_FILM_GRAIN: int = 30
+
+    # Minimum blended confidence for a non-OTHER classification. Below this no
+    # ceiling is applied (the content is treated as OTHER). Raised from 0.55 to
+    # 0.80 in the PR #40 round-3 fix: with the conjunctive (geometric-mean)
+    # data-viz score and the palette-driven photographic/film-grain scores,
+    # genuine in-class content scores >=0.90 (flat content 0.93-1.00,
+    # photographic ~1.00, film grain 0.93-0.97) while borderline / ambiguous
+    # content (e.g. the high-contrast synthetic) tops out around 0.34. A 0.80
+    # floor therefore admits genuine classifications and rejects weak ones,
+    # rather than the old 0.55 floor that let near-everything through.
+    MIN_CONFIDENCE: float = 0.80
+
+    def lossy_max_for(self, content_class: ContentClass) -> int | None:
+        """Return the ceiling for ``content_class``, or ``None`` for OTHER."""
+        # Imported here to avoid a config→content_classifier import cycle
+        # (content_classifier imports ClassifierConfig at module top).
+        from giflab.content_classifier import ContentClass
+
+        mapping = {
+            ContentClass.DATA_VIZ_ANIMATION: self.MAX_LOSSY_DATA_VIZ,
+            ContentClass.PHOTOGRAPHIC: self.MAX_LOSSY_PHOTOGRAPHIC,
+            ContentClass.FILM_GRAIN: self.MAX_LOSSY_FILM_GRAIN,
+        }
+        return mapping.get(content_class)
 
 
 # Frame cache configuration (added for performance optimization)
