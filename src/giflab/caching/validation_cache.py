@@ -16,6 +16,8 @@ import threading
 import time
 import zlib
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -108,9 +110,31 @@ class ValidationCache:
         if self.enabled:
             self._init_database()
 
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a SQLite connection that commits on success and always closes.
+
+        ``with sqlite3.connect(...) as conn`` manages only the *transaction*
+        (commit on success, rollback on error); it does NOT close the
+        connection. On POSIX, CPython refcounting closes it promptly, but on
+        Windows the lingering handle keeps the database file locked, so a
+        following ``TemporaryDirectory`` teardown raises
+        ``PermissionError: [WinError 32]``. Closing here keeps teardown
+        cross-platform-safe without changing transaction semantics.
+        """
+        conn = sqlite3.connect(str(self.disk_path))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _init_database(self) -> None:
         """Initialize SQLite database for disk cache."""
-        with sqlite3.connect(str(self.disk_path)) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS validation_cache (
@@ -390,7 +414,7 @@ class ValidationCache:
             if current_size + size_bytes > self.disk_limit_bytes:
                 self._evict_disk_entries(size_bytes)
 
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO validation_cache
@@ -427,7 +451,7 @@ class ValidationCache:
     def _load_from_disk(self, cache_key: str) -> ValidationResult | None:
         """Load entry from disk cache."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     SELECT metric_type, value_data, frame_indices, config_hash,
@@ -472,7 +496,7 @@ class ValidationCache:
     def _invalidate_disk_entry(self, cache_key: str) -> None:
         """Remove an entry from disk cache."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     "DELETE FROM validation_cache WHERE cache_key = ?", (cache_key,)
                 )
@@ -483,7 +507,7 @@ class ValidationCache:
     def _get_disk_cache_size(self) -> int:
         """Get current disk cache size in bytes."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute("SELECT SUM(size_bytes) FROM validation_cache")
                 result = cursor.fetchone()[0]
                 return result if result else 0
@@ -493,7 +517,7 @@ class ValidationCache:
     def _evict_disk_entries(self, needed_bytes: int) -> None:
         """Evict oldest disk entries to make room."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 # Get entries sorted by last access time
                 cursor = conn.execute(
                     """
@@ -544,7 +568,7 @@ class ValidationCache:
 
             # Clean disk cache
             try:
-                with sqlite3.connect(str(self.disk_path)) as conn:
+                with self._connect() as conn:
                     conn.execute(
                         "DELETE FROM validation_cache WHERE timestamp < ?",
                         (cutoff_time,),
@@ -574,7 +598,7 @@ class ValidationCache:
 
             # Clear from disk cache
             try:
-                with sqlite3.connect(str(self.disk_path)) as conn:
+                with self._connect() as conn:
                     conn.execute(
                         "DELETE FROM validation_cache WHERE metric_type = ?",
                         (metric_type,),
@@ -592,7 +616,7 @@ class ValidationCache:
             self._memory_bytes = 0
 
             try:
-                with sqlite3.connect(str(self.disk_path)) as conn:
+                with self._connect() as conn:
                     conn.execute("DELETE FROM validation_cache")
                     conn.commit()
             except Exception as e:
@@ -608,7 +632,7 @@ class ValidationCache:
         with self._lock:
             # Update disk stats
             try:
-                with sqlite3.connect(str(self.disk_path)) as conn:
+                with self._connect() as conn:
                     cursor = conn.execute(
                         "SELECT COUNT(*), SUM(size_bytes) FROM validation_cache"
                     )
@@ -628,7 +652,7 @@ class ValidationCache:
         stats = {}
 
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     SELECT metric_type, COUNT(*) as count
