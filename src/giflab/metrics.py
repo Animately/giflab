@@ -2980,12 +2980,26 @@ def calculate_comprehensive_metrics_from_frames(
                         )
                     except Exception as e:
                         logger.warning(f"Temporal consistency calculation failed: {e}")
-                        # Use default values if calculation fails
-                        optimized_results["temporal_consistency_pre"] = 1.0
-                        optimized_results["temporal_consistency_post"] = 1.0
-                        optimized_results["temporal_consistency_delta"] = 0.0
-                        optimized_results["temporal_consistency_compressed"] = 1.0
-                        optimized_results["temporal_consistency_original"] = 1.0
+                        # Audit-fix [[giflab-optimized-temporal-failure-nan]]:
+                        # emit NaN, NOT fabricated-perfect (1.0/0.0), when the
+                        # temporal calc fails. The old defaults silently inflated
+                        # composite_quality on exactly the runs that LOST temporal
+                        # signal (``temporal_consistency_delta`` and the legacy
+                        # ``temporal_consistency_compressed`` feed
+                        # calculate_composite_quality). NaN propagates the loss
+                        # honestly: ``_is_missing`` filters it and
+                        # ``_resolve_composite_from_contributions`` redistributes
+                        # the temporal weight, and the validator reports the data
+                        # as "unavailable for validation".
+                        optimized_results["temporal_consistency_pre"] = float("nan")
+                        optimized_results["temporal_consistency_post"] = float("nan")
+                        optimized_results["temporal_consistency_delta"] = float("nan")
+                        optimized_results["temporal_consistency_compressed"] = float(
+                            "nan"
+                        )
+                        optimized_results["temporal_consistency_original"] = float(
+                            "nan"
+                        )
 
                     # Process with quality system
                     from .enhanced_metrics import process_metrics_with_enhanced_quality

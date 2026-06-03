@@ -249,3 +249,39 @@ class TestPhase6SchemaContract:
         # The removed bare key and the never-measured _original must be absent.
         assert "temporal_consistency" not in result
         assert "temporal_consistency_original" not in result
+
+    def test_no_aligned_pairs_fallback_temporal_is_nan_not_fabricated_perfect(self):
+        """The no-aligned-pairs FAILURE fallback must emit NaN — not fabricated
+        perfect temporal preservation — for the four temporal keys.
+
+        Audit-fix [[giflab-optimized-temporal-failure-nan]]: this fallback fires
+        on the SAME "No frame pairs could be aligned" condition on which the main
+        path honestly ``raise ValueError`` (``calculate_comprehensive_metrics_
+        from_frames`` in ``giflab.metrics``). It previously fabricated
+        ``temporal_consistency_{compressed,pre,post} = 1.0`` and
+        ``temporal_consistency_delta = 0.0`` — perfect temporal preservation on a
+        run that produced NO comparable frames — which silently inflated
+        ``composite_quality`` (``temporal_consistency_delta`` /
+        ``temporal_consistency_compressed`` feed ``calculate_composite_quality``).
+        NaN propagates the loss honestly (``_is_missing`` filters it; the temporal
+        weight is redistributed). This path was previously UNTESTED for VALUE —
+        the sibling presence test only asserted the keys exist.
+        """
+        # Two empty frame lists align to zero pairs -> the failure fallback.
+        result = self._run([], [])
+        for key in (
+            "temporal_consistency_compressed",
+            "temporal_consistency_pre",
+            "temporal_consistency_post",
+            "temporal_consistency_delta",
+        ):
+            val = result[key]
+            assert np.isnan(val), (
+                f"{key} must be NaN on the no-aligned-pairs failure fallback "
+                f"(honest signal loss, NOT fabricated-perfect 1.0/0.0); got {val!r}"
+            )
+        # Structural worst-case values stay 0.0 (no comparison was possible) — it
+        # is specifically the temporal 1.0/0.0 that inflated composite_quality.
+        assert result["ssim_mean"] == 0.0
+        assert result["mse_mean"] == 0.0
+        assert result["psnr_mean"] == 0.0
