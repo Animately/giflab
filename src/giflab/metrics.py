@@ -2994,12 +2994,12 @@ def calculate_comprehensive_metrics_from_frames(
                         optimized_results["temporal_consistency_pre"] = float("nan")
                         optimized_results["temporal_consistency_post"] = float("nan")
                         optimized_results["temporal_consistency_delta"] = float("nan")
-                        optimized_results[
-                            "temporal_consistency_compressed"
-                        ] = float("nan")
-                        optimized_results[
-                            "temporal_consistency_original"
-                        ] = float("nan")
+                        optimized_results["temporal_consistency_compressed"] = float(
+                            "nan"
+                        )
+                        optimized_results["temporal_consistency_original"] = float(
+                            "nan"
+                        )
 
                     # Process with quality system
                     from .enhanced_metrics import process_metrics_with_enhanced_quality

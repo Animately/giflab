@@ -2725,9 +2725,9 @@ class TestOptimizedTemporalFailureNaNHonesty:
             f"processing (metadata: {opt_meta}). The NaN assertions below would be "
             "meaningless on the standard path."
         )
-        assert opt_meta.get("quality_tier") == "high", (
-            f"expected HIGH tier to reach the temporal except gate, got {opt_meta}"
-        )
+        assert (
+            opt_meta.get("quality_tier") == "high"
+        ), f"expected HIGH tier to reach the temporal except gate, got {opt_meta}"
 
         # --- Step 5: NaN assertions (the PRIMARY before/after discriminator) ---
         # On the BUGGY code these are 1.0/0.0 (fabricated perfect) -> these
