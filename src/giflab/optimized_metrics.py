@@ -540,14 +540,29 @@ def calculate_optimized_comprehensive_metrics(
         # only the bare ``temporal_consistency`` key and none of the
         # ``_compressed`` / ``_pre`` / ``_post`` / ``_delta`` siblings, a shape
         # divergence from the normal path. The bare key is now removed.
+        #
+        # Audit-fix [[giflab-optimized-temporal-failure-nan]]: emit NaN — NOT
+        # fabricated-perfect (1.0/0.0) — for the four temporal keys on this
+        # no-aligned-pairs FAILURE. This is the SAME fabricate-perfect-on-failure
+        # anti-pattern the PR fixes in the conditional path: on the identical
+        # "No frame pairs could be aligned" condition the main path honestly
+        # ``raise ValueError`` (``metrics.py`` ``calculate_comprehensive_metrics_
+        # from_frames``), so claiming perfect temporal preservation (1.0/1.0/1.0/
+        # 0.0) here would inflate ``composite_quality`` on exactly the runs that
+        # produced no comparable frames. NaN propagates the loss honestly:
+        # ``_is_missing`` filters it and ``_resolve_composite_from_contributions``
+        # redistributes the temporal weight, and the validator reports the data
+        # as unavailable. The structural ssim/mse/psnr = 0.0 worst-case values
+        # stay (no comparison was possible, so worst-case is honest, not
+        # fabricated-perfect).
         return {
             "ssim_mean": 0.0,
             "mse_mean": 0.0,
             "psnr_mean": 0.0,
-            "temporal_consistency_compressed": 1.0,
-            "temporal_consistency_pre": 1.0,
-            "temporal_consistency_post": 1.0,
-            "temporal_consistency_delta": 0.0,
+            "temporal_consistency_compressed": float("nan"),
+            "temporal_consistency_pre": float("nan"),
+            "temporal_consistency_post": float("nan"),
+            "temporal_consistency_delta": float("nan"),
             "frame_count": len(original_frames),
             "compressed_frame_count": len(compressed_frames),
             "render_ms": 0,
