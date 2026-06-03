@@ -2638,3 +2638,164 @@ class TestExtractGifFramesAlphaCompositing:
         # Identity pair must hit ceiling on both composites -> worst-of ceiling.
         assert metrics["ssim"] == pytest.approx(1.0, abs=1e-6), metrics
         assert metrics["composite_quality"] == pytest.approx(1.0, abs=1e-6), metrics
+
+
+class TestOptimizedTemporalFailureNaNHonesty:
+    """The OPTIMIZED (conditional / Phase-6 high-tier) temporal block must emit
+    NaN — not fabricated PERFECT temporal preservation — when the temporal
+    consistency calculation raises.
+
+    Audit-fix [[giflab-optimized-temporal-failure-nan]]: the optimized-branch
+    temporal ``except`` handler in ``calculate_comprehensive_metrics_from_frames``
+    previously wrote ``temporal_consistency_{pre,post,delta,compressed,original}``
+    = ``1.0/1.0/0.0/1.0/1.0`` on failure. Because ``temporal_consistency_delta``
+    (default ``USE_TEMPORAL_DELTA_FOR_COMPOSITE=True``) and the legacy
+    ``temporal_consistency_compressed`` feed ``calculate_composite_quality``, a
+    FAILED temporal calc silently inflated composite_quality on exactly the runs
+    that lost the signal. Emitting NaN propagates the loss honestly: the consumer
+    side is NaN-safe (``_is_missing`` filters it, ``_resolve_composite_from_
+    contributions`` redistributes the 10% temporal weight), and the public
+    validator reports the data as unavailable.
+
+    Precedent: ``test_temporal_delta_nan_skips_temporal_does_not_fall_back`` (this
+    file) already proves the honest NaN-delta composite path. This test exercises
+    the OPTIMIZED path end-to-end — the INVERSE of
+    ``test_psnr_mean_omitted_when_no_raw_values`` (which uses ``force_all_metrics=
+    True`` to drive the STANDARD path); here we leave the force flag off and feed
+    high-tier identical frames so the conditional optimized branch is taken.
+    """
+
+    _TEMPORAL_KEYS = (
+        "temporal_consistency_pre",
+        "temporal_consistency_post",
+        "temporal_consistency_delta",
+        "temporal_consistency_compressed",
+        "temporal_consistency_original",
+    )
+
+    def test_optimized_temporal_failure_emits_nan_not_fabricated_perfect(
+        self, monkeypatch
+    ):
+        import giflab.enhanced_metrics as enhanced_metrics
+        import giflab.metrics as metrics_mod
+        from giflab.metrics import calculate_comprehensive_metrics_from_frames
+
+        # --- Step 1: force entry to the conditional/optimized block ---
+        # Leave GIFLAB_ENABLE_CONDITIONAL_METRICS at its default (true) and ensure
+        # NEITHER force flag is set, so ``use_conditional and not force_all_metrics``
+        # holds and the optimized branch (not the standard path) runs.
+        monkeypatch.delenv("GIFLAB_FORCE_ALL_METRICS", raising=False)
+        monkeypatch.delenv("GIFLAB_ENABLE_CONDITIONAL_METRICS", raising=False)
+        # Step 8: optimized conditional branch is in-process, but set this
+        # defensively so a monkeypatch would apply even if a parallel path were
+        # reached.
+        monkeypatch.setenv("GIFLAB_ENABLE_PARALLEL_METRICS", "false")
+
+        # --- Step 2: force the HIGH-tier gate ---
+        # 3 IDENTICAL mid-grey frames -> infinite PSNR -> avg_psnr = 40.0 -> HIGH
+        # tier, at which lpips + ssimulacra2 are deselected so the optimized gate
+        # passes. Multi-frame so temporal is actually computed (not the trivial
+        # single-frame 1.0). Identical streams keep gradient/color/ssimulacra2
+        # sub-blocks succeeding so nothing else throws into the outer catch-all.
+        frame = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        orig = [frame] * 3
+        comp = [frame] * 3
+
+        # --- Step 3: force the temporal except ---
+        # The success branch calls the module-level ``calculate_temporal_consistency``
+        # at its two call sites; patching the name on the module intercepts both so
+        # the optimized-branch temporal ``except`` fires.
+        def raising_temporal(*args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+            raise RuntimeError("forced temporal failure")
+
+        monkeypatch.setattr(
+            metrics_mod, "calculate_temporal_consistency", raising_temporal
+        )
+
+        result = calculate_comprehensive_metrics_from_frames(orig, comp)
+
+        # --- Step 4: POSITIVE path-taken assertion FIRST (load-bearing) ---
+        # The optimized block is wrapped in an outer catch-all that silently demotes
+        # to standard processing on ANY in-block error. Without this assertion a
+        # mis-wired test would pass VACUOUSLY on the wrong path. ``optimization_
+        # applied is True`` proves we reached the optimized return.
+        opt_meta = result.get("_optimization_metadata", {})
+        assert opt_meta.get("optimization_applied") is True, (
+            "optimized path was NOT taken — the outer catch-all demoted to standard "
+            f"processing (metadata: {opt_meta}). The NaN assertions below would be "
+            "meaningless on the standard path."
+        )
+        assert opt_meta.get("quality_tier") == "high", (
+            f"expected HIGH tier to reach the temporal except gate, got {opt_meta}"
+        )
+
+        # --- Step 5: NaN assertions (the PRIMARY before/after discriminator) ---
+        # On the BUGGY code these are 1.0/0.0 (fabricated perfect) -> these
+        # assertions FAIL. After the fix they are NaN -> PASS.
+        for key in self._TEMPORAL_KEYS:
+            assert key in result, f"{key} missing from optimized result"
+            assert math.isnan(result[key]), (
+                f"{key} must be NaN on the optimized temporal-failure path "
+                f"(honest signal loss), not a fabricated value; got {result[key]!r}"
+            )
+
+        # --- Step 6: composite finite-guard ONLY (no-NaN-leak / no-crash) ---
+        # NOT a de-inflation proof: on this identical-frame fixture the structural
+        # metrics are genuinely perfect, so composite_quality is ~1.0 before AND
+        # after the fix (the temporal weight is redistributed across still-perfect
+        # metrics). This only guards that the NaN does not poison the composite.
+        assert "composite_quality" in result
+        assert math.isfinite(result["composite_quality"]), (
+            "NaN temporal must be filtered by _resolve_composite_from_contributions "
+            "(10% weight << 50% COMPOSITE_NAN_THRESHOLD), keeping composite finite"
+        )
+
+        # --- Step 7: validator honesty via the PUBLIC entry ---
+        # The fixed NaN ``temporal_consistency_post`` must make the public validator
+        # report the data as unavailable (and NOT raise a false animation_corruption
+        # — ``disposal_artifacts_pre`` is unset on the optimized path, so the
+        # cross-validation combination short-circuits before any NaN comparison).
+        from giflab.meta import GifMetadata
+        from giflab.optimization_validation.validation_checker import ValidationChecker
+
+        # Precondition the validator keys on (enhanced_metrics-mirrored sentinel).
+        assert enhanced_metrics._is_missing(result["temporal_consistency_post"]) is True
+
+        checker = ValidationChecker(None)  # default config
+        metadata = GifMetadata(
+            gif_sha="test_sha",
+            orig_filename="t.gif",
+            orig_kilobytes=10.0,
+            orig_width=100,
+            orig_height=100,
+            orig_frames=3,
+            orig_fps=10.0,
+            orig_n_colors=256,
+            entropy=5.0,
+            source_platform="test",
+        )
+        validation = checker.validate_compression_result(
+            original_metadata=metadata,
+            compression_metrics=result,
+            pipeline_id="t",
+            gif_name="t",
+            content_type="test",
+        )
+
+        temporal_unavailable = [
+            w
+            for w in validation.warnings
+            if w.category == "temporal_consistency" and "unavailable" in w.message
+        ]
+        assert temporal_unavailable, (
+            "validator must emit a temporal_consistency 'data unavailable' WARNING "
+            f"when temporal_consistency_post is NaN; warnings: {validation.warnings}"
+        )
+        # No false corruption issue from the NaN (disposal_pre short-circuit).
+        assert not any(
+            getattr(issue, "category", None) == "animation_corruption"
+            for issue in validation.issues
+        ), (
+            "NaN temporal must NOT trip a false animation_corruption issue "
+            f"(issues: {validation.issues})"
+        )
