@@ -9,7 +9,7 @@ import logging
 import math
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 
 def _is_missing(v: object) -> bool:
@@ -429,6 +429,7 @@ class ValidationChecker:
             )
             return
 
+        composite_quality = cast(float, composite_quality)
         minimum_floor = thresholds["minimum_quality_floor"]
         warning_threshold = thresholds["quality_warning_threshold"]
 
@@ -473,6 +474,7 @@ class ValidationChecker:
             )
             return
 
+        efficiency = cast(float, efficiency)
         # Check for unreasonably high efficiency (may indicate calculation errors)
         max_reasonable_efficiency = 0.95
         if efficiency > max_reasonable_efficiency:
@@ -510,6 +512,8 @@ class ValidationChecker:
             )
             return
 
+        disposal_pre = cast(float, disposal_pre)
+        disposal_post = cast(float, disposal_post)
         artifact_threshold = thresholds["disposal_artifact_threshold"]
         delta_threshold = thresholds["disposal_artifact_delta_threshold"]
 
@@ -518,7 +522,7 @@ class ValidationChecker:
             or disposal_post < artifact_threshold
             or (
                 not _is_missing(disposal_delta)
-                and abs(disposal_delta) > delta_threshold
+                and abs(cast(float, disposal_delta)) > delta_threshold
             )
         ):
             result.issues.append(
@@ -551,6 +555,7 @@ class ValidationChecker:
             )
             return
 
+        temporal_score = cast(float, temporal_score)
         threshold = thresholds["temporal_consistency_threshold"]
 
         if temporal_score < threshold:
@@ -595,6 +600,7 @@ class ValidationChecker:
         if alignment_accuracy == -1.0:
             return
 
+        alignment_accuracy = cast(float, alignment_accuracy)
         threshold = thresholds["alignment_warning_threshold"]
 
         if alignment_accuracy < threshold:
@@ -730,13 +736,13 @@ class ValidationChecker:
 
         # Validate flicker excess
         flicker_threshold = thresholds.get("flicker_excess_threshold", 0.02)
-        if not _is_missing(flicker_excess) and flicker_excess > flicker_threshold:
+        if not _is_missing(flicker_excess) and cast(float, flicker_excess) > flicker_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="flicker_excess",
-                    message=f"Excessive flicker detected: {flicker_excess:.4f} > {flicker_threshold:.4f}",
+                    message=f"Excessive flicker detected: {cast(float, flicker_excess):.4f} > {flicker_threshold:.4f}",
                     expected_value=flicker_threshold,
-                    actual_value=flicker_excess,
+                    actual_value=cast(float, flicker_excess),
                     threshold=flicker_threshold,
                     severity="WARNING",
                 )
@@ -746,40 +752,43 @@ class ValidationChecker:
         flat_flicker_threshold = thresholds.get("flat_flicker_ratio_threshold", 0.1)
         if (
             not _is_missing(flat_flicker_ratio)
-            and flat_flicker_ratio > flat_flicker_threshold
+            and cast(float, flat_flicker_ratio) > flat_flicker_threshold
         ):
+            _flat_flicker_f = cast(float, flat_flicker_ratio)
             result.issues.append(
                 ValidationIssue(
                     category="background_flicker",
-                    message=f"Background flicker detected in {flat_flicker_ratio*100:.1f}% of stable regions - check disposal methods",
+                    message=f"Background flicker detected in {_flat_flicker_f*100:.1f}% of stable regions - check disposal methods",
                     expected_value=flat_flicker_threshold,
-                    actual_value=flat_flicker_ratio,
+                    actual_value=_flat_flicker_f,
                     threshold=flat_flicker_threshold,
                 )
             )
 
         # Validate temporal pumping
         pumping_threshold = thresholds.get("temporal_pumping_threshold", 0.15)
-        if not _is_missing(temporal_pumping) and temporal_pumping > pumping_threshold:
+        if not _is_missing(temporal_pumping) and cast(float, temporal_pumping) > pumping_threshold:
+            _tp_f = cast(float, temporal_pumping)
             result.issues.append(
                 ValidationIssue(
                     category="temporal_pumping",
-                    message=f"Temporal pumping detected: {temporal_pumping:.3f} > {pumping_threshold:.3f} - quality oscillation creates 'breathing' effect",
+                    message=f"Temporal pumping detected: {_tp_f:.3f} > {pumping_threshold:.3f} - quality oscillation creates 'breathing' effect",
                     expected_value=pumping_threshold,
-                    actual_value=temporal_pumping,
+                    actual_value=_tp_f,
                     threshold=pumping_threshold,
                 )
             )
 
         # Validate LPIPS-T for perceptual temporal consistency
         lpips_threshold = thresholds.get("lpips_t_threshold", 0.05)
-        if not _is_missing(lpips_t_mean) and lpips_t_mean > lpips_threshold:
+        if not _is_missing(lpips_t_mean) and cast(float, lpips_t_mean) > lpips_threshold:
+            _lpips_t_f = cast(float, lpips_t_mean)
             result.issues.append(
                 ValidationIssue(
                     category="perceptual_temporal_degradation",
-                    message=f"Poor temporal consistency detected: {lpips_t_mean:.4f} > {lpips_threshold:.4f} - check for compression artifacts",
+                    message=f"Poor temporal consistency detected: {_lpips_t_f:.4f} > {lpips_threshold:.4f} - check for compression artifacts",
                     expected_value=lpips_threshold,
-                    actual_value=lpips_t_mean,
+                    actual_value=_lpips_t_f,
                     threshold=lpips_threshold,
                     severity="WARNING",
                 )
@@ -814,7 +823,7 @@ class ValidationChecker:
                 composite_quality = compression_metrics.get("composite_quality")
                 if (
                     not _is_missing(composite_quality)
-                    and 0.3 <= composite_quality <= 0.7
+                    and 0.3 <= cast(float, composite_quality) <= 0.7
                 ):  # Borderline quality
                     result.warnings.append(
                         ValidationWarning(
@@ -838,7 +847,7 @@ class ValidationChecker:
         # Validate LPIPS quality - higher scores indicate more perceptual difference (worse quality)
         lpips_threshold = thresholds.get("lpips_quality_threshold", 0.3)
 
-        if not _is_missing(lpips_quality_mean) and lpips_quality_mean > lpips_threshold:
+        if not _is_missing(lpips_quality_mean) and cast(float, lpips_quality_mean) > lpips_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="perceptual_quality_degradation",
@@ -852,7 +861,7 @@ class ValidationChecker:
 
         # Validate extreme cases with p95 metric
         extreme_threshold = thresholds.get("lpips_quality_extreme_threshold", 0.5)
-        if not _is_missing(lpips_quality_p95) and lpips_quality_p95 > extreme_threshold:
+        if not _is_missing(lpips_quality_p95) and cast(float, lpips_quality_p95) > extreme_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="extreme_perceptual_degradation",
@@ -866,7 +875,7 @@ class ValidationChecker:
 
         # Check for very high maximum values that indicate severe artifacts
         max_threshold = thresholds.get("lpips_quality_max_threshold", 0.7)
-        if not _is_missing(lpips_quality_max) and lpips_quality_max > max_threshold:
+        if not _is_missing(lpips_quality_max) and cast(float, lpips_quality_max) > max_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="severe_perceptual_artifacts",
@@ -883,13 +892,13 @@ class ValidationChecker:
         if (
             not _is_missing(composite_quality)
             and not _is_missing(lpips_quality_mean)
-            and composite_quality < 0.6
-            and lpips_quality_mean > 0.2
+            and cast(float, composite_quality) < 0.6
+            and cast(float, lpips_quality_mean) > 0.2
         ):
             result.issues.append(
                 ValidationIssue(
                     category="comprehensive_quality_failure",
-                    message=f"Both traditional and perceptual quality poor: Composite {composite_quality:.3f} + LPIPS {lpips_quality_mean:.3f}",
+                    message=f"Both traditional and perceptual quality poor: Composite {cast(float, composite_quality):.3f} + LPIPS {cast(float, lpips_quality_mean):.3f}",
                     severity="CRITICAL",
                 )
             )
@@ -938,7 +947,7 @@ class ValidationChecker:
         thresholds.get("ssimulacra2_high_threshold", 0.7)  # High quality
 
         # Check mean quality
-        if not _is_missing(ssimulacra2_mean) and ssimulacra2_mean < low_threshold:
+        if not _is_missing(ssimulacra2_mean) and cast(float, ssimulacra2_mean) < low_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="ssimulacra2_poor_quality",
@@ -949,7 +958,7 @@ class ValidationChecker:
                     severity="CRITICAL",
                 )
             )
-        elif not _is_missing(ssimulacra2_mean) and ssimulacra2_mean < medium_threshold:
+        elif not _is_missing(ssimulacra2_mean) and cast(float, ssimulacra2_mean) < medium_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="ssimulacra2_medium_quality",
@@ -962,7 +971,7 @@ class ValidationChecker:
             )
 
         # Check worst case (minimum) quality
-        if not _is_missing(ssimulacra2_min) and ssimulacra2_min < low_threshold:
+        if not _is_missing(ssimulacra2_min) and cast(float, ssimulacra2_min) < low_threshold:
             result.issues.append(
                 ValidationIssue(
                     category="ssimulacra2_worst_frame",
@@ -975,7 +984,7 @@ class ValidationChecker:
             )
 
         # Check 95th percentile quality
-        if not _is_missing(ssimulacra2_p95) and ssimulacra2_p95 < medium_threshold:
+        if not _is_missing(ssimulacra2_p95) and cast(float, ssimulacra2_p95) < medium_threshold:
             result.warnings.append(
                 ValidationWarning(
                     category="ssimulacra2_poor_consistency",
@@ -992,8 +1001,8 @@ class ValidationChecker:
         if (
             not _is_missing(composite_quality)
             and not _is_missing(ssimulacra2_mean)
-            and composite_quality > 0.7  # High composite quality
-            and ssimulacra2_mean < medium_threshold  # But poor perceptual quality
+            and cast(float, composite_quality) > 0.7  # High composite quality
+            and cast(float, ssimulacra2_mean) < medium_threshold  # But poor perceptual quality
         ):
             result.warnings.append(
                 ValidationWarning(

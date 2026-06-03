@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 
 if TYPE_CHECKING:
     from .backends import MetricsBackend
@@ -63,10 +63,10 @@ class RingBuffer:
 
     def __init__(self, max_size: int = 10000):
         self.max_size = max_size
-        self.buffer = deque(maxlen=max_size)
+        self.buffer: deque[MetricPoint] = deque(maxlen=max_size)
         self.lock = threading.RLock()
 
-    def append(self, item: MetricPoint):
+    def append(self, item: MetricPoint) -> None:
         """Add item to buffer."""
         with self.lock:
             self.buffer.append(item)
@@ -82,7 +82,7 @@ class RingBuffer:
         with self.lock:
             return [p for p in self.buffer if p.timestamp >= cutoff]
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all items."""
         with self.lock:
             self.buffer.clear()
@@ -93,32 +93,32 @@ class MetricsAggregator:
 
     def __init__(self, flush_interval: float = 10.0):
         self.flush_interval = flush_interval
-        self.counters = defaultdict(float)
-        self.gauges = defaultdict(float)
-        self.histograms = defaultdict(list)
-        self.timers = defaultdict(list)
+        self.counters: dict[str, float] = defaultdict(float)
+        self.gauges: dict[str, float] = defaultdict(float)
+        self.histograms: dict[str, list[float]] = defaultdict(list)
+        self.timers: dict[str, list[float]] = defaultdict(list)
         self.lock = threading.RLock()
         self.last_flush = time.time()
 
-    def add_counter(self, name: str, value: float, tags: dict[str, str] = None):
+    def add_counter(self, name: str, value: float, tags: Optional[dict[str, str]] = None) -> None:
         """Increment counter."""
         key = self._make_key(name, tags)
         with self.lock:
             self.counters[key] += value
 
-    def set_gauge(self, name: str, value: float, tags: dict[str, str] = None):
+    def set_gauge(self, name: str, value: float, tags: Optional[dict[str, str]] = None) -> None:
         """Set gauge value."""
         key = self._make_key(name, tags)
         with self.lock:
             self.gauges[key] = value
 
-    def add_histogram(self, name: str, value: float, tags: dict[str, str] = None):
+    def add_histogram(self, name: str, value: float, tags: Optional[dict[str, str]] = None) -> None:
         """Add value to histogram."""
         key = self._make_key(name, tags)
         with self.lock:
             self.histograms[key].append(value)
 
-    def add_timer(self, name: str, duration: float, tags: dict[str, str] = None):
+    def add_timer(self, name: str, duration: float, tags: Optional[dict[str, str]] = None) -> None:
         """Add timing measurement."""
         key = self._make_key(name, tags)
         with self.lock:
@@ -294,8 +294,8 @@ class MetricsCollector:
         self._flush_thread.start()
 
     def record_counter(
-        self, name: str, value: float = 1.0, tags: dict[str, str] = None
-    ):
+        self, name: str, value: float = 1.0, tags: Optional[dict[str, str]] = None
+    ) -> None:
         """Record counter increment."""
         if not self._should_sample():
             return
@@ -304,7 +304,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
 
-    def record_gauge(self, name: str, value: float, tags: dict[str, str] = None):
+    def record_gauge(self, name: str, value: float, tags: Optional[dict[str, str]] = None) -> None:
         """Record gauge value."""
         if not self._should_sample():
             return
@@ -313,7 +313,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
 
-    def record_histogram(self, name: str, value: float, tags: dict[str, str] = None):
+    def record_histogram(self, name: str, value: float, tags: Optional[dict[str, str]] = None) -> None:
         """Record histogram value."""
         if not self._should_sample():
             return
@@ -322,7 +322,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
 
-    def record_timer(self, name: str, duration: float, tags: dict[str, str] = None):
+    def record_timer(self, name: str, duration: float, tags: Optional[dict[str, str]] = None) -> None:
         """Record timer duration in seconds."""
         if not self._should_sample():
             return
@@ -331,7 +331,7 @@ class MetricsCollector:
         if self.aggregator.should_flush():
             self.flush()
 
-    def flush(self):
+    def flush(self) -> None:
         """Flush aggregated metrics to backend."""
         try:
             points = self.aggregator.flush()
@@ -347,10 +347,10 @@ class MetricsCollector:
 
     def get_summary(
         self,
-        name: str = None,
-        metric_type: MetricType = None,
+        name: Optional[str] = None,
+        metric_type: Optional[MetricType] = None,
         window_seconds: float = 300,
-        tags: dict[str, str] = None,
+        tags: Optional[dict[str, str]] = None,
     ) -> list[MetricSummary]:
         """
         Get summary statistics for metrics.
@@ -412,17 +412,17 @@ class MetricsCollector:
         return summaries
 
     def get_metrics(
-        self, start_time: float = None, end_time: float = None, **filters
+        self, start_time: Optional[float] = None, end_time: Optional[float] = None, **filters: Any
     ) -> list[MetricPoint]:
         """Get raw metric points from backend."""
-        return self.backend.query(start_time, end_time, **filters)
+        return self.backend.query(start_time=start_time, end_time=end_time)
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all metrics."""
         self.buffer.clear()
         self.backend.clear()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shutdown metrics collector."""
         self._shutdown = True
         self.flush()
@@ -439,7 +439,7 @@ class MetricsCollector:
 
         return random.random() < self.sampling_rate
 
-    def _flush_loop(self):
+    def _flush_loop(self) -> None:
         """Background thread for periodic flushing."""
         while not self._shutdown:
             time.sleep(1.0)
@@ -461,18 +461,18 @@ def get_metrics_collector() -> MetricsCollector:
                 from ..config import MONITORING
                 from .backends import create_backend
 
-                backend = create_backend(MONITORING.get("backend", "memory"))
+                backend = create_backend(cast(str, MONITORING.get("backend", "memory")))
                 _metrics_collector = MetricsCollector(
                     backend=backend,
-                    buffer_size=MONITORING.get("buffer_size", 10000),
-                    flush_interval=MONITORING.get("flush_interval", 10.0),
-                    enabled=MONITORING.get("enabled", True),
-                    sampling_rate=MONITORING.get("sampling_rate", 1.0),
+                    buffer_size=cast(int, MONITORING.get("buffer_size", 10000)),
+                    flush_interval=cast(float, MONITORING.get("flush_interval", 10.0)),
+                    enabled=cast(bool, MONITORING.get("enabled", True)),
+                    sampling_rate=cast(float, MONITORING.get("sampling_rate", 1.0)),
                 )
     return _metrics_collector
 
 
-def reset_metrics_collector():
+def reset_metrics_collector() -> None:
     """Reset singleton metrics collector (mainly for testing)."""
     global _metrics_collector
     with _lock:
