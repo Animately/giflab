@@ -651,8 +651,8 @@ class TestSsimulacra2ValidatorExtended:
             else:  # float types
                 frame = np.random.random((50, 50, 3)).astype(dtype)
 
-            with tempfile.NamedTemporaryFile(suffix=".png") as temp_file:
-                temp_path = Path(temp_file.name)
+            with tempfile.TemporaryDirectory() as _td:
+                temp_path = Path(_td) / "frame.png"
 
                 # Should handle different dtypes gracefully
                 try:
@@ -670,8 +670,8 @@ class TestSsimulacra2ValidatorExtended:
         ]
 
         for frame in extreme_frames:
-            with tempfile.NamedTemporaryFile(suffix=".png") as temp_file:
-                temp_path = Path(temp_file.name)
+            with tempfile.TemporaryDirectory() as _td:
+                temp_path = Path(_td) / "frame.png"
                 validator._export_frame_to_png(frame, temp_path)
                 assert temp_path.exists()
 
