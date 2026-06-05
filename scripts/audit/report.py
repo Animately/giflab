@@ -462,12 +462,29 @@ def render_report(
         "Identity = metric on (gif, gif). Pathological = metric on (white, "
         "black). Direction inferred from those two reference points. "
         "Verdict PASS if monotonicity holds across all degradation kinds "
-        "(noise / blur / quantize / animately lossy). SUSPICIOUS if any "
-        "kind shows an inversion. INCONCLUSIVE if identity == pathological "
-        "(usually a single-stream metric where this pair can't discriminate)."
+        "(noise / blur / quantize / animately lossy). SUSPICIOUS if a "
+        "**pairwise-quality** metric shows an inversion. DIAGNOSTIC if a "
+        "structurally-non-monotonic-by-design metric (dispersion `_std`/`_min`/"
+        "`_max` siblings, single-stream `_compressed` keys, or diagnostic/"
+        "system metrics like render_ms / kilobytes / efficiency) shows an "
+        "inversion — real but expected, so segregated from SUSPICIOUS. "
+        "INCONCLUSIVE if identity == pathological (the pair can't discriminate)."
     )
     md.append("")
     verdicts = sanity.get("verdicts", [])
+    _counts: dict[str, int] = {}
+    for _v in verdicts:
+        _counts[_v["verdict"]] = _counts.get(_v["verdict"], 0) + 1
+    md.append(
+        "**Verdict summary:** "
+        + ", ".join(
+            f"{_counts.get(k, 0)} {k}"
+            for k in ("PASS", "SUSPICIOUS", "DIAGNOSTIC", "INCONCLUSIVE")
+        )
+        + ". Only SUSPICIOUS (pairwise-quality inversions) warrants "
+        "investigation; DIAGNOSTIC metrics are non-monotonic by design."
+    )
+    md.append("")
     rows = []
     for v in verdicts:
         rows.append(

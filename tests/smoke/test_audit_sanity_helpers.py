@@ -122,6 +122,167 @@ class TestMonotonicityCheck:
         )
 
 
+class TestMetricClassification:
+    """`_classify_metric` triages a metric name into one of four classes so the
+    verdict loop can segregate structurally-non-monotonic-by-design metrics
+    (dispersion siblings, single-stream `_compressed` keys, diagnostic/system
+    metrics) from the SUSPICIOUS verdict — otherwise the ~1 genuine
+    pairwise-quality signal (composite_quality) is buried under ~70 structural
+    false positives. See docs/metrics-audit/2026-06-03/post-fix-verdict.md.
+    """
+
+    def test_primary_pairwise_quality_metrics(self) -> None:
+        for m in (
+            "composite_quality",
+            "ssim",
+            "ssim_mean",
+            "ms_ssim",
+            "psnr_mean",
+            "edge_similarity",
+            "texture_similarity",
+            "fsim",
+            "gmsd",
+            "chist",
+            "lpips_quality_mean",
+            "ssimulacra2_mean",
+            "deltae_mean",
+            "banding_score_mean",
+            "deltae_pct_gt2",
+        ):
+            assert sanity._classify_metric(m) == "pairwise_quality", m
+
+    def test_dispersion_and_positional_siblings(self) -> None:
+        for m in (
+            "ssim_std",
+            "edge_similarity_std",
+            "gmsd_min",
+            "fsim_max",
+            "mse_first",
+            "mse_last",
+            "chist_middle",
+            "chist_positional_variance",
+            "deltae_max",
+            "ssimulacra2_min",
+        ):
+            assert sanity._classify_metric(m) == "dispersion", m
+
+    def test_single_stream_compressed_metrics(self) -> None:
+        for m in (
+            "temporal_consistency_compressed",
+            "temporal_consistency_compressed_max",
+            "temporal_consistency_post",
+            "disposal_artifacts_compressed",
+            "disposal_artifacts_post",
+            "flicker_excess_compressed",
+            "flicker_frame_ratio_compressed",
+            "flat_flicker_ratio_compressed",
+            "quality_oscillation_frequency_compressed",
+            "temporal_pumping_score_compressed",
+            "lpips_t_mean_compressed",
+            "lpips_t_p95_compressed",
+        ):
+            assert sanity._classify_metric(m) == "single_stream", m
+
+    def test_temporal_delta_is_pairwise_not_single_stream(self) -> None:
+        # _delta is the genuine original-vs-compressed change signal — it must
+        # stay eligible for SUSPICIOUS, unlike the single-stream siblings.
+        assert (
+            sanity._classify_metric("temporal_consistency_delta") == "pairwise_quality"
+        )
+        assert sanity._classify_metric("disposal_artifacts_delta") == "pairwise_quality"
+
+    def test_diagnostic_system_metrics(self) -> None:
+        for m in (
+            "render_ms",
+            "kilobytes",
+            "efficiency",
+            "frame_count",
+            "compressed_frame_count",
+            "color_count_compressed",
+            "color_count_original",
+            "compression_ratio",
+        ):
+            assert sanity._classify_metric(m) == "diagnostic", m
+
+
+class TestSingleStreamKeysInSync:
+    """Guard that sanity.py's locally-mirrored single-stream family stays a
+    superset of giflab.metrics._SINGLE_STREAM_TEMPORAL_KEYS. The mirror exists
+    so the pure classification helpers don't import the heavy metrics stack;
+    this test (which DOES import giflab, lazily) keeps the two from drifting.
+    """
+
+    def test_mirror_covers_source_of_truth(self) -> None:
+        from giflab.metrics import _SINGLE_STREAM_TEMPORAL_KEYS
+
+        missing = set(_SINGLE_STREAM_TEMPORAL_KEYS) - sanity._SINGLE_STREAM_FAMILY_KEYS
+        assert not missing, (
+            "sanity._SINGLE_STREAM_FAMILY_KEYS has drifted from "
+            f"giflab.metrics._SINGLE_STREAM_TEMPORAL_KEYS — missing: {missing}. "
+            "Add the new key(s) so the audit verdict triage keeps segregating them."
+        )
+
+
+class TestDecideVerdict:
+    """`_decide_verdict` returns (verdict, note, classification). Structural
+    metrics with monotonicity failures must be downgraded from SUSPICIOUS to
+    DIAGNOSTIC so the SUSPICIOUS list only contains genuine pairwise-quality
+    inversions.
+    """
+
+    _FAIL = [
+        {
+            "kind": "lossy",
+            "base": "smooth_gradient",
+            "values": [1.0, 0.5],
+            "inversions": [],
+        }
+    ]
+
+    def test_pairwise_failure_is_suspicious(self) -> None:
+        verdict, _note, classification = sanity._decide_verdict(
+            "composite_quality", "higher_better", 1.0, 0.1858, self._FAIL, "solid"
+        )
+        assert verdict == "SUSPICIOUS"
+        assert classification == "pairwise_quality"
+
+    def test_dispersion_failure_is_diagnostic_not_suspicious(self) -> None:
+        verdict, _note, classification = sanity._decide_verdict(
+            "ssim_std", "lower_better", 0.0, 0.0099, self._FAIL, "structural"
+        )
+        assert verdict == "DIAGNOSTIC"
+        assert classification == "dispersion"
+
+    def test_single_stream_failure_is_diagnostic(self) -> None:
+        verdict, _note, _c = sanity._decide_verdict(
+            "temporal_consistency_compressed",
+            "higher_better",
+            0.97,
+            0.89,
+            self._FAIL,
+            "structural",
+        )
+        assert verdict == "DIAGNOSTIC"
+
+    def test_diagnostic_metric_failure_is_diagnostic(self) -> None:
+        verdict, _note, _c = sanity._decide_verdict(
+            "render_ms", "higher_better", 3952.0, 65.0, self._FAIL, "solid"
+        )
+        assert verdict == "DIAGNOSTIC"
+
+    def test_no_failures_is_pass(self) -> None:
+        verdict, _note, _c = sanity._decide_verdict(
+            "ssim", "higher_better", 1.0, 0.0001, [], "solid"
+        )
+        assert verdict == "PASS"
+
+    def test_flat_identity_equals_pathological_is_inconclusive(self) -> None:
+        verdict, _note, _c = sanity._decide_verdict(
+            "compression_ratio", "flat", 1.0, 1.0, [], "solid"
+        )
+        assert verdict == "INCONCLUSIVE"
+
+
 class TestCoalesceByteIdenticalLevels:
     """The lossy arm of sanity.py should drop consecutive byte-identical
     compressions before running the monotonicity check, because saturated
