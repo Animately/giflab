@@ -372,8 +372,8 @@ class TestTemporalArtifactEdgeCases:
         # Create a single frame GIF
         img = Image.new("RGB", (32, 32), (255, 0, 0))
 
-        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as tmp:
-            gif_path = Path(tmp.name)
+        with tempfile.TemporaryDirectory() as _td:
+            gif_path = Path(_td) / "single_frame.gif"
             img.save(gif_path)
 
             try:
@@ -531,8 +531,8 @@ class TestTemporalArtifactEdgeCases:
     def test_invalid_gif_file(self):
         """Test temporal detection with invalid GIF file."""
         # Create a file that's not a valid GIF
-        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as tmp:
-            invalid_gif = Path(tmp.name)
+        with tempfile.TemporaryDirectory() as _td:
+            invalid_gif = Path(_td) / "invalid.gif"
             invalid_gif.write_text("This is not a GIF file")
 
             try:

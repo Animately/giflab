@@ -1,6 +1,7 @@
 """Tests for version helper functions with stub binaries."""
 
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,6 +16,13 @@ from giflab.lossy import (
 from giflab.system_tools import _extract_version, _run_version_cmd
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="These tests drive version detection through POSIX bash stub binaries "
+    "(#!/bin/bash scripts), which Windows cannot execute (WinError 193: not a valid "
+    "Win32 application). The version helpers themselves are cross-platform; only this "
+    "stub-based harness is POSIX-only.",
+)
 class TestVersionHelpers:
     """Test version helper functions with stub binaries."""
 

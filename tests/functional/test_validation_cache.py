@@ -1,5 +1,6 @@
 """Unit tests for ValidationCache."""
 
+import contextlib
 import hashlib
 import json
 import sqlite3
@@ -70,8 +71,11 @@ class TestValidationCache:
         assert cache.ttl_seconds == 1800
         assert cache_path.exists()
 
-        # Check database tables exist
-        with sqlite3.connect(str(cache_path)) as conn:
+        # Check database tables exist. contextlib.closing() guarantees the
+        # connection is closed before the temp dir is torn down — `with
+        # sqlite3.connect(...)` only commits, it does not close, and on Windows
+        # the lingering handle locks the .db file (WinError 32) at cleanup.
+        with contextlib.closing(sqlite3.connect(str(cache_path))) as conn:
             cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             tables = {row[0] for row in cursor}
             assert "validation_cache" in tables

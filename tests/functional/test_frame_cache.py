@@ -105,6 +105,11 @@ class TestFrameCacheEntry:
             file_mtime=123456.789,
         )
 
+        # Force an old timestamp first so the refresh is detectable even on
+        # Windows, whose time.time() resolution is coarse enough that two
+        # back-to-back calls can return the identical value — making a strict
+        # ``>`` against a just-set timestamp flaky.
+        entry.last_accessed = 1.0
         initial_time = entry.last_accessed
         entry.update_access()
 

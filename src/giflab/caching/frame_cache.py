@@ -8,6 +8,8 @@ import threading
 import time
 import zlib
 from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -177,9 +179,31 @@ class FrameCache:
             self._init_database()
             self._cleanup_expired()
 
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
+        """Yield a SQLite connection that commits on success and always closes.
+
+        ``with sqlite3.connect(...) as conn`` manages only the *transaction*
+        (commit on success, rollback on error); it does NOT close the
+        connection. On POSIX, CPython refcounting closes it promptly, but on
+        Windows the lingering handle keeps the database file locked, so a
+        following ``TemporaryDirectory`` teardown raises
+        ``PermissionError: [WinError 32]``. Closing here keeps teardown
+        cross-platform-safe without changing transaction semantics.
+        """
+        conn = sqlite3.connect(str(self.disk_path))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _init_database(self) -> None:
         """Initialize SQLite database for disk cache."""
-        with sqlite3.connect(str(self.disk_path)) as conn:
+        with self._connect() as conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS frame_cache (
@@ -468,7 +492,7 @@ class FrameCache:
             if current_size + data_size > self.disk_limit_bytes:
                 self._evict_disk_entries(data_size)
 
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO frame_cache
@@ -498,7 +522,7 @@ class FrameCache:
     def _load_from_disk(self, cache_key: str) -> FrameCacheEntry | None:
         """Load entry from disk cache."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     SELECT data FROM frame_cache WHERE cache_key = ?
@@ -529,7 +553,7 @@ class FrameCache:
     def _invalidate_disk_entry(self, cache_key: str) -> None:
         """Remove entry from disk cache."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     "DELETE FROM frame_cache WHERE cache_key = ?", (cache_key,)
                 )
@@ -540,7 +564,7 @@ class FrameCache:
     def _get_disk_cache_size(self) -> int:
         """Get total size of disk cache in bytes."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 cursor = conn.execute("SELECT SUM(data_size) FROM frame_cache")
                 result = cursor.fetchone()[0]
                 return result if result else 0
@@ -551,7 +575,7 @@ class FrameCache:
     def _evict_disk_entries(self, needed_bytes: int) -> None:
         """Evict oldest entries from disk to make space."""
         try:
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 # Get entries sorted by last access time
                 cursor = conn.execute(
                     """
@@ -587,7 +611,7 @@ class FrameCache:
         """Remove expired entries from disk cache."""
         try:
             cutoff_time = time.time() - self.ttl_seconds
-            with sqlite3.connect(str(self.disk_path)) as conn:
+            with self._connect() as conn:
                 conn.execute(
                     """
                     DELETE FROM frame_cache WHERE created_at < ?
@@ -645,7 +669,7 @@ class FrameCache:
 
             if self.enabled:
                 try:
-                    with sqlite3.connect(str(self.disk_path)) as conn:
+                    with self._connect() as conn:
                         conn.execute("DELETE FROM frame_cache")
                         conn.commit()
                 except Exception as e:
@@ -671,7 +695,7 @@ class FrameCache:
             # Add disk cache stats
             if self.enabled:
                 try:
-                    with sqlite3.connect(str(self.disk_path)) as conn:
+                    with self._connect() as conn:
                         cursor = conn.execute("SELECT COUNT(*) FROM frame_cache")
                         stats.disk_entries = cursor.fetchone()[0]
                 except Exception:
