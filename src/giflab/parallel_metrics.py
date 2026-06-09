@@ -4,9 +4,11 @@ This module provides parallelization infrastructure for frame-level metrics
 to significantly reduce processing time for multi-frame GIFs.
 """
 
+import atexit
 import logging
 import multiprocessing as mp
 import os
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -18,6 +20,72 @@ from typing import Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+# --- Worker-leak guard --------------------------------------------------------
+#
+# ``ProcessPoolExecutor`` only reaps its worker processes when ``shutdown()`` is
+# called. If the parent exits abnormally while a pool is live — an uncaught
+# error or ``KeyboardInterrupt`` propagating out of ``_process_with_pool``, or a
+# fatal signal — the workers are never told to stop and re-parent to the init
+# process (launchd / PID 1), lingering at ~100 MB RSS each and accumulating
+# across sessions (observed: a 2-day-old batch of orphans). See task
+# ``giflab-processpool-worker-leak-on-crash``.
+#
+# This registry tracks every executor that is currently mid-flight inside
+# ``_process_with_pool``. An ``atexit`` hook (and the existing SIGTERM/SIGINT
+# handlers in ``multiprocessing_support``, which run before interpreter exit)
+# drains it on the way down, force-terminating any worker the normal teardown
+# did not reach. ``stdlib``'s own ``concurrent.futures`` atexit hook joins
+# workers with ``wait=True`` and can itself deadlock on a *broken* pool — the
+# exact hang PR #53 fixed — so we deliberately *terminate* rather than join.
+_LIVE_PROCESS_EXECUTORS: set[ProcessPoolExecutor] = set()
+_LIVE_EXECUTORS_LOCK = threading.Lock()
+
+
+def _terminate_pool_workers(executor: ProcessPoolExecutor) -> None:
+    """Force-kill any worker processes still alive under *executor*.
+
+    ``ProcessPoolExecutor._processes`` maps pid -> ``Process``. We terminate
+    rather than ``join`` because a broken pool's queue-feeder thread can hang a
+    ``join`` indefinitely (CPython ``_wait_for_tstate_lock``); a terminate is
+    always safe and never blocks. Best-effort: a process that has already
+    exited, or an executor that never started its workers, is a no-op.
+    """
+    processes = getattr(executor, "_processes", None) or {}
+    for proc in list(processes.values()):
+        try:
+            if proc.is_alive():
+                proc.terminate()
+        except Exception:  # pragma: no cover - defensive, OS races
+            pass
+
+
+def _reap_live_process_executors() -> None:
+    """Tear down every still-registered process pool, terminating its workers.
+
+    Invoked from ``atexit`` (and reachable from signal-driven shutdown) so that
+    an abnormal parent exit cannot leave orphaned ``multiprocessing.spawn``
+    workers behind. Uses ``wait=False`` to avoid the broken-pool join deadlock,
+    then terminates any worker the non-blocking shutdown did not stop.
+    """
+    with _LIVE_EXECUTORS_LOCK:
+        executors = list(_LIVE_PROCESS_EXECUTORS)
+        _LIVE_PROCESS_EXECUTORS.clear()
+    for executor in executors:
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # pragma: no cover - defensive
+            pass
+        _terminate_pool_workers(executor)
+
+
+# Reap on normal interpreter exit. The SIGTERM/SIGINT handlers installed in
+# ``giflab.multiprocessing_support`` log-and-fall-through to the same
+# interpreter-shutdown path, so this hook also covers the common kill signals.
+# (SIGKILL / ``kill -9`` is uncatchable by design — nothing in Python can reap
+# on -9; the registry exists for every *recoverable* abnormal exit.)
+atexit.register(_reap_live_process_executors)
 
 
 @dataclass
@@ -226,6 +294,13 @@ class ParallelMetricsCalculator:
         # executor lifecycle by hand lets us tear a broken pool down with
         # ``wait=False`` and re-raise so the caller can fall back cleanly.
         executor = ProcessPoolExecutor(max_workers=self.config.max_workers)
+        # Register the live executor so the atexit reaper can terminate its
+        # workers if the parent exits abnormally mid-call (uncaught error,
+        # KeyboardInterrupt, fatal signal). Without this, an abnormal exit on
+        # any path *other than* the two handled below would orphan the workers.
+        with _LIVE_EXECUTORS_LOCK:
+            _LIVE_PROCESS_EXECUTORS.add(executor)
+        broken = False
         try:
             # Submit all chunks
             futures = {
@@ -250,16 +325,33 @@ class ParallelMetricsCalculator:
                     # Return empty results for failed chunk
                     results[chunk_idx] = {}
         except BrokenProcessPool:
+            broken = True
             logger.warning(
                 "Process pool broke (a worker terminated abruptly); tearing it "
                 "down without waiting and falling back to sequential metrics."
             )
-            # wait=False avoids the join deadlock; cancel_futures drops the
-            # still-pending work instead of trying to run it on a dead pool.
-            executor.shutdown(wait=False, cancel_futures=True)
             raise
-        else:
-            executor.shutdown(wait=True)
+        except BaseException:
+            # Any other abnormal exit — KeyboardInterrupt, MemoryError,
+            # SystemExit, or a non-BrokenProcessPool error from as_completed —
+            # used to skip both the BrokenProcessPool branch and the clean
+            # ``else`` shutdown, orphaning every spawned worker. Treat it like a
+            # broken pool: tear down without waiting (a wait=True join could
+            # itself deadlock) and re-raise.
+            broken = True
+            raise
+        finally:
+            # Single teardown point reached on EVERY exit path. A clean run
+            # joins workers (wait=True). Any abnormal exit uses wait=False to
+            # dodge the broken-pool join deadlock, then force-terminates any
+            # worker the non-blocking shutdown left alive.
+            if broken:
+                executor.shutdown(wait=False, cancel_futures=True)
+                _terminate_pool_workers(executor)
+            else:
+                executor.shutdown(wait=True)
+            with _LIVE_EXECUTORS_LOCK:
+                _LIVE_PROCESS_EXECUTORS.discard(executor)
 
         return [r for r in results if r is not None]
 
