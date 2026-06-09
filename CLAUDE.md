@@ -233,6 +233,8 @@ These tests are **correctly skipped** during normal test runs:
 
 ## ⚠️ Known gotchas
 
+**Windows is not a CI target — there is intentionally no Windows job.** GifLab runs on macOS/Linux only; the `Windows External Tools Tests` job was removed from `ci.yml` (PR #51, 2026-06-09) because it was a perpetually-red, non-required check that added noise without a signal we act on. CI runs only `Fast Tests` ×2 (the required gate), `Core Tests` ×2, `External Tools (Ubuntu)`, `macOS Compatibility`, and `Lint and Type Check`. **A missing Windows check is expected — do not "restore" it or treat its absence as a regression.** Don't add Windows-specific CI, test skips, or platform shims unless someone explicitly makes Windows a target.
+
 **`gh pr edit --body ...` can silently exit 1.** GitHub's "Projects (classic) deprecated" GraphQL error causes `gh pr edit` to exit non-zero even when the body would otherwise update fine. Agents that don't check the exit code think the edit succeeded — but the body never lands. Observed in the [[giflab-rollout-2026-05-26]] rollout during PR #22's round-2 follow-up.
 
 **Workaround**: use the REST API directly:
