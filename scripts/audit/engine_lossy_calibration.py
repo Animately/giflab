@@ -27,8 +27,47 @@ Usage:
     gifsicle's error-bounded lossy produced banding_score == 0 at every level and
     a smooth composite curve (>=0.90 at lossy 100), while animately cliffs early.
     Conclusion: gifsicle does not exhibit the posterisation failure mode the
-    ceiling guards against, so it gets NO content ceiling. gifski / imagemagick /
-    ffmpeg remain uncalibrated (re-run this with ``--engines`` to assess them).
+    ceiling guards against, so it gets NO content ceiling.
+
+2026-06-09 finding (gifski / ffmpeg / imagemagick) — all THREE get NO ceiling,
+but for two structurally different reasons. Be honest about which:
+
+    Rich RGB gradient — composite_quality by public lossy level (banding == 0.00
+    at EVERY measurement for all three, across all four content archetypes):
+       engine   L=0    L=40   L=80   L=100
+       gifski  0.920  0.734  0.518  0.398   <- real axis, GRADUAL, banding-free
+       ffmpeg  0.492  0.492  0.492  0.492   <- FLAT: lossy_level is INERT
+  imagemagick  1.000  1.000  1.000  1.000   <- FLAT: lossy_level is INERT
+
+    - gifski has a REAL lossy axis (4 distinct output md5s; bytes 15.0->2.3 kB
+      over L=0->100). Its composite declines smoothly with banding_score == 0 at
+      every level — gifsicle's profile, no posterisation cliff. NO ceiling.
+    - ffmpeg / imagemagick ``lossy_level`` is INERT for GIF output: the wrappers
+      map it to ``-q:v`` (a video-DCT knob) / ``-quality`` (a PNG/JPEG zlib knob)
+      respectively, NEITHER of which affects GIF pixels. Verified by md5 probe:
+      output is BYTE-IDENTICAL at every level (same hash, same size). So their
+      flat curves are NOT "graceful degradation" — no lossy axis is exercised at
+      all, hence they cannot cliff. imagemagick's flat composite == 1.000 means
+      "nothing changed" (re-saved as-is), NOT "perfect lossy". Do not misread a
+      flat/declining curve as evidence of graceful degradation unless the output
+      bytes actually vary across levels.
+
+    Caveat (evidence quality, not a calibration error): on tiny 4-frame
+    synthetic GIFs the metrics pipeline logs frame-count / FPS-drift warnings for
+    gifski; these slightly perturb gifski's ABSOLUTE composite but not the
+    verdict (banding == 0, monotone, real axis). Fixing the two inert wrappers to
+    actually drive GIF lossiness is a separate engine-fidelity task, NOT a
+    ceiling-calibration change — out of scope here.
+
+    Conclusion: all four non-animately engines are now calibrated and none needs
+    a content ceiling. The ``engine == "animately"`` gate in public_api.compress
+    is correct and fully data-backed.
+
+Note: the default ``LEVELS`` grid stops at 100 (the public lossy range). It used
+to include 120, which crashed the imagemagick column: that wrapper maps
+``quality = 100 - lossy_level`` with no clamp, so level 120 -> quality -20 ->
+``ValueError``. Pass ``--levels`` explicitly to probe above 100 (and expect that
+crash for imagemagick until its wrapper clamps quality).
 """
 
 from __future__ import annotations
@@ -113,7 +152,11 @@ CONTENTS = {
     "data_viz_flat": _data_viz_flat,
     "rich_gradient": _rich_gradient,
 }
-LEVELS = [0, 10, 20, 30, 40, 60, 80, 100, 120]
+# Default grid stops at 100 (the public lossy range). Levels above 100 are not
+# part of the public scale and crash the imagemagick column (its wrapper does
+# ``quality = 100 - lossy_level`` with no clamp, so level 120 -> quality -20 ->
+# ValueError). Pass ``--levels`` explicitly to probe above 100 if needed.
+LEVELS = [0, 10, 20, 30, 40, 60, 80, 100]
 
 
 def main() -> int:

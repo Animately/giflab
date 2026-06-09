@@ -301,15 +301,26 @@ class ClassifierConfig:
     Engine scope (data-backed, NOT a placeholder). The ceiling is applied to
     ``animately`` only. It exists to prevent the posterisation / quality-cliff
     that animately's re-quantising lossy produces on photographic / gradient /
-    data-viz content (composite cliffs ~1.0 → 0.73 by lossy 40). A 2026-06-05
-    calibration (``scripts/audit/engine_lossy_calibration.py``; see
-    ``docs/metrics-audit/2026-06-03/post-fix-verdict.md``) found gifsicle's
-    error-bounded lossy degrades GRADUALLY with no such cliff (composite stays
-    >=0.92 to lossy 120, banding 0 across all content types) — so gifsicle needs
-    NO content ceiling; clamping it would discard good compression for no
-    benefit. gifski / imagemagick / ffmpeg remain uncalibrated and likewise skip
-    the ceiling until a calibration demonstrates a cliff failure mode AND
-    supplies per-engine ceiling values (the values below are animately-specific).
+    data-viz content (composite cliffs ~1.0 → 0.73 by lossy 40). All four
+    non-animately lossy engines are calibrated
+    (``scripts/audit/engine_lossy_calibration.py``; see
+    ``docs/metrics-audit/2026-06-03/post-fix-verdict.md``) and none needs a
+    content ceiling — but for two structurally different reasons:
+
+    * gifsicle (2026-06-05) and gifski (2026-06-09) have a REAL lossy axis that
+      degrades GRADUALLY with ``banding_score == 0`` at every level — no
+      posterisation cliff — so clamping them would discard good compression for
+      no benefit.
+    * ffmpeg and imagemagick (2026-06-09) have an INERT ``lossy_level`` for GIF
+      output: their wrappers map it to ``-q:v`` / ``-quality`` (video-DCT / zlib
+      knobs that do not touch GIF pixels), so output is BYTE-IDENTICAL across all
+      levels (md5 probe). With no lossy axis exercised they cannot cliff — their
+      flat curves are "nothing changed", NOT "graceful degradation".
+
+    The values below are animately-specific. ``ClassifierConfig`` has no
+    per-engine dimension because the data says no second engine needs one; if a
+    future engine is shown to cliff, that dimension must be added before granting
+    it a ceiling (do not build it speculatively).
     """
 
     # Flat-colour content (categorical charts AND flat logos / cartoons / UI /

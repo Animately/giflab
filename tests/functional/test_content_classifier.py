@@ -426,22 +426,55 @@ def test_frame_drop_and_clamp_warnings_co_occur(tmp_path: Path) -> None:
     )
 
 
-def test_ceiling_skipped_for_non_animately_engine(tmp_path: Path) -> None:
-    """The ceiling is animately-calibrated only — other lossy engines skip
-    classification entirely (no clamp, no warning)."""
+# engine → the wrapper symbol looked up inside ``giflab.public_api`` (the patch
+# target). Every non-animately lossy engine is calibrated (2026-06-09,
+# scripts/audit/engine_lossy_calibration.py) and needs NO content ceiling:
+#   - gifsicle / gifski: measured GRADUAL, banding-free degradation (no
+#     posterisation cliff — the failure mode the ceiling guards against).
+#   - ffmpeg / imagemagick: their public ``lossy_level`` is INERT for GIF output
+#     (byte-identical output across all levels — ``-q:v`` / ``-quality`` are
+#     video-DCT / zlib knobs that do not touch GIF pixels), so they cannot cliff.
+# Either way the ceiling must never fire for them. This freezes that invariant.
+_NON_ANIMATELY_WRAPPER_SYMBOLS = {
+    "gifsicle": "GifsicleLossyCompressor",
+    "gifski": "GifskiLossyCompressor",
+    "imagemagick": "ImageMagickLossyCompressor",
+    "ffmpeg": "FFmpegLossyCompressor",
+}
+
+
+@pytest.mark.parametrize(
+    "engine", sorted(_NON_ANIMATELY_WRAPPER_SYMBOLS), ids=lambda e: e
+)
+def test_ceiling_skipped_for_non_animately_engine(
+    engine: str, tmp_path: Path
+) -> None:
+    """The ceiling is animately-calibrated only — every other lossy engine skips
+    classification entirely (no clamp, no warning), even at a ``lossy_level``
+    (60) well above animately's photographic ceiling (20).
+
+    Characterization lock: the ``engine == "animately"`` gate already restricts
+    the ceiling to animately, so this passes immediately for all four engines.
+    It freezes the data-backed verdict that none of them needs a ceiling — a
+    future widening of the gate to ``engine in {...}`` would silently start
+    clamping these engines and break this test.
+    """
     gif = _save_synthetic_gif(tmp_path / "gradient.gif", "gradient", frames=12)
-    out_path = tmp_path / "gifsicle_out.gif"
+    out_path = tmp_path / f"{engine}_out.gif"
     instance = MagicMock()
     instance.apply.side_effect = lambda *a, **kw: (
         out_path.write_bytes(b"\x00" * 256),
-        {"render_ms": 1, "engine": "gifsicle", "command": "x", "kilobytes": 1},
+        {"render_ms": 1, "engine": engine, "command": "x", "kilobytes": 1},
     )[1]
     cls = MagicMock(return_value=instance)
     cls.available = MagicMock(return_value=True)
-    cls.version = MagicMock(return_value="gifsicle-test")
+    cls.version = MagicMock(return_value=f"{engine}-test")
 
-    with patch("giflab.public_api.GifsicleLossyCompressor", cls):
-        result = compress(gif, out_path, engine="gifsicle", params={"lossy_level": 60})
+    symbol = _NON_ANIMATELY_WRAPPER_SYMBOLS[engine]
+    with patch(f"giflab.public_api.{symbol}", cls):
+        result = compress(gif, out_path, engine=engine, params={"lossy_level": 60})
 
+    # lossy_level passed through UNCLAMPED (60, not animately's photographic 20).
     assert instance.apply.call_args.kwargs["params"]["lossy_level"] == 60
+    # No clamp warning (and no other warning) emitted.
     assert result.warnings == ()
