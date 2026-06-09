@@ -4,9 +4,12 @@ This module provides parallelization infrastructure for frame-level metrics
 to significantly reduce processing time for multi-frame GIFs.
 """
 
+import atexit
 import logging
 import multiprocessing as mp
 import os
+import signal
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -18,6 +21,229 @@ from typing import Any
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+# --- Worker-leak guard --------------------------------------------------------
+#
+# ``ProcessPoolExecutor`` only reaps its worker processes when ``shutdown()`` is
+# called. If the parent exits abnormally while a pool is live — an uncaught
+# error or ``KeyboardInterrupt`` propagating out of ``_process_with_pool``, or a
+# fatal signal — the workers are never told to stop and re-parent to the init
+# process (launchd / PID 1), lingering at ~100 MB RSS each and accumulating
+# across sessions (observed: a 2-day-old batch of orphans). See task
+# ``giflab-processpool-worker-leak-on-crash``.
+#
+# This registry tracks every executor that is currently mid-flight inside
+# ``_process_with_pool``. Three mechanisms drain it, one per way the parent can
+# go down:
+#
+#   * Normal interpreter exit (a ``sys.exit`` / falling off ``main`` / an
+#     uncaught exception that propagates all the way out) — the ``atexit`` hook
+#     below.
+#   * ``SIGTERM`` (plain ``kill``, the first signal process managers send) —
+#     a dedicated handler installed by ``_install_sigterm_reaper`` below.
+#     Without it ``SIGTERM`` defaults to ``SIG_DFL`` (immediate terminate),
+#     which runs *no* ``atexit`` hooks, so the workers would orphan.
+#   * ``SIGINT`` (Ctrl-C) — *not* handled here. Python's default ``SIGINT``
+#     disposition raises ``KeyboardInterrupt`` into ``_process_with_pool``,
+#     where the ``except BaseException`` branch tears the pool down inline.
+#
+# ``stdlib``'s own ``concurrent.futures`` atexit hook joins workers with
+# ``wait=True`` and can itself deadlock on a *broken* pool — the exact hang
+# PR #53 fixed — so every drain path here deliberately *terminates* rather
+# than joins.
+#
+# Note: ``giflab.multiprocessing_support`` installs its own ``SIGTERM``/
+# ``SIGINT`` handlers, but (a) that module is not imported on the metrics path
+# (it is absent from ``sys.modules`` after ``import giflab.parallel_metrics``),
+# and (b) its handler only *logs and returns* — it neither exits nor re-raises,
+# so it would not trigger any ``atexit``-style reaping even if loaded, and it
+# would actively swallow the ``KeyboardInterrupt`` the ``SIGINT`` path relies
+# on. We therefore do our own signal handling rather than depend on it.
+_LIVE_PROCESS_EXECUTORS: set[ProcessPoolExecutor] = set()
+_LIVE_EXECUTORS_LOCK = threading.Lock()
+
+
+def _pool_worker_pids(executor: ProcessPoolExecutor) -> list[int]:
+    """Snapshot the worker OS PIDs an *executor* currently tracks.
+
+    Must be read BEFORE ``executor.shutdown()``: the stdlib clears
+    ``_processes`` to ``None`` partway through ``shutdown``, so a snapshot taken
+    afterwards finds nothing to reap and the workers orphan. Filters on a
+    non-None pid only — NOT on ``is_alive()``: ``Process.is_alive`` routes
+    through ``Popen.poll()``, which is unreliable from inside our signal
+    handler or a half-torn-down pool; ``os.kill`` later treats an already-dead
+    PID as a graceful no-op, so a populated-pid check is the honest gate.
+    """
+    processes = getattr(executor, "_processes", None) or {}
+    return [proc.pid for proc in list(processes.values()) if getattr(proc, "pid", None)]
+
+
+def _terminate_pool_workers(executor: ProcessPoolExecutor) -> None:
+    """Force-kill any worker processes still alive under *executor*.
+
+    Snapshots the worker PIDs (see ``_pool_worker_pids`` for why this must
+    precede ``shutdown``) and signals them via ``_terminate_worker_pids``.
+    Best-effort: an executor that never started its workers is a no-op.
+    """
+    _terminate_worker_pids(_pool_worker_pids(executor))
+
+
+def _terminate_worker_pids(pids: list[int]) -> None:
+    """Force-kill the given worker *pids*, escalating ``SIGTERM`` -> ``SIGKILL``.
+
+    We signal the worker OS processes directly with ``os.kill`` on their PIDs —
+    not via ``Process.terminate()`` / ``Process.kill()``. Those route through
+    the worker's ``Popen`` object, which (verified empirically) becomes a no-op
+    when called from inside our ``SIGTERM`` handler or while the pool is being
+    torn down: the SIGTERM is delivered to the parent but the worker survives
+    and re-parents to launchd — the exact orphan this guard exists to prevent.
+    ``os.kill(pid, ...)`` hits the kernel directly and always lands.
+
+    Escalation: ``SIGTERM`` first (lets the worker exit cleanly), a short
+    bounded reap, then an uncatchable ``SIGKILL`` for any survivor. Reaping is a
+    non-blocking ``os.waitpid(..., WNOHANG)`` against PIDs we are the parent of,
+    so the workers do not linger as zombies. Best-effort: an already-exited PID
+    is a no-op.
+    """
+    if not pids:
+        return
+
+    def _send(pid: int, sig: int) -> None:
+        try:
+            os.kill(pid, sig)
+        except OSError:  # already reaped / not ours — graceful no-op
+            pass
+
+    # SIGTERM first.
+    for pid in pids:
+        _send(pid, signal.SIGTERM)
+    survivors = _reap_pids(pids, timeout=2.0)
+    # SIGKILL anything still standing.
+    for pid in survivors:
+        _send(pid, signal.SIGKILL)
+    _reap_pids(survivors, timeout=2.0)
+
+
+def _reap_pids(pids: list[int], timeout: float) -> list[int]:
+    """Wait up to *timeout* for *pids* to die; return the PIDs still alive.
+
+    Reaps children we own with a non-blocking ``waitpid`` so they do not linger
+    as zombies; for PIDs we are not the parent of (the registry can outlive the
+    direct parent relationship), liveness is probed with signal ``0``.
+    """
+    deadline = time.monotonic() + timeout
+    remaining = list(pids)
+    while remaining and time.monotonic() < deadline:
+        still: list[int] = []
+        for pid in remaining:
+            try:
+                reaped_pid, _ = os.waitpid(pid, os.WNOHANG)
+                if reaped_pid == 0:
+                    # Still running and we are its parent.
+                    still.append(pid)
+            except ChildProcessError:
+                # Not our child (or already reaped) — fall back to signal 0.
+                try:
+                    os.kill(pid, 0)
+                    still.append(pid)
+                except OSError:
+                    pass  # gone
+            except OSError:
+                pass  # gone
+        remaining = still
+        if remaining:
+            time.sleep(0.02)
+    return remaining
+
+
+def _reap_live_process_executors() -> None:
+    """Tear down every still-registered process pool, terminating its workers.
+
+    Invoked from ``atexit`` and from the ``SIGTERM`` handler so that an abnormal
+    parent exit cannot leave orphaned ``multiprocessing.spawn`` workers behind.
+
+    Order matters: we snapshot the worker PIDs and kill them by PID FIRST, then
+    call ``executor.shutdown(wait=False)`` for the management-thread cleanup.
+    Doing shutdown first would clear ``_processes`` to ``None`` before we could
+    read the PIDs (the original leak), and ``wait=False`` is required regardless
+    to avoid the broken-pool join deadlock PR #53 fixed.
+    """
+    with _LIVE_EXECUTORS_LOCK:
+        executors = list(_LIVE_PROCESS_EXECUTORS)
+        _LIVE_PROCESS_EXECUTORS.clear()
+    for executor in executors:
+        # Snapshot + kill the workers BEFORE shutdown nulls ``_processes``.
+        _terminate_worker_pids(_pool_worker_pids(executor))
+        try:
+            executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:  # pragma: no cover - defensive
+            pass
+
+
+# Reap on normal interpreter exit (``sys.exit``, falling off ``main``, or an
+# uncaught exception propagating out). This does NOT cover ``SIGTERM``: a
+# ``SIG_DFL`` terminate runs no ``atexit`` hooks, so ``SIGTERM`` needs its own
+# handler (installed just below). It also does not cover ``SIGINT``/Ctrl-C —
+# that surfaces as ``KeyboardInterrupt`` inside ``_process_with_pool`` and is
+# torn down there. ``SIGKILL`` / ``kill -9`` is uncatchable by design — nothing
+# in Python can reap on -9.
+atexit.register(_reap_live_process_executors)
+
+
+def _install_sigterm_reaper() -> None:
+    """Install a ``SIGTERM`` handler that reaps live pools, then terminates.
+
+    A plain ``kill`` (``SIGTERM``) is the default signal a process manager — or
+    a human — sends first, and the task's reproduction is an explicit kill.
+    Without a handler, ``SIGTERM`` runs the ``SIG_DFL`` immediate terminate,
+    which fires *no* ``atexit`` hooks, so every live ``ProcessPoolExecutor``'s
+    workers would orphan (re-parent to launchd / PID 1). This handler closes
+    that gap: it drains the live-executor registry, chains to any handler that
+    was already installed (so we do not silently clobber e.g.
+    ``multiprocessing_support``'s, if it loaded first), then restores the
+    default disposition and re-raises ``SIGTERM`` so the process still exits
+    with the conventional ``128 + SIGTERM`` status rather than swallowing the
+    signal.
+
+    Only installed when the current ``SIGTERM`` disposition is the default or a
+    plain previously-registered handler — never inside a worker (where the main
+    interpreter's signal machinery is not in play) and never if signals are
+    unavailable on this platform.
+    """
+    try:
+        previous = signal.getsignal(signal.SIGTERM)
+    except (ValueError, OSError):  # pragma: no cover - non-main-thread / no signals
+        return
+
+    # Idempotent: if our reaper is already the SIGTERM handler (e.g. a module
+    # reload re-ran this), do nothing rather than chain a copy onto itself.
+    if getattr(previous, "_giflab_sigterm_reaper", False):
+        return
+
+    def _handler(signum: int, frame: Any) -> None:
+        try:
+            _reap_live_process_executors()
+        finally:
+            # Chain to a real previously-installed handler if there was one,
+            # then fall through to the default terminate. ``SIG_IGN`` /
+            # ``SIG_DFL`` are sentinels, not callables — skip them.
+            if callable(previous):
+                previous(signum, frame)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signum)
+
+    _handler._giflab_sigterm_reaper = True  # type: ignore[attr-defined]
+    try:
+        signal.signal(signal.SIGTERM, _handler)
+    except (ValueError, OSError):  # pragma: no cover - not on the main thread
+        # ``signal.signal`` only works on the main thread of the main
+        # interpreter; if this module is first imported off-thread we simply
+        # rely on the atexit hook for the recoverable cases.
+        pass
+
+
+_install_sigterm_reaper()
 
 
 @dataclass
@@ -226,6 +452,15 @@ class ParallelMetricsCalculator:
         # executor lifecycle by hand lets us tear a broken pool down with
         # ``wait=False`` and re-raise so the caller can fall back cleanly.
         executor = ProcessPoolExecutor(max_workers=self.config.max_workers)
+        # Register the live executor so the out-of-band reapers (the ``atexit``
+        # hook for a normal interpreter exit, and the ``SIGTERM`` handler for a
+        # plain ``kill``) can terminate its workers if the parent dies before
+        # the ``finally`` below runs. The ``finally`` itself handles the two
+        # in-band paths — a clean run and any exception, including the
+        # ``KeyboardInterrupt`` Ctrl-C raises — and unregisters the executor.
+        with _LIVE_EXECUTORS_LOCK:
+            _LIVE_PROCESS_EXECUTORS.add(executor)
+        broken = False
         try:
             # Submit all chunks
             futures = {
@@ -250,16 +485,34 @@ class ParallelMetricsCalculator:
                     # Return empty results for failed chunk
                     results[chunk_idx] = {}
         except BrokenProcessPool:
+            broken = True
             logger.warning(
                 "Process pool broke (a worker terminated abruptly); tearing it "
                 "down without waiting and falling back to sequential metrics."
             )
-            # wait=False avoids the join deadlock; cancel_futures drops the
-            # still-pending work instead of trying to run it on a dead pool.
-            executor.shutdown(wait=False, cancel_futures=True)
             raise
-        else:
-            executor.shutdown(wait=True)
+        except BaseException:
+            # Any other abnormal exit — KeyboardInterrupt, MemoryError,
+            # SystemExit, or a non-BrokenProcessPool error from as_completed —
+            # used to skip both the BrokenProcessPool branch and the clean
+            # ``else`` shutdown, orphaning every spawned worker. Treat it like a
+            # broken pool: tear down without waiting (a wait=True join could
+            # itself deadlock) and re-raise.
+            broken = True
+            raise
+        finally:
+            # Single teardown point reached on EVERY exit path. A clean run
+            # joins workers (wait=True). Any abnormal exit force-terminates the
+            # workers by PID FIRST (snapshotting before shutdown nulls
+            # ``_processes``), then shuts the executor down with wait=False to
+            # dodge the broken-pool join deadlock.
+            if broken:
+                _terminate_pool_workers(executor)
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=True)
+            with _LIVE_EXECUTORS_LOCK:
+                _LIVE_PROCESS_EXECUTORS.discard(executor)
 
         return [r for r in results if r is not None]
 
