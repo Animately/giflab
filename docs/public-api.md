@@ -225,7 +225,7 @@ Eight optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`
 | `gmsd` | `[0.0, 1.0]` | Lower is better. |
 | `psnr` | `[0.0, 50.0]` dB | Higher is better. Values are reported in decibels; `50.0` is the cap (the internal `PSNR_MAX_DB` setting) and represents "effectively identical" candidates. |
 | `lpips` | `[0.0, 1.0]` | Lower is better. Perceptual distance per the LPIPS model; this is the mean across frames. |
-| `composite_quality` | `[0.0, 1.0]` (may be `NaN`) | Higher is better. The calibrated weighted aggregate of the underlying metrics. May be `NaN` when the majority of present contributor weight is unmeasurable (see [`composite_quality` — weights are a public contract](#composite_quality--weights-are-a-public-contract)). |
+| `composite_quality` | `[0.0, 1.0]` (may be `NaN`) | Higher is better. The calibrated weighted aggregate of the underlying metrics. May be `NaN` when half or more of the present contributor weight is unmeasurable (see [`composite_quality` — weights are a public contract](#composite_quality--weights-are-a-public-contract)). |
 
 #### `composite_quality` — weights are a public contract
 
@@ -243,7 +243,7 @@ Eight optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`
 
 Weights sum to 1.0.
 
-**NaN-aware weight redistribution.** When a contributor cannot be measured (returns `NaN`), its weight is redistributed proportionally across the contributors that *were* measured — the composite is never silently corrupted by a fabricated sentinel. If the **majority** of present weight is unmeasurable (`> COMPOSITE_NAN_THRESHOLD`, default 0.5), `composite_quality` itself is `NaN`. Consumers MUST treat the field as possibly-`NaN` and use NaN-aware comparisons.
+**NaN-aware weight redistribution.** When a contributor cannot be measured (returns `NaN`), its weight is redistributed proportionally across the contributors that *were* measured — the composite is never silently corrupted by a fabricated sentinel. If **half or more** of the present weight is unmeasurable (`>= COMPOSITE_NAN_THRESHOLD`, default 0.5 — so an exactly-50% split returns `NaN`), `composite_quality` itself is `NaN`. Consumers MUST treat the field as possibly-`NaN` and use NaN-aware comparisons.
 
 **Determinism — `lpips` contributor is forced on.** Because the redistribution above is contributor-set-dependent, `composite_quality` would otherwise return a *different* value depending on whether `lpips` happened to be co-requested (LPIPS gated off → `lpips_quality_mean` is `NaN` → its 4% weight redistributes; gated on → it contributes). To make the verdict number deterministic across request sets, **requesting `composite_quality` always forces the LPIPS computation on**, regardless of whether `"lpips"` is also in `metrics`. This is why `composite_quality` is not a cheap metric (see [Cost model](#cost-model)). Consequence: `measure(["composite_quality"])`, `measure(["composite_quality", "lpips"])`, and `measure(["composite_quality", "ssim", "psnr"])` all return the **same** `composite_quality` for the same file pair.
 

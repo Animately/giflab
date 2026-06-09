@@ -394,10 +394,11 @@ def test_measure_composite_quality_nan_propagates(
 ) -> None:
     """A legitimately-NaN composite surfaces as NaN, not a raise nor a sentinel.
 
-    composite_quality is NaN when the majority of present contributor weight is
-    unmeasurable (COMPOSITE_NAN_THRESHOLD). Per the metrics-accuracy policy
-    (NaN over sentinels), measure() must pass that NaN through to the public
-    field — not raise (the missing-key path) and not fabricate 0.5/1.0.
+    composite_quality is NaN when half or more of the present contributor weight
+    is unmeasurable (>= COMPOSITE_NAN_THRESHOLD; an exactly-50% split returns
+    NaN). Per the metrics-accuracy policy (NaN over sentinels), measure() must
+    pass that NaN through to the public field — not raise (the missing-key path)
+    and not fabricate 0.5/1.0.
     """
     ref, cand = two_gifs
     with patch(
