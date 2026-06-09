@@ -2,6 +2,33 @@
 
 All notable changes to giflab are documented here. Versioning follows semver within the 0.x major; see [docs/public-api.md](./docs/public-api.md) for the versioning policy that applies to the public API surface.
 
+## v0.4.0 — 2026-06-09
+
+### Changed (BREAKING): single-stream metric legacy bare-key aliases removed
+
+The legacy bare single-stream metric keys that *read* like original-vs-compressed pair signals but only ever measured the **compressed** stream have been removed. The honest `*_compressed` keys are now the canonical names. This is a breaking change to the metric **key schema** (hence the minor bump), affecting any consumer that read these keys off the result dict or from the SQLite store.
+
+**Removed bare keys** (use the `*_compressed` equivalent instead): `temporal_consistency`, `disposal_artifacts`, `flicker_excess`, `flicker_frame_ratio`, `flat_flicker_ratio`, `flat_region_count`, `temporal_pumping_score`, `quality_oscillation_frequency`, `lpips_t_mean` / `lpips_t_p95` / `lpips_t_max`.
+
+- Statistical siblings (`_std` / `_min` / `_max`) re-rooted onto `*_compressed`; `_pre` / `_post` / `_delta` / `_original` provenance kept.
+- Phase 6 optimized path emits `temporal_consistency_compressed` only (honest compressed-stream value).
+- `storage.py`: `QUALITY_METRIC_COLUMNS` + table schema renamed to `*_compressed` (idempotent `ALTER` auto-adds the new columns; stale bare columns in old DBs are ignored).
+- The public `measure()` surface was **not** affected by this change — it projects only the bare cheap-metric keys (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`), none of which were single-stream aliases.
+
+### Added: `composite_quality` on the public `measure()` surface
+
+`composite_quality` — giflab's calibrated weighted-aggregate **verdict number** — is now a recognised metric on the public API. The intended downstream consumer is gifprep, which adopts it as its single deterministic quality gate.
+
+- New entry in `SUPPORTED_METRICS`: `"composite_quality"`.
+- New `MeasureResult.composite_quality: float | None = None` field (backward-compatible — existing `MeasureResult` construction and callers that never request the metric are unaffected; the field defaults to `None`).
+- New `MetricIdentifier` `Literal` member and public→internal key mapping (the bare `composite_quality` key, projected through unchanged — no `_mean` sibling, no denormalisation).
+- **Determinism fix.** `composite_quality` redistributes a NaN contributor's weight across the measured contributors, so its value is *contributor-set-dependent*. The only request-gated contributor is `lpips` (`ENHANCED_LPIPS_WEIGHT` 0.04). Requesting `composite_quality` now **forces the LPIPS computation on** regardless of whether `"lpips"` is also requested, so `measure(["composite_quality"])`, `measure(["composite_quality", "lpips"])`, and `measure(["composite_quality", "ssim", "psnr"])` all return the **same** value for a given file pair. Cost consequence: `composite_quality` is **not** a cheap metric — it pays the LPIPS model load (see the [Cost model](./docs/public-api.md#cost-model)).
+- **NaN / environmental contract.** `composite_quality` may be `NaN` when half or more of the present contributor weight is unmeasurable (per `COMPOSITE_NAN_THRESHOLD`, a `>=` comparison — an exactly-50% split is `NaN`) — surfaced as a `NaN` float, never a fabricated sentinel. The `ssimulacra2` contributor (3% weight) is binary-gated, not request-gated, so `composite_quality` is deterministic **per environment** but can differ across machines that do/don't have the `ssimulacra2` binary on `PATH`. The per-dimension weights are now a documented public contract — see [`composite_quality` — weights are a public contract](./docs/public-api.md#composite_quality--weights-are-a-public-contract).
+
+### Not changed
+
+- CLI, dataset generation pipeline, matrix benchmark, feature extraction, engine parameter grids, internal tool interfaces, and the underlying metric *implementations* (`composite_quality` is exposed, not reimplemented).
+
 ## v0.3.2 — 2026-05-22
 
 ### Fixed: Public API FR-009 perceptual-cost contract

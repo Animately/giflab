@@ -67,7 +67,7 @@ Thin wrapper over `calculate_comprehensive_metrics`. Computes a configurable sub
 def measure(
     reference_path: Path,
     candidate_path: Path,
-    metrics: list[Literal["ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist"]] = ["ssim"],
+    metrics: list[Literal["ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist", "composite_quality"]] = ["ssim"],
 ) -> MeasureResult:
     ...
 
@@ -80,6 +80,7 @@ class MeasureResult:
     gmsd: float | None
     fsim: float | None
     chist: float | None
+    composite_quality: float | None  # calibrated verdict number (added v0.4.0)
     # Populated only for metrics requested; others remain None
 ```
 
