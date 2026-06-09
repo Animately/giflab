@@ -10,6 +10,7 @@ pass is mocked. This exercises the public→internal key mapping for
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from unittest.mock import patch
 
@@ -59,7 +60,15 @@ def test_measure_ssim_only(reference_and_candidate: tuple[Path, Path]) -> None:
     assert result.ssim is not None
     assert 0.0 <= result.ssim <= 1.0
     # All others must be unpopulated.
-    for other in ("ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist"):
+    for other in (
+        "ms_ssim",
+        "psnr",
+        "lpips",
+        "gmsd",
+        "fsim",
+        "chist",
+        "composite_quality",
+    ):
         assert getattr(result, other) is None
 
 
@@ -177,3 +186,56 @@ def test_measure_propagates_lpips_gate_to_deep_perceptual_config(
     assert (
         deep_config.get("disable_deep_perceptual") is False
     ), f"LPIPS requested → disable flag must be False; got config={deep_config}"
+
+
+def test_measure_composite_quality_e2e(
+    reference_and_candidate: tuple[Path, Path],
+) -> None:
+    """Real-pipeline composite_quality is a finite value in [0, 1].
+
+    Exercises the full ``calculate_comprehensive_metrics`` → composite path and
+    the public projection of the bare ``composite_quality`` key. The composite
+    is NaN-tolerant only in the pathological case where the majority of present
+    contributor weight is unmeasurable — for a real reference/candidate pair
+    with the cheap structural metrics all computable, it must be finite.
+    """
+    ref, cand = reference_and_candidate
+    result = measure(ref, cand, metrics=["composite_quality"])
+
+    assert isinstance(result, MeasureResult)
+    assert result.composite_quality is not None
+    # SSIM/PSNR/etc. are all computable on a real pair, so the composite is
+    # never majority-unmeasurable here — assert finite and in range.
+    assert math.isfinite(result.composite_quality)
+    assert 0.0 <= result.composite_quality <= 1.0
+    # Requesting composite alone leaves the other public fields unset.
+    for other in ("ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist"):
+        assert getattr(result, other) is None
+
+
+def test_measure_composite_quality_deterministic_across_request_sets(
+    reference_and_candidate: tuple[Path, Path],
+) -> None:
+    """Regression lock for the load-bearing finding: composite is request-set-invariant.
+
+    Because measure() forces ENABLE_DEEP_PERCEPTUAL on whenever composite_quality
+    is requested, the LPIPS contributor is always present in the weighted
+    aggregate — so co-requesting "lpips" (or any other metric) cannot change the
+    composite value. Without the gate fix this FAILS: composite WITHOUT the LPIPS
+    contributor redistributes its 4% weight and lands on a different number.
+    """
+    ref, cand = reference_and_candidate
+
+    composite_alone = measure(ref, cand, metrics=["composite_quality"]).composite_quality
+    composite_with_lpips = measure(
+        ref, cand, metrics=["composite_quality", "lpips"]
+    ).composite_quality
+    composite_with_cheap = measure(
+        ref, cand, metrics=["composite_quality", "ssim", "psnr"]
+    ).composite_quality
+
+    assert composite_alone is not None
+    assert composite_with_lpips is not None
+    assert composite_with_cheap is not None
+    assert composite_alone == pytest.approx(composite_with_lpips)
+    assert composite_alone == pytest.approx(composite_with_cheap)

@@ -7,6 +7,7 @@ models or do real metric computation. Real-metric coverage lives in
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,6 +31,7 @@ def _fake_full_result() -> dict[str, float]:
       - ssim/ms_ssim/gmsd/fsim/chist pass through unchanged
       - psnr is denormalized: 0.5 * PSNR_MAX_DB(50.0) = 25.0 dB
       - lpips reads lpips_quality_mean = 0.08
+      - composite_quality reads the bare ``composite_quality`` key unchanged
     """
     return {
         "ssim": 0.91,
@@ -43,6 +45,9 @@ def _fake_full_result() -> dict[str, float]:
         "gmsd": 0.05,
         "fsim": 0.93,
         "chist": 0.97,
+        # Bare key — the calibrated weighted aggregate. Projected through
+        # unchanged (no _mean sibling, no denormalisation).
+        "composite_quality": 0.873,
     }
 
 
@@ -55,6 +60,7 @@ _EXPECTED_PUBLIC = {
     "gmsd": 0.05,
     "fsim": 0.93,
     "chist": 0.97,
+    "composite_quality": 0.873,  # bare key, passed through unchanged
 }
 
 
@@ -332,3 +338,73 @@ def test_measure_psnr_returned_in_decibels(two_gifs: tuple[Path, Path]) -> None:
     assert result.psnr == pytest.approx(35.0)  # 0.7 * 50.0
     # And a real consumer's sanity check — PSNR in dB is usually > 1.
     assert result.psnr > 1.0
+
+
+def test_measure_composite_quality_projects_bare_key(
+    two_gifs: tuple[Path, Path],
+) -> None:
+    """composite_quality reads the bare ``composite_quality`` key, no _mean alias.
+
+    Unlike LPIPS (keyed ``lpips_quality_mean``) or PSNR (normalised, then
+    denormalised), composite_quality is already the final calibrated scalar on
+    the bare key — projection is a pass-through. Confirms the public→internal
+    mapping is the identity and no denormalisation fires.
+    """
+    ref, cand = two_gifs
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=_fake_full_result(),
+    ):
+        result = measure(ref, cand, metrics=["composite_quality"])
+
+    assert result.composite_quality == 0.873
+    # Requesting composite alone must not populate any other public field.
+    for other in SUPPORTED_METRICS:
+        if other != "composite_quality":
+            assert getattr(result, other) is None
+
+
+def test_measure_composite_quality_forces_lpips_gate(
+    two_gifs: tuple[Path, Path],
+) -> None:
+    """Determinism guard: requesting composite_quality forces ENABLE_DEEP_PERCEPTUAL.
+
+    composite_quality redistributes a NaN contributor's weight, so it is
+    request-set-dependent unless the LPIPS contributor is pinned on. Requesting
+    ["composite_quality"] WITHOUT "lpips" must still set
+    ENABLE_DEEP_PERCEPTUAL=True so the composite is computed over the full
+    LPIPS-included dimension set and is deterministic across request sets.
+    This is the single most important new test for the metric.
+    """
+    ref, cand = two_gifs
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value=_fake_full_result(),
+    ) as mock_calc:
+        measure(ref, cand, metrics=["composite_quality"])
+
+    _, kwargs = mock_calc.call_args
+    config = kwargs.get("config")
+    assert config is not None
+    assert config.ENABLE_DEEP_PERCEPTUAL is True
+
+
+def test_measure_composite_quality_nan_propagates(
+    two_gifs: tuple[Path, Path],
+) -> None:
+    """A legitimately-NaN composite surfaces as NaN, not a raise nor a sentinel.
+
+    composite_quality is NaN when the majority of present contributor weight is
+    unmeasurable (COMPOSITE_NAN_THRESHOLD). Per the metrics-accuracy policy
+    (NaN over sentinels), measure() must pass that NaN through to the public
+    field — not raise (the missing-key path) and not fabricate 0.5/1.0.
+    """
+    ref, cand = two_gifs
+    with patch(
+        "giflab.public_api.calculate_comprehensive_metrics",
+        return_value={"composite_quality": float("nan")},
+    ):
+        result = measure(ref, cand, metrics=["composite_quality"])
+
+    assert result.composite_quality is not None
+    assert math.isnan(result.composite_quality)
