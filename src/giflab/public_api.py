@@ -288,9 +288,13 @@ def compress(
     # Content-aware lossy ceiling: animately only — a data-backed scope, not a
     # placeholder. animately's re-quantising lossy cliffs on photographic /
     # gradient / data-viz content (the posterisation failure mode the ceiling
-    # prevents); gifsicle's error-bounded lossy degrades gradually with no cliff
-    # (2026-06-05 calibration, scripts/audit/engine_lossy_calibration.py), so it
-    # needs no ceiling. Skip for lossless / colour-only calls (no positive
+    # prevents). All four non-animately engines are calibrated
+    # (scripts/audit/engine_lossy_calibration.py) and need NO ceiling, for two
+    # reasons: gifsicle (2026-06-05) and gifski (2026-06-09) degrade gradually
+    # with banding 0 at every level (no cliff); ffmpeg and imagemagick
+    # (2026-06-09) have an INERT lossy_level for GIF output (byte-identical output
+    # across all levels — -q:v / -quality don't touch GIF pixels), so they cannot
+    # cliff at all. Skip for lossless / colour-only calls (no positive
     # lossy_level), and when the caller opts out (audit sweeps).
     if (
         apply_content_ceiling

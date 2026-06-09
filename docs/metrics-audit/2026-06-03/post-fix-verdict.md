@@ -107,9 +107,46 @@ correct and now data-backed (config.py / public_api.py comments updated; the
 archetypes spanning the ceiling's target failure modes plus a direct same-content
 animately-vs-gifsicle comparison — it is a mechanism-level finding about
 gifsicle's error-bounded lossy, not content-specific. A broad real-corpus
-gifsicle sweep would further harden it. **Still deferred:** gifski / imagemagick
-/ ffmpeg remain uncalibrated and skip the ceiling; re-run the calibration script
-with `--engines` to assess them before granting any of them a ceiling.
+gifsicle sweep would further harden it.
+
+### 2026-06-09 follow-up: gifski / ffmpeg / imagemagick (deferral closed)
+
+The three remaining non-animately engines were calibrated with the same harness
+(`scripts/audit/engine_lossy_calibration.py`). **All three get NO content
+ceiling**, but for two structurally different reasons — and the honest
+distinction matters (a flat curve is only evidence of graceful degradation if the
+output bytes actually vary across levels):
+
+| content (rich RGB gradient) | L=0 | L=40 | L=80 | L=100 | reading |
+|---|---|---|---|---|---|
+| **gifski** composite | 0.920 | 0.734 | 0.518 | 0.398 | real axis, GRADUAL, banding-free |
+| **ffmpeg** composite | 0.492 | 0.492 | 0.492 | 0.492 | FLAT — `lossy_level` is INERT |
+| **imagemagick** composite | 1.000 | 1.000 | 1.000 | 1.000 | FLAT — `lossy_level` is INERT |
+
+`banding_score = 0.00` at **every** measurement for all three, across all four
+content archetypes.
+
+- **gifski** has a REAL lossy axis (4 distinct output md5s; bytes 15.0→2.3 kB over
+  L=0→100). Its composite declines smoothly with `banding_score = 0` at every
+  level — gifsicle's profile, no posterisation cliff. **NO ceiling.**
+- **ffmpeg / imagemagick** `lossy_level` is **INERT** for GIF output: the
+  wrappers map it to `-q:v` (a video-DCT knob) / `-quality` (a PNG/JPEG zlib
+  knob) respectively, neither of which affects GIF pixels. Verified by md5 probe:
+  output is BYTE-IDENTICAL at every level (same hash, same size) on both content
+  types tested. So their flat curves are **not** "graceful degradation" — no
+  lossy axis is exercised at all, hence they cannot cliff. imagemagick's flat
+  `composite == 1.000` means "nothing changed" (re-saved as-is), **not** "perfect
+  lossy". **NO ceiling.** Fixing the two inert wrappers to actually drive GIF
+  lossiness is a separate engine-fidelity task, out of scope for ceiling
+  calibration.
+
+**Conclusion: all four non-animately engines are now calibrated and none needs a
+content ceiling.** The `engine == "animately"` gate in `public_api.compress` is
+correct and fully data-backed; the parametrized
+`test_ceiling_skipped_for_non_animately_engine` regression test locks the
+invariant for all four. The default `LEVELS` grid was capped at 100 (the public
+lossy range) — it previously included 120, which crashed the imagemagick column
+(`quality = 100 - 120 = -20 → ValueError`).
 
 ## What was deliberately NOT changed
 
