@@ -10,6 +10,7 @@ import os
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from functools import partial
 from typing import Any
@@ -28,7 +29,15 @@ class ParallelConfig:
     min_chunk_size: int = 1
     max_chunk_size: int = 50
     use_process_pool: bool = (
-        True  # Use ProcessPool for CPU-bound, ThreadPool for I/O-bound
+        # Default to threads. The frame metrics are dominated by cv2/numpy ops
+        # that release the GIL, so a thread pool parallelises them without the
+        # ProcessPool's fragility: a worker that dies abruptly (a native
+        # segfault/OOM on some GIF content) breaks the pool, and CPython's
+        # broken-pool teardown then DEADLOCKS both the metrics call and
+        # interpreter exit (see _process_with_pool). A thread pool cannot break
+        # that way. Opt back in with GIFLAB_USE_PROCESS_POOL=true if you have
+        # benchmarked a real gain for your workload.
+        False
     )
     enable_profiling: bool = False
 
@@ -58,6 +67,12 @@ class ParallelConfig:
         self.enable_profiling = (
             os.environ.get("GIFLAB_ENABLE_PROFILING", "false").lower() == "true"
         )
+        # Explicit opt-in to the process pool (default is the safer thread
+        # pool). Only an explicitly-set env var overrides a value passed to the
+        # constructor.
+        env_pool = os.environ.get("GIFLAB_USE_PROCESS_POOL")
+        if env_pool is not None:
+            self.use_process_pool = env_pool.lower() == "true"
 
 
 class ParallelMetricsCalculator:
@@ -200,7 +215,18 @@ class ParallelMetricsCalculator:
             _process_chunk_worker, metric_functions=metric_functions, config=config
         )
 
-        with ProcessPoolExecutor(max_workers=self.config.max_workers) as executor:
+        # We deliberately do NOT use ``with ProcessPoolExecutor(...) as executor``.
+        # If a worker dies abruptly (segfault / OOM / killed) the pool enters a
+        # broken state, and the context manager's ``__exit__`` calls
+        # ``shutdown(wait=True)``, which DEADLOCKS joining the dead worker and
+        # queue-feeder threads (CPython ``_wait_for_tstate_lock`` hang). That
+        # turns a recoverable error into an infinite hang and starves the
+        # sequential fallback in ``calculate_comprehensive_metrics_from_frames``
+        # (it never gets to run because this call never returns). Managing the
+        # executor lifecycle by hand lets us tear a broken pool down with
+        # ``wait=False`` and re-raise so the caller can fall back cleanly.
+        executor = ProcessPoolExecutor(max_workers=self.config.max_workers)
+        try:
             # Submit all chunks
             futures = {
                 executor.submit(process_func, chunk): i
@@ -213,10 +239,27 @@ class ParallelMetricsCalculator:
                 chunk_idx = futures[future]
                 try:
                     results[chunk_idx] = future.result()
+                except BrokenProcessPool:
+                    # The pool is dead — no pending future can succeed, and
+                    # swallowing this would emit empty per-chunk dicts that
+                    # silently corrupt every downstream aggregate. Abort to the
+                    # caller for an honest sequential recompute.
+                    raise
                 except Exception as e:
                     logger.error(f"Chunk {chunk_idx} processing failed: {e}")
                     # Return empty results for failed chunk
                     results[chunk_idx] = {}
+        except BrokenProcessPool:
+            logger.warning(
+                "Process pool broke (a worker terminated abruptly); tearing it "
+                "down without waiting and falling back to sequential metrics."
+            )
+            # wait=False avoids the join deadlock; cancel_futures drops the
+            # still-pending work instead of trying to run it on a dead pool.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        else:
+            executor.shutdown(wait=True)
 
         return [r for r in results if r is not None]
 
