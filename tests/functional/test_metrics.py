@@ -14,6 +14,7 @@ from giflab.enhanced_metrics import (
 )
 from giflab.metrics import (
     FrameExtractResult,
+    _is_flat_frame,
     align_frames,
     align_frames_content_based,
     calculate_comprehensive_metrics,
@@ -2042,22 +2043,26 @@ class TestLegacyCompositeQualityNaNSafety:
 
 
 class TestEdgeSimilaritySparseEdgeAggregation:
-    """Tests for edge_similarity aggregation robustness on sparse-edge content.
+    """Tests for edge_similarity on sparse-edge (smooth-gradient) content.
 
-    Smooth-gradient and other sparse-edge GIFs expose a flaw in the ``max``
-    sub-key: colour quantization introduces banding edges in the compressed
-    stream that aren't present in the original, driving per-frame Jaccard
-    similarity to near-zero. But at very low colour counts (4–16 colours) the
-    banding becomes so coarse that Canny no longer detects it, so most frames
-    have union == 0 and return 1.0 via the guard. A ``max`` aggregation then
-    reports 1.0 regardless of quantization level — INCONCLUSIVE in the audit.
+    Root-cause fix (2026-06-03 audit, docs/metrics-audit/2026-06-03/post-fix-
+    verdict.md): when Canny finds NO edges in either frame (``union == 0``),
+    edge similarity is *undefined* — there are no edges to compare — so the
+    metric now returns ``NaN``, not a fabricated-perfect ``1.0``. The old 1.0
+    guard injected fake-perfect outliers on smooth-gradient content: at high
+    lossy most frames went edgeless and returned 1.0, rebounding the median
+    aggregate upward (``edge_similarity`` lossy sweep ``[1.00, 0.97, 0.48,
+    0.99]``) and pulling ``composite_quality`` non-monotonic. ``NaN`` is dropped
+    by the ``nanmedian`` aggregation (``_MEDIAN_AGGREGATED_METRICS``), so
+    edgeless frames no longer inflate the score, and compression that *invents*
+    banding edges absent from an edgeless original is correctly penalised to
+    ~0.0 (union > 0, intersection == 0).
 
-    The fix switches the primary aggregation key for ``edge_similarity`` from
-    ``mean`` to ``median``. Median is robust to the outlier 1.0 frames from the
-    union-zero guard while still reflecting the typical frame quality faithfully.
+    This supersedes the median-aggregation workaround (#30/#32) that existed to
+    tolerate the 1.0 outliers — the outliers are now removed at the source.
 
-    Reference: giflab-edge-similarity-max-aggregation-sparse-edges task note,
-    2026-05-22 sanity audit (report.md line 106: edge_similarity_max FLAT).
+    Reference: giflab-optimized-temporal-failure-nan sibling fix; median
+    aggregation (#30/#32) retained for sparse-edge robustness.
     """
 
     def _make_smooth_gradient_frame(
@@ -2080,73 +2085,72 @@ class TestEdgeSimilaritySparseEdgeAggregation:
             out[:, :, ch] = levels[indices].reshape(ch_vals.shape)
         return out.astype(np.uint8)
 
-    def test_edge_similarity_max_is_not_stable_primary_on_sparse_edges(self):
-        """Demonstrate the ``max`` sub-key volatility on sparse-edge content.
+    def test_edge_similarity_is_nan_when_reference_edgeless(self):
+        """An edgeless reference yields NaN (undefined), not fabricated 1.0.
 
-        This test documents the pre-fix behaviour: per-frame edge_similarity
-        values on a smooth gradient include 1.0 outliers (from the union==0
-        guard), which means ``np.max`` is always 1.0 regardless of how many
-        colours the palette was reduced to.  A ``max``-based primary
-        aggregation therefore can't discriminate between light and heavy
-        quantization on sparse-edge content.
+        A smooth gradient has no Canny edges. Light quantization (256/64/16
+        colours) keeps it edgeless, so ``union == 0`` for every frame: edge
+        similarity is undefined (no edges to compare) and must be ``NaN``, not
+        the old fabricated-perfect 1.0 that rebounded the aggregate.
         """
         frame = self._make_smooth_gradient_frame()
+        assert not _is_flat_frame(frame), (
+            "smooth gradient must be non-flat so it bypasses the flat-content "
+            "fallback and reaches the Canny union==0 path"
+        )
+        for n in (256, 64, 16):
+            q = self._quantize_frame(frame, n)
+            val = edge_similarity(frame, q)
+            assert math.isnan(val), (
+                f"edgeless reference at {n} colours must give NaN (undefined "
+                f"edge similarity), not fabricated-perfect; got {val!r}"
+            )
 
-        # Collect per-frame edge_similarity scores for two levels of quantization.
-        # 256 colours (near-identical) vs 4 colours (heavy quantization).
-        frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
-        frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
+    def test_edge_similarity_penalises_compression_introduced_banding(self):
+        """Banding edges absent from an edgeless original are penalised to ~0.0.
 
-        scores_256: list[float] = [edge_similarity(frame, q) for q in frames_256_col]
-        scores_4: list[float] = [edge_similarity(frame, q) for q in frames_4_col]
+        Heavy quantization (4 colours) introduces coarse banding edges that the
+        smooth original does not have: ``union > 0`` but ``intersection == 0``
+        → edge similarity ~0.0. This is the genuine artifact signal, and it must
+        NOT be masked — unlike light quantization, which stays edgeless (NaN).
+        """
+        frame = self._make_smooth_gradient_frame()
+        light = self._quantize_frame(frame, 256)  # stays edgeless → NaN
+        heavy = self._quantize_frame(frame, 4)  # invents banding edges → ~0.0
 
-        # At 4 colours, at least some frames should detect banding → near-zero scores
-        # (i.e., the metric IS sensitive at the frame level).
-        # However, np.max picks the single highest score — often 1.0 from union==0.
-        max_256 = float(np.max(scores_256))
-        max_4 = float(np.max(scores_4))
-
-        # Both max values can be 1.0 because at least one frame has union==0.
-        # This is the bug: max cannot distinguish the two quantization levels.
-        # The test documents this (it should PASS with current code, confirming the bug).
-        assert max_256 >= max_4 or abs(max_256 - max_4) < 0.05, (
-            f"Pre-fix invariant violated: max_256={max_256:.4f}, max_4={max_4:.4f}. "
-            "The test may need updating if the synthetic content changed."
+        assert math.isnan(
+            edge_similarity(frame, light)
+        ), "light quantization keeps the gradient edgeless → NaN"
+        heavy_val = edge_similarity(frame, heavy)
+        assert not math.isnan(heavy_val), (
+            "heavy quantization invents banding edges (union > 0) → a real, "
+            "non-NaN penalty, not undefined"
+        )
+        assert heavy_val == pytest.approx(0.0, abs=0.05), (
+            "compression-introduced banding edges absent from the edgeless "
+            f"original must score ~0.0 (artifact), got {heavy_val:.4f}"
         )
 
-    def test_edge_similarity_median_is_stable_on_sparse_edges(self):
-        """Median aggregation is robust to outlier 1.0 union-zero frames.
+    def test_edgeless_frames_no_longer_mask_banding_artifact(self):
+        """The rebound fix at the aggregate level: edgeless frames (NaN) drop
+        out of the nanmedian, so a single real banding artifact is surfaced
+        rather than masked by fabricated-perfect 1.0 frames.
 
-        On smooth-gradient content, most frame pairs with heavy quantization
-        will have one edge map with banding and the other with no edges
-        (Jaccard → 0). Median ignores the occasional 1.0 frames from the
-        union-zero guard and reflects the typical per-frame quality.
-
-        After the fix, the primary aggregation key for ``edge_similarity`` uses
-        ``median``, so ``edge_similarity`` (the primary key emitted in the
-        aggregated result) should be close to 1.0 for light quantization and
-        substantially lower for heavy quantization.
+        Old behaviour: per-frame scores ``[1.0, 1.0, 1.0, 0.0]`` (3 edgeless
+        union==0 frames → 1.0) → median 1.0, the 0.0 banding artifact hidden.
+        New behaviour: ``[NaN, NaN, NaN, 0.0]`` → nanmedian 0.0, surfaced.
         """
+        from giflab.metrics import _aggregate_metric
+
         frame = self._make_smooth_gradient_frame()
+        comp = [self._quantize_frame(frame, 256)] * 3 + [self._quantize_frame(frame, 4)]
+        scores = [edge_similarity(frame, c) for c in comp]
 
-        frames_256_col = [self._quantize_frame(frame, 256) for _ in range(8)]
-        frames_4_col = [self._quantize_frame(frame, 4) for _ in range(8)]
-
-        scores_256: list[float] = [edge_similarity(frame, q) for q in frames_256_col]
-        scores_4: list[float] = [edge_similarity(frame, q) for q in frames_4_col]
-
-        median_256 = float(np.median(scores_256))
-        median_4 = float(np.median(scores_4))
-
-        # After quantizing to 4 colours, at least some frames will have banding
-        # edges that don't match the original → median should drop noticeably
-        # below the near-identity 256-colour case.
-        # For content where ALL frames return 1.0 under 256 colours (identical
-        # or near-identical), the 4-colour median should be lower OR equal.
-        assert median_256 >= median_4, (
-            f"Median should be higher (or equal) at 256 colours than 4 colours on "
-            f"smooth-gradient content; got median_256={median_256:.4f}, "
-            f"median_4={median_4:.4f}"
+        agg = _aggregate_metric(scores, "edge_similarity")["edge_similarity"]
+        assert agg == pytest.approx(0.0, abs=1e-6), (
+            "nanmedian must drop the edgeless (NaN) frames and surface the "
+            f"banding artifact (0.0), not rebound to 1.0; got {agg:.4f} from "
+            f"scores={scores}"
         )
 
     def test_aggregate_metric_uses_median_for_edge_similarity(self):

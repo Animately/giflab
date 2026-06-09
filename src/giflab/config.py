@@ -296,9 +296,20 @@ class ClassifierConfig:
 
     See ``src/giflab/content_classifier.py`` and the 2026-05-26 outlier
     deep-dive. ``compress`` consults the classifier and clamps the requested
-    animately ``lossy_level`` DOWN to the per-class ceiling. The values are
-    animately-calibrated only — other engines skip the ceiling (see
-    ``content_classifier`` and ``docs/public-api.md``).
+    animately ``lossy_level`` DOWN to the per-class ceiling.
+
+    Engine scope (data-backed, NOT a placeholder). The ceiling is applied to
+    ``animately`` only. It exists to prevent the posterisation / quality-cliff
+    that animately's re-quantising lossy produces on photographic / gradient /
+    data-viz content (composite cliffs ~1.0 → 0.73 by lossy 40). A 2026-06-05
+    calibration (``scripts/audit/engine_lossy_calibration.py``; see
+    ``docs/metrics-audit/2026-06-03/post-fix-verdict.md``) found gifsicle's
+    error-bounded lossy degrades GRADUALLY with no such cliff (composite stays
+    >=0.92 to lossy 120, banding 0 across all content types) — so gifsicle needs
+    NO content ceiling; clamping it would discard good compression for no
+    benefit. gifski / imagemagick / ffmpeg remain uncalibrated and likewise skip
+    the ceiling until a calibration demonstrates a cliff failure mode AND
+    supplies per-engine ceiling values (the values below are animately-specific).
     """
 
     # Flat-colour content (categorical charts AND flat logos / cartoons / UI /

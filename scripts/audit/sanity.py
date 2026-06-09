@@ -216,8 +216,9 @@ class PerMetricVerdict:
     pathological: float
     direction: str  # "higher_better", "lower_better", "flat"
     monotonicity_failures: list[dict[str, Any]]
-    verdict: str  # "PASS", "SUSPICIOUS", "INCONCLUSIVE"
+    verdict: str  # "PASS", "SUSPICIOUS", "DIAGNOSTIC", "INCONCLUSIVE"
     note: str = ""
+    classification: str = "pairwise_quality"  # see _classify_metric
 
 
 def _gif_path_by_name(gifs: list[Path], name: str) -> Path | None:
@@ -308,6 +309,128 @@ def _monotonicity_check(
             if b < a - effective_tol:
                 inversions.append((i, a, b))
     return inversions
+
+
+# ---------------------------------------------------------------------------
+# Verdict triage — segregate structurally-non-monotonic-by-design metrics
+# ---------------------------------------------------------------------------
+#
+# The monotonicity verdict is only meaningful for *pairwise quality* metrics
+# (the original-vs-compressed signals that feed composite_quality). Three
+# families are non-monotonic by construction and must NOT be flagged
+# SUSPICIOUS, or they bury the genuine signal (the 2026-06-03 audit had 74
+# SUSPICIOUS, ~1 of which — composite_quality — actually mattered):
+#   - dispersion / positional siblings (_std, _min, _max, _first, _last,
+#     _middle, _positional_variance) — spread/extremes don't track degradation;
+#   - single-stream metrics measured on the compressed stream alone (the
+#     _compressed / _post temporal-artefact family) — they don't track the
+#     ORIGINAL's degradation axis;
+#   - diagnostic / system metrics (render_ms wall-clock, kilobytes size,
+#     efficiency tradeoff, frame/colour counts).
+# See docs/metrics-audit/2026-06-03/post-fix-verdict.md.
+
+_DISPERSION_SUFFIXES: tuple[str, ...] = (
+    "_std", "_min", "_max", "_first", "_last", "_middle", "_positional_variance",
+)
+
+# Single-stream temporal/artefact families. Mirror of
+# ``giflab.metrics._SINGLE_STREAM_TEMPORAL_KEYS`` plus the two pre/post/compressed
+# families — kept local so this script's pure helpers don't import the heavy
+# giflab.metrics stack. A sync guard lives in
+# tests/smoke/test_audit_sanity_helpers.py::TestSingleStreamKeysInSync.
+# Every role EXCEPT ``_delta`` (the genuine original-vs-compressed change
+# signal) is single-stream.
+_SINGLE_STREAM_FAMILY_KEYS: frozenset[str] = frozenset({
+    "flicker_excess", "flicker_frame_ratio", "flat_flicker_ratio",
+    "flat_region_count", "temporal_pumping_score",
+    "quality_oscillation_frequency", "lpips_t_mean", "lpips_t_p95", "lpips_t_max",
+    "temporal_consistency", "disposal_artifacts",
+})
+_STREAM_ROLE_SUFFIXES: tuple[str, ...] = ("_compressed", "_post", "_pre", "_original")
+
+_DIAGNOSTIC_METRICS: frozenset[str] = frozenset({
+    "render_ms", "kilobytes", "efficiency", "compression_ratio",
+    "grid_length", "timing_grid_ms",
+})
+
+
+def _strip_suffix(metric: str, suffixes: tuple[str, ...]) -> tuple[str, bool]:
+    """Strip the first matching suffix; return ``(stem, matched)``."""
+    for suf in suffixes:
+        if metric.endswith(suf) and len(metric) > len(suf):
+            return metric[: -len(suf)], True
+    return metric, False
+
+
+def _classify_metric(metric: str) -> str:
+    """Classify a metric name for verdict triage.
+
+    Returns one of ``"pairwise_quality"`` (the real signal — eligible for a
+    SUSPICIOUS verdict), ``"dispersion"``, ``"single_stream"`` or
+    ``"diagnostic"`` (the latter three are non-monotonic by design).
+    """
+    stem, had_dispersion = _strip_suffix(metric, _DISPERSION_SUFFIXES)
+
+    # Diagnostic / system / counting metrics first: color_count_compressed ends
+    # with _compressed but is a count, not a single-stream quality signal.
+    if stem in _DIAGNOSTIC_METRICS or "count" in stem:
+        return "diagnostic"
+
+    # Single-stream: measured on one stream (compressed/post/pre/original).
+    role_stem, _ = _strip_suffix(stem, _STREAM_ROLE_SUFFIXES)
+    if (
+        stem.endswith("_compressed")
+        or role_stem in _SINGLE_STREAM_FAMILY_KEYS
+        or stem in _SINGLE_STREAM_FAMILY_KEYS
+    ):
+        return "single_stream"
+
+    if had_dispersion:
+        return "dispersion"
+    return "pairwise_quality"
+
+
+def _decide_verdict(
+    metric: str,
+    direction: str,
+    ident_mean: float,
+    patho_val: float,
+    failures: list[dict[str, Any]],
+    patho_src: str,
+) -> tuple[str, str, str]:
+    """Return ``(verdict, note, classification)`` for one metric.
+
+    Structural metrics (dispersion / single_stream / diagnostic) with
+    monotonicity failures are reported as ``DIAGNOSTIC`` rather than
+    ``SUSPICIOUS`` — the failures are real but expected (these metrics are
+    non-monotonic by design), so surfacing them as SUSPICIOUS only buries the
+    genuine pairwise-quality inversions. The raw failures are still recorded.
+    """
+    classification = _classify_metric(metric)
+    if direction == "flat" and abs(patho_val - ident_mean) < 1e-3:
+        return (
+            "INCONCLUSIVE",
+            "identity and both pathological pairs (solid + structural) gave "
+            "identical values — metric doesn't discriminate even on "
+            "(gradient vs inverse)",
+            classification,
+        )
+    if failures:
+        n = len(failures)
+        if classification == "pairwise_quality":
+            return (
+                "SUSPICIOUS",
+                f"{n} monotonicity violation(s); patho={patho_src}",
+                classification,
+            )
+        return (
+            "DIAGNOSTIC",
+            f"{n} monotonicity violation(s) on a {classification} metric "
+            f"(non-monotonic by design — not a pairwise-quality signal); "
+            f"patho={patho_src}",
+            classification,
+        )
+    return ("PASS", f"patho={patho_src}", classification)
 
 
 def _coalesce_byte_identical_levels(
@@ -686,18 +809,13 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                     }
                 )
 
-        # Decide verdict
-        note = ""
+        # Decide verdict — structural metrics (dispersion / single_stream /
+        # diagnostic) with failures are DIAGNOSTIC, not SUSPICIOUS, so the
+        # SUSPICIOUS list stays scoped to genuine pairwise-quality inversions.
         src = patho_source.get(metric, "solid")
-        if direction == "flat" and abs(patho_val - ident_mean) < 1e-3:
-            verdict = "INCONCLUSIVE"
-            note = "identity and both pathological pairs (solid + structural) gave identical values — metric doesn't discriminate even on (gradient vs inverse)"
-        elif failures:
-            verdict = "SUSPICIOUS"
-            note = f"{len(failures)} monotonicity violation(s); patho={src}"
-        else:
-            verdict = "PASS"
-            note = f"patho={src}"
+        verdict, note, classification = _decide_verdict(
+            metric, direction, ident_mean, patho_val, failures, src
+        )
 
         verdicts.append(
             PerMetricVerdict(
@@ -709,6 +827,7 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
                 monotonicity_failures=failures,
                 verdict=verdict,
                 note=note,
+                classification=classification,
             )
         )
 

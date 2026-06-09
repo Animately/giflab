@@ -229,3 +229,6 @@ benchmark_results/
 /audit/synthetic/
 # Derived sweep output — regenerate after each fix wave
 /audit/sweep.csv
+
+# One-off audit rerun scratch dirs (durable copies live under docs/metrics-audit/<date>/data/)
+/audit-rerun-*/

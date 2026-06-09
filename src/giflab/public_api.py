@@ -270,10 +270,13 @@ def compress(
     effective_params: dict[str, Any] = dict(params) if params is not None else {}
     result_warnings: list[str] = []
 
-    # Content-aware lossy ceiling: animately only (the ceilings are
-    # animately-calibrated; gifsicle's 3x native mapping is uncalibrated). Skip
-    # for lossless / colour-only calls (no positive lossy_level), and when the
-    # caller opts out (audit sweeps).
+    # Content-aware lossy ceiling: animately only — a data-backed scope, not a
+    # placeholder. animately's re-quantising lossy cliffs on photographic /
+    # gradient / data-viz content (the posterisation failure mode the ceiling
+    # prevents); gifsicle's error-bounded lossy degrades gradually with no cliff
+    # (2026-06-05 calibration, scripts/audit/engine_lossy_calibration.py), so it
+    # needs no ceiling. Skip for lossless / colour-only calls (no positive
+    # lossy_level), and when the caller opts out (audit sweeps).
     if (
         apply_content_ceiling
         and engine == "animately"

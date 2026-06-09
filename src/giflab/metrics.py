@@ -1869,15 +1869,29 @@ def chist(frame1: np.ndarray, frame2: np.ndarray, bins: int = 32) -> float:
 def edge_similarity(
     frame1: np.ndarray, frame2: np.ndarray, threshold1: int = 50, threshold2: int = 150
 ) -> float:
-    """Edge-Map Jaccard similarity (0-1, higher is better).
+    """Edge-Map Jaccard similarity (0-1, higher is better; NaN if undefined).
 
     Flat-content fallback: Canny finds no edges on solid-colour frames, so
-    the ``union == 0`` branch would silently return 1.0 (perfect) for any
-    flat pair, including white-vs-black. ``_flat_content_fallback`` returns
-    smooth-degradation values: identity (1.0) for same-colour flats, blending
-    to worst-case (0.0) for different-colour flats. See
-    docs/metrics-audit/2026-05-22/report.md and task note
-    giflab-flat-mean-tol-recalibration.
+    a naive ``union == 0`` branch would silently treat any flat pair as
+    perfect. ``_flat_content_fallback`` returns smooth-degradation values:
+    identity (1.0) for same-colour flats, blending to worst-case (0.0) for
+    different-colour flats. See docs/metrics-audit/2026-05-22/report.md and
+    task note giflab-flat-mean-tol-recalibration.
+
+    Undefined-on-edgeless (NaN): for NON-flat content where Canny still finds
+    no edges in EITHER frame (e.g. smooth gradients with no hard transitions),
+    edge similarity is *undefined* — there are no edges to compare — so this
+    returns ``float("nan")``, NOT a fabricated-perfect 1.0. The old 1.0 guard
+    injected fake-perfect outliers on smooth-gradient content that rebounded
+    the ``nanmedian`` aggregate upward at high lossy and pulled
+    ``composite_quality`` non-monotonic (2026-06-03 audit; see
+    docs/metrics-audit/2026-06-03/post-fix-verdict.md). NaN is dropped by the
+    ``_MEDIAN_AGGREGATED_METRICS`` nanmedian aggregation, so edgeless frames no
+    longer inflate the score; if every frame is edgeless the metric aggregates
+    to NaN and ``composite_quality`` redistributes its weight. Note that
+    compression which *introduces* banding edges absent from an edgeless
+    original gives ``union > 0, intersection == 0`` → 0.0 (artifact, penalised),
+    which is the genuine signal and is unaffected.
 
     Args:
         frame1: First frame (RGB or grayscale)
@@ -1903,7 +1917,8 @@ def edge_similarity(
     intersection = np.logical_and(edges1 > 0, edges2 > 0).sum()
     union = np.logical_or(edges1 > 0, edges2 > 0).sum()
     if union == 0:
-        return 1.0  # no edges at all
+        # No edges in either non-flat frame → undefined, not fabricated-perfect.
+        return float("nan")
     return float(intersection / union)
 
 
