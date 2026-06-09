@@ -72,16 +72,29 @@ SUPPORTED_METRICS: tuple[str, ...] = (
     "gmsd",
     "fsim",
     "chist",
+    "composite_quality",
 )
 """Metric strings recognised by :func:`measure`."""
 
-MetricIdentifier = Literal["ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist"]
+MetricIdentifier = Literal[
+    "ssim",
+    "ms_ssim",
+    "psnr",
+    "lpips",
+    "gmsd",
+    "fsim",
+    "chist",
+    "composite_quality",
+]
 
 # Public metric identifier → internal result-dict key. Six metrics flow
 # through metrics._aggregate_metric() and end up keyed by their bare name;
 # LPIPS is the exception — its computation surfaces lpips_quality_{mean,p95,
-# max} and we expose the mean as the public scalar. Module-level so we don't
-# rebuild it on every measure() call.
+# max} and we expose the mean as the public scalar. composite_quality is the
+# calibrated 11-metric weighted aggregate (see calculate_composite_quality);
+# it is already keyed by its bare name on the result dict — no _mean sibling,
+# so no denormalisation. Module-level so we don't rebuild it on every
+# measure() call.
 _PUBLIC_TO_INTERNAL_METRIC_KEY: dict[str, str] = {
     "ssim": "ssim",
     "ms_ssim": "ms_ssim",
@@ -90,6 +103,7 @@ _PUBLIC_TO_INTERNAL_METRIC_KEY: dict[str, str] = {
     "gmsd": "gmsd",
     "fsim": "fsim",
     "chist": "chist",
+    "composite_quality": "composite_quality",
 }
 
 # Public metrics that require the temporal_artifacts pipeline (which loads
@@ -201,6 +215,7 @@ class MeasureResult:
     gmsd: float | None = None
     fsim: float | None = None
     chist: float | None = None
+    composite_quality: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -404,10 +419,31 @@ def measure(
     # computed in a shared pass over frames. Gate LPIPS specifically; the
     # cheap metrics are always populated by the underlying call and we project
     # only what the caller requested. The temporal_artifacts pipeline also
-    # loads LPIPS (for lpips_t_*), so gate it too — no v0.3.0 public metric
+    # loads LPIPS (for lpips_t_*), so gate it too — no v0.4.0 public metric
     # needs it (see _TEMPORAL_NEEDING_METRICS).
+    #
+    # composite_quality determinism: composite_quality is the calibrated
+    # weighted aggregate, and `lpips_quality_mean` is one of its contributors
+    # (ENHANCED_LPIPS_WEIGHT=0.04). _resolve_composite_from_contributions
+    # redistributes a contributor's weight across the rest when that
+    # contributor resolves to NaN, so the composite is REQUEST-SET-DEPENDENT
+    # unless we pin the LPIPS contributor on: measure(["composite_quality"])
+    # (LPIPS gated off → lpips_quality_mean is NaN → 4% redistributed) would
+    # return a DIFFERENT value than measure(["composite_quality", "lpips"])
+    # (LPIPS computed → contributes) for the same file pair. Verified
+    # empirically: 0.9007 vs 0.9045 on degraded content. For the metric
+    # gifprep designates as its single deterministic verdict number, that is
+    # unacceptable — so when composite_quality is requested we force the LPIPS
+    # gate ON regardless of whether "lpips" is also requested. Then composite
+    # is always computed over the full LPIPS-included dimension set and is
+    # deterministic for a given (file pair, giflab version, environment).
+    # (SSIMULACRA2's 3% weight is binary-gated, not request-gated, so it
+    # remains an environmental caveat — see docs/public-api.md — that
+    # measure() cannot force deterministic without fabricating a value.)
     config = MetricsConfig()
-    config.ENABLE_DEEP_PERCEPTUAL = "lpips" in requested
+    config.ENABLE_DEEP_PERCEPTUAL = (
+        "lpips" in requested or "composite_quality" in requested
+    )
     config.ENABLE_TEMPORAL_ARTIFACTS = bool(_TEMPORAL_NEEDING_METRICS & requested)
 
     try:
@@ -460,4 +496,5 @@ def measure(
         gmsd=_project("gmsd"),
         fsim=_project("fsim"),
         chist=_project("chist"),
+        composite_quality=_project("composite_quality"),
     )

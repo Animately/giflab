@@ -135,6 +135,7 @@ def measure(
 
 - Requesting only the six "cheap" metrics (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`) is fast — they share intermediate computation and run as a single pass over the frames.
 - Requesting `lpips` triggers a PyTorch model load on first call within a process and dominates cost. Subsequent calls within the same process reuse the cached model.
+- Requesting `composite_quality` is **not** cheap: it forces the LPIPS model load (LPIPS is a weighted contributor to the calibrated composite, and the value would otherwise be request-set-dependent — see [`composite_quality` — weights are a public contract](#composite_quality--weights-are-a-public-contract)). Treat `composite_quality` like `lpips` for budgeting: the first call per process pays the model load, subsequent calls reuse the cached model.
 
 **Thread safety**: Safe to call concurrently.
 
@@ -168,11 +169,12 @@ Behaviour:
   `CompressResult.render_ms` (which is engine subprocess time, see below) — and
   it is **not** projected onto the public `MeasureResult` (which carries no
   `render_ms`).
-- The **public `measure()` surface is unaffected**: it projects only the seven
+- The **public `measure()` surface is unaffected**: it projects only the eight
   metric fields; the worst-of merge happens beneath that projection, so a caller
   requesting e.g. `ssim` simply receives the (worst-of, transparency-aware)
   value with the same field shape. The public surface reads the **bare** metric
-  keys (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`), so when a stem's
+  keys (`ssim`, `ms_ssim`, `psnr`, `gmsd`, `fsim`, `chist`, and the merged
+  `composite_quality` recomputed from the worst-of values), so when a stem's
   worst-of value comes from the black pass the merge overwrites the **entire key
   family** for that stem — the bare alias, the `_std`/`_min`/`_max`/`_raw`
   siblings, **and** every non-sibling companion (`ssimulacra2_p95`, the
@@ -213,7 +215,7 @@ Both result types are `@dataclass(frozen=True)`. Hash-equal results compare equa
 
 ### `MeasureResult`
 
-Seven optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`, `lpips`, `gmsd`, `fsim`, `chist`. Each field is populated iff that metric was requested in the call; otherwise `None`.
+Eight optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`, `lpips`, `gmsd`, `fsim`, `chist`, `composite_quality`. Each field is populated iff that metric was requested in the call; otherwise `None`.
 
 **Units and ranges**:
 
@@ -223,6 +225,29 @@ Seven optional float fields, one per supported metric: `ssim`, `ms_ssim`, `psnr`
 | `gmsd` | `[0.0, 1.0]` | Lower is better. |
 | `psnr` | `[0.0, 50.0]` dB | Higher is better. Values are reported in decibels; `50.0` is the cap (the internal `PSNR_MAX_DB` setting) and represents "effectively identical" candidates. |
 | `lpips` | `[0.0, 1.0]` | Lower is better. Perceptual distance per the LPIPS model; this is the mean across frames. |
+| `composite_quality` | `[0.0, 1.0]` (may be `NaN`) | Higher is better. The calibrated weighted aggregate of the underlying metrics. May be `NaN` when half or more of the present contributor weight is unmeasurable (see [`composite_quality` — weights are a public contract](#composite_quality--weights-are-a-public-contract)). |
+
+#### `composite_quality` — weights are a public contract
+
+`composite_quality` is giflab's single calibrated **verdict number**: a weighted aggregate of the underlying metrics, on `[0.0, 1.0]`, higher is better. It is computed by the internal `calculate_composite_quality` and projected through `measure()` unchanged. The per-dimension weights below are part of the public contract — they will not change without a `CHANGELOG.md` entry.
+
+| Dimension | Weight | Contributors (config field on `giflab.config.MetricsConfig`) |
+|---|---|---|
+| Structural | 33% | `ssim` (`ENHANCED_SSIM_WEIGHT` 0.15) + `ms_ssim` (`ENHANCED_MS_SSIM_WEIGHT` 0.18) |
+| Signal | 13% | `psnr` (`ENHANCED_PSNR_WEIGHT` 0.08) + `mse` (`ENHANCED_MSE_WEIGHT` 0.05) |
+| Advanced structural | 17% | `fsim` (`ENHANCED_FSIM_WEIGHT` 0.07) + `edge` (`ENHANCED_EDGE_WEIGHT` 0.06) + `gmsd` (`ENHANCED_GMSD_WEIGHT` 0.04) |
+| Perceptual | 10% | `chist` (`ENHANCED_CHIST_WEIGHT` 0.04) + `sharpness` (`ENHANCED_SHARPNESS_WEIGHT` 0.03) + `texture` (`ENHANCED_TEXTURE_WEIGHT` 0.03) |
+| Temporal | 10% | `temporal_consistency_delta` (`ENHANCED_TEMPORAL_WEIGHT` 0.10) |
+| Deep perceptual | 7% | `lpips` (`ENHANCED_LPIPS_WEIGHT` 0.04) + `ssimulacra2` (`ENHANCED_SSIMULACRA2_WEIGHT` 0.03) |
+| GIF-specific | 10% | `banding` (`ENHANCED_BANDING_WEIGHT` 0.05) + `deltae` (`ENHANCED_DELTAE_WEIGHT` 0.05) |
+
+Weights sum to 1.0.
+
+**NaN-aware weight redistribution.** When a contributor cannot be measured (returns `NaN`), its weight is redistributed proportionally across the contributors that *were* measured — the composite is never silently corrupted by a fabricated sentinel. If **half or more** of the present weight is unmeasurable (`>= COMPOSITE_NAN_THRESHOLD`, default 0.5 — so an exactly-50% split returns `NaN`), `composite_quality` itself is `NaN`. Consumers MUST treat the field as possibly-`NaN` and use NaN-aware comparisons.
+
+**Determinism — `lpips` contributor is forced on.** Because the redistribution above is contributor-set-dependent, `composite_quality` would otherwise return a *different* value depending on whether `lpips` happened to be co-requested (LPIPS gated off → `lpips_quality_mean` is `NaN` → its 4% weight redistributes; gated on → it contributes). To make the verdict number deterministic across request sets, **requesting `composite_quality` always forces the LPIPS computation on**, regardless of whether `"lpips"` is also in `metrics`. This is why `composite_quality` is not a cheap metric (see [Cost model](#cost-model)). Consequence: `measure(["composite_quality"])`, `measure(["composite_quality", "lpips"])`, and `measure(["composite_quality", "ssim", "psnr"])` all return the **same** `composite_quality` for the same file pair.
+
+**Environmental caveat — SSIMULACRA2.** The `ssimulacra2` contributor (3% weight) is gated on the `ssimulacra2` binary being present on `PATH`, which `measure()` cannot force. On a machine where the binary is **absent** (e.g. most CI / dev machines), `ssimulacra2_mean` resolves to `NaN` and its 3% weight is honestly redistributed — giflab does **not** fabricate a value. The practical consequence: `composite_quality` is deterministic **per environment** but a machine with the binary and a machine without it can produce slightly different composites for the same pair. Consumers relying on cross-machine reproducibility must standardise the presence/absence of the `ssimulacra2` binary across their fleet.
 
 ---
 
@@ -234,7 +259,7 @@ SUPPORTED_ENGINES: tuple[str, ...] = (
 )
 
 SUPPORTED_METRICS: tuple[str, ...] = (
-    "ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist",
+    "ssim", "ms_ssim", "psnr", "lpips", "gmsd", "fsim", "chist", "composite_quality",
 )
 ```
 
@@ -243,6 +268,7 @@ These tuples are authoritative for what the public API accepts in this release. 
 ```python
 from giflab import SUPPORTED_ENGINES, SUPPORTED_METRICS
 assert "gifsicle" in SUPPORTED_ENGINES
+assert "composite_quality" in SUPPORTED_METRICS
 ```
 
 ---
@@ -264,6 +290,8 @@ Catch them uniformly with `except GifLabError:` if you want.
 ## Versioning
 
 This contract is bound to giflab `v0.3.0` and later (within the 0.x major). Breaking changes — removing an engine from `SUPPORTED_ENGINES`, removing a metric from `SUPPORTED_METRICS`, changing a return field, renaming a public symbol — ship as a minor bump (e.g., `v0.4.0`) with a `CHANGELOG.md` entry. Additive changes — adding a new supported engine or metric, adding an optional parameter with a default — ship as a patch bump.
+
+`v0.4.0` is a minor bump driven by a breaking change to the metric key schema (the single-stream aliases removed in that release); the additive `composite_quality` metric documented here rides along in the same `v0.4.0` release rather than its own patch bump. Adding `composite_quality` to `SUPPORTED_METRICS` and a `composite_quality: float | None = None` field to `MeasureResult` is backward-compatible — existing `MeasureResult` construction is unaffected, and callers that never request the metric continue to see `None`.
 
 Consumers should pin to a version string in their dependency manifest:
 
