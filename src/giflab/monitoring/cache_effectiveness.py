@@ -162,7 +162,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from .memory_monitor import MemoryPressureLevel, MemoryStats
 
@@ -385,11 +385,11 @@ class CacheEffectivenessMonitor:
         cache_key = f"effectiveness_{cache_type}"
         current_time = time.time()
 
-        # Check analysis cache
+        # Check analysis cache (heterogeneous: values typed Any, cast per entry kind)
         if cache_key in self._analysis_cache:
             cache_time, cached_result = self._analysis_cache[cache_key]
             if current_time - cache_time < self._analysis_cache_ttl:
-                return cached_result
+                return cast(CacheEffectivenessStats, cached_result)
 
         with self._lock:
             stats = self._cache_stats[cache_type]
@@ -446,11 +446,11 @@ class CacheEffectivenessMonitor:
         cache_key = f"baseline_{operation_type}"
         current_time = time.time()
 
-        # Check analysis cache
+        # Check analysis cache (heterogeneous: values typed Any, cast per entry kind)
         if cache_key in self._analysis_cache:
             cache_time, cached_result = self._analysis_cache[cache_key]
             if current_time - cache_time < self._analysis_cache_ttl:
-                return cached_result
+                return cast(BaselineComparison, cached_result)
 
         with self._lock:
             baseline_times = self._baseline_times.get(operation_type, [])
@@ -506,11 +506,11 @@ class CacheEffectivenessMonitor:
         cache_key = "system_summary"
         current_time = time.time()
 
-        # Check analysis cache
+        # Check analysis cache (heterogeneous: values typed Any, cast per entry kind)
         if cache_key in self._analysis_cache:
             cache_time, cached_result = self._analysis_cache[cache_key]
             if current_time - cache_time < self._analysis_cache_ttl:
-                return cached_result
+                return cast(dict[str, Any], cached_result)
 
         all_stats = self.get_all_cache_stats()
 

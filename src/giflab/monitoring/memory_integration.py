@@ -13,6 +13,7 @@ from typing import Optional
 from ..config import MONITORING
 from .memory_monitor import (
     MemoryPressureLevel,
+    MemoryPressureManager,
     get_cache_memory_tracker,
     get_memory_pressure_manager,
     get_system_memory_monitor,
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 class MemoryPressureIntegration:
     """Integrates memory pressure monitoring with existing monitoring systems."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._initialized = False
         self._last_eviction_time = 0.0
         self._eviction_cooldown = 30.0  # seconds
@@ -67,7 +68,7 @@ class MemoryPressureIntegration:
             logger.error(f"Failed to initialize memory pressure monitoring: {e}")
             return False
 
-    def _setup_pressure_checking(self, pressure_manager) -> None:
+    def _setup_pressure_checking(self, pressure_manager: "MemoryPressureManager") -> None:
         """Set up periodic memory pressure checking."""
         # This would typically integrate with the existing monitoring loop
         # For now, we'll register the pressure manager for use by other systems
@@ -133,7 +134,7 @@ def instrument_cache_with_memory_tracking(
             pressure_manager.register_eviction_callback(cache_type, eviction_callback)
 
         # Set up periodic size updates
-        def update_cache_size():
+        def update_cache_size() -> None:
             try:
                 size_mb = get_size_callback()
                 cache_tracker.update_cache_size(cache_type, size_mb)
@@ -270,7 +271,7 @@ def integrate_memory_monitoring_with_metrics() -> None:
         system_monitor = get_system_memory_monitor()
         collector = get_metrics_collector()
 
-        def record_memory_metrics():
+        def record_memory_metrics() -> None:
             """Record current memory statistics as metrics."""
             stats = system_monitor.get_current_stats()
             if stats:

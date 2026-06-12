@@ -10,7 +10,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import deque
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .metrics_collector import MetricPoint, MetricType
 
@@ -21,30 +21,30 @@ class MetricsBackend(ABC):
     """Abstract base class for metrics storage backends."""
 
     @abstractmethod
-    def write(self, metric: MetricPoint):
+    def write(self, metric: MetricPoint) -> None:
         """Write single metric point."""
         pass
 
     @abstractmethod
-    def write_batch(self, metrics: list[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]) -> None:
         """Write batch of metric points."""
         pass
 
     @abstractmethod
     def query(
         self,
-        start_time: float = None,
-        end_time: float = None,
-        name: str = None,
-        metric_type: MetricType = None,
-        tags: dict[str, str] = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        name: str | None = None,
+        metric_type: MetricType | None = None,
+        tags: dict[str, str] | None = None,
         limit: int = 1000,
     ) -> list[MetricPoint]:
         """Query metrics with filters."""
         pass
 
     @abstractmethod
-    def clear(self):
+    def clear(self) -> None:
         """Clear all stored metrics."""
         pass
 
@@ -60,19 +60,19 @@ class InMemoryBackend(MetricsBackend):
     Suitable for development and testing.
     """
 
-    def __init__(self, max_size: int = 100000):
+    def __init__(self, max_size: int = 100000) -> None:
         self.max_size = max_size
-        self.metrics = deque(maxlen=max_size)
+        self.metrics: deque[MetricPoint] = deque(maxlen=max_size)
         self.lock = threading.RLock()
         self.total_written = 0
 
-    def write(self, metric: MetricPoint):
+    def write(self, metric: MetricPoint) -> None:
         """Write single metric point."""
         with self.lock:
             self.metrics.append(metric)
             self.total_written += 1
 
-    def write_batch(self, metrics: list[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]) -> None:
         """Write batch of metric points."""
         with self.lock:
             self.metrics.extend(metrics)
@@ -80,11 +80,11 @@ class InMemoryBackend(MetricsBackend):
 
     def query(
         self,
-        start_time: float = None,
-        end_time: float = None,
-        name: str = None,
-        metric_type: MetricType = None,
-        tags: dict[str, str] = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        name: str | None = None,
+        metric_type: MetricType | None = None,
+        tags: dict[str, str] | None = None,
         limit: int = 1000,
     ) -> list[MetricPoint]:
         """Query metrics with filters."""
@@ -109,7 +109,7 @@ class InMemoryBackend(MetricsBackend):
 
             return results
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all stored metrics."""
         with self.lock:
             self.metrics.clear()
@@ -141,7 +141,7 @@ class SQLiteBackend(MetricsBackend):
         db_path: Path | None = None,
         retention_days: float = 7.0,
         max_size_mb: float = 100.0,
-    ):
+    ) -> None:
         """
         Initialize SQLite backend.
 
@@ -167,7 +167,7 @@ class SQLiteBackend(MetricsBackend):
         # Initialize database
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         """Initialize database schema."""
         with self.lock:
             conn = sqlite3.connect(str(self.db_path))
@@ -210,11 +210,11 @@ class SQLiteBackend(MetricsBackend):
             finally:
                 conn.close()
 
-    def write(self, metric: MetricPoint):
+    def write(self, metric: MetricPoint) -> None:
         """Write single metric point."""
         self.write_batch([metric])
 
-    def write_batch(self, metrics: list[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]) -> None:
         """Write batch of metric points."""
         if not metrics:
             return
@@ -257,11 +257,11 @@ class SQLiteBackend(MetricsBackend):
 
     def query(
         self,
-        start_time: float = None,
-        end_time: float = None,
-        name: str = None,
-        metric_type: MetricType = None,
-        tags: dict[str, str] = None,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        name: str | None = None,
+        metric_type: MetricType | None = None,
+        tags: dict[str, str] | None = None,
         limit: int = 1000,
     ) -> list[MetricPoint]:
         """Query metrics with filters."""
@@ -270,7 +270,7 @@ class SQLiteBackend(MetricsBackend):
             try:
                 # Build query
                 query = "SELECT name, value, metric_type, timestamp, tags FROM metrics WHERE 1=1"
-                params = []
+                params: list[Any] = []
 
                 if start_time:
                     query += " AND timestamp >= ?"
@@ -315,7 +315,7 @@ class SQLiteBackend(MetricsBackend):
             finally:
                 conn.close()
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear all stored metrics."""
         with self.lock:
             conn = sqlite3.connect(str(self.db_path), isolation_level=None)
@@ -360,7 +360,7 @@ class SQLiteBackend(MetricsBackend):
             finally:
                 conn.close()
 
-    def _cleanup(self):
+    def _cleanup(self) -> None:
         """Clean up old metrics and manage database size."""
         cutoff_time = time.time() - (self.retention_days * 86400)
 
@@ -405,7 +405,7 @@ class StatsDBackend(MetricsBackend):
         port: int = 8125,
         prefix: str = "giflab",
         buffer_size: int = 1000,
-    ):
+    ) -> None:
         """
         Initialize StatsD backend.
 
@@ -420,8 +420,8 @@ class StatsDBackend(MetricsBackend):
         self.prefix = prefix
 
         # Local buffer for when StatsD is unavailable
-        self.fallback_buffer = deque(maxlen=buffer_size)
-        self.client = None
+        self.fallback_buffer: deque[MetricPoint] = deque(maxlen=buffer_size)
+        self.client: Any = None
 
         try:
             import statsd
@@ -432,9 +432,9 @@ class StatsDBackend(MetricsBackend):
             logger.warning("statsd library not available, using fallback buffer")
             self.available = False
 
-    def write(self, metric: MetricPoint):
+    def write(self, metric: MetricPoint) -> None:
         """Write single metric point."""
-        if not self.available:
+        if not self.available or self.client is None:
             self.fallback_buffer.append(metric)
             return
 
@@ -456,17 +456,25 @@ class StatsDBackend(MetricsBackend):
             logger.error(f"Error sending to StatsD: {e}")
             self.fallback_buffer.append(metric)
 
-    def write_batch(self, metrics: list[MetricPoint]):
+    def write_batch(self, metrics: list[MetricPoint]) -> None:
         """Write batch of metric points."""
         for metric in metrics:
             self.write(metric)
 
-    def query(self, **kwargs) -> list[MetricPoint]:
+    def query(
+        self,
+        start_time: float | None = None,
+        end_time: float | None = None,
+        name: str | None = None,
+        metric_type: MetricType | None = None,
+        tags: dict[str, str] | None = None,
+        limit: int = 1000,
+    ) -> list[MetricPoint]:
         """StatsD backend doesn't support querying."""
         # Return fallback buffer contents if requested
         return list(self.fallback_buffer)
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear fallback buffer."""
         self.fallback_buffer.clear()
 
@@ -490,7 +498,7 @@ class StatsDBackend(MetricsBackend):
         return f"{name}.{tag_str}"
 
 
-def create_backend(backend_type: str, **kwargs) -> MetricsBackend:
+def create_backend(backend_type: str, **kwargs: Any) -> MetricsBackend:
     """
     Factory function to create metrics backend.
 
