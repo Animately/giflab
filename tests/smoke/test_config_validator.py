@@ -91,9 +91,7 @@ class TestValidateWithContext:
         validator = _make_validator()
         validator.add_rule(
             "FRAME_CACHE.memory_limit_mb",
-            ValidationRule(
-                "positive", lambda value: value > 0, "must be positive"
-            ),
+            ValidationRule("positive", lambda value: value > 0, "must be positive"),
         )
 
         ok = validator.validate({"FRAME_CACHE": {"memory_limit_mb": 10}})

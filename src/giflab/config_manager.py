@@ -853,7 +853,9 @@ class ConfigManager:
             self._change_history.append(change)
             self._notify_change(change)
 
-    def register_change_callback(self, callback: Callable[[ConfigChange], None]) -> None:
+    def register_change_callback(
+        self, callback: Callable[[ConfigChange], None]
+    ) -> None:
         """Register a callback for configuration changes."""
         self._change_callbacks.append(callback)
 

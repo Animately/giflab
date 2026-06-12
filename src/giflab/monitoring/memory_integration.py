@@ -68,7 +68,9 @@ class MemoryPressureIntegration:
             logger.error(f"Failed to initialize memory pressure monitoring: {e}")
             return False
 
-    def _setup_pressure_checking(self, pressure_manager: "MemoryPressureManager") -> None:
+    def _setup_pressure_checking(
+        self, pressure_manager: "MemoryPressureManager"
+    ) -> None:
         """Set up periodic memory pressure checking."""
         # This would typically integrate with the existing monitoring loop
         # For now, we'll register the pressure manager for use by other systems

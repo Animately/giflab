@@ -9,6 +9,7 @@ import gc
 import logging
 import os
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Optional
 
@@ -207,7 +208,7 @@ def lpips_model_context(
     version: str = "0.1",
     spatial: bool = False,
     device: str = "cpu",
-):
+) -> Iterator[Any]:
     """Context manager for LPIPS model usage with automatic cleanup.
 
     Example:

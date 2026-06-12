@@ -15,6 +15,7 @@ import os
 import zlib
 from datetime import UTC, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
@@ -404,10 +405,10 @@ def _calculate_dct_energy_ratio(frame: np.ndarray) -> float:
 
     High ratio = more detail = harder to compress with lossy.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
 
     # Resize to standard size for consistent DCT
-    gray = cv2.resize(gray, (64, 64))
+    gray = cv2.resize(gray, (64, 64)).astype(np.float32)
 
     # Apply DCT
     dct = cv2.dct(gray)
@@ -541,9 +542,10 @@ def compute_gif_sha(gif_path: Path) -> str:
 
 
 # CLIP content classification
-_clip_model = None
-_clip_preprocess = None
-_clip_tokenizer = None
+# Lazily-initialised CLIP handles (Any: open_clip objects, set by _init_clip)
+_clip_model: Any = None
+_clip_preprocess: Any = None
+_clip_tokenizer: Any = None
 _clip_device = None
 
 CONTENT_QUERIES = [
@@ -589,7 +591,7 @@ def _init_clip() -> bool:
         return False
 
 
-def extract_clip_scores(frame: np.ndarray) -> dict[str, float]:
+def extract_clip_scores(frame: np.ndarray) -> dict[str, float | None]:
     """Extract CLIP content classification scores from a frame.
 
     Args:

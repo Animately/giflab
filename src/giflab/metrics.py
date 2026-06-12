@@ -483,7 +483,9 @@ def _compute_frame_indices(
         return list(range(total_frames))
     # Sample evenly across the entire animation to capture quality issues
     # that may appear later in the animation
-    return [int(i) for i in np.linspace(0, total_frames - 1, frames_to_extract, dtype=int)]
+    return [
+        int(i) for i in np.linspace(0, total_frames - 1, frames_to_extract, dtype=int)
+    ]
 
 
 def resize_to_common_dimensions(
@@ -2179,9 +2181,7 @@ def _default_ssimulacra2_fallback() -> dict[str, float | str]:
     accumulators it feeds (dict value types are invariant).
     """
     fallback: dict[str, float | str] = {
-        **_nan_fallback_dict(
-            ["ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min"]
-        )
+        **_nan_fallback_dict(["ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min"])
     }
     fallback["ssimulacra2_frame_count"] = 0.0
     fallback["ssimulacra2_triggered"] = 0.0
@@ -3759,9 +3759,7 @@ def calculate_comprehensive_metrics_from_frames(
         for s2_key, s2_value in ssimulacra2_metrics.items():
             # Convert values to appropriate types for storage
             result[s2_key] = (
-                float(s2_value)
-                if isinstance(s2_value, int | float)
-                else str(s2_value)
+                float(s2_value) if isinstance(s2_value, int | float) else str(s2_value)
             )
 
         # Add text/UI validation metrics (Phase 3.1)

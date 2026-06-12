@@ -565,14 +565,14 @@ class OCRValidator:
             Estimated confidence based on image properties (0-1)
         """
         # Calculate image sharpness using Laplacian variance
-        laplacian_var = cv2.Laplacian(roi, cv2.CV_64F).var()
+        laplacian_var = float(cv2.Laplacian(roi, cv2.CV_64F).var())
 
         # Calculate contrast using standard deviation
-        contrast = roi.std()
+        contrast = float(roi.std())
 
         # Calculate edge density
         edges = cv2.Canny(roi, 50, 150)
-        edge_density = np.sum(edges > 0) / (roi.shape[0] * roi.shape[1])
+        edge_density = float(np.sum(edges > 0)) / (roi.shape[0] * roi.shape[1])
 
         # Combine metrics for confidence estimate
         # Higher sharpness, contrast, and edge density = higher confidence

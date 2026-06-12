@@ -20,7 +20,7 @@ Dependencies:
 
 import logging
 from dataclasses import dataclass
-from typing import Literal, Optional, Protocol, Union
+from typing import TYPE_CHECKING, Any, Literal, Optional, Protocol, Union
 
 import numpy as np
 
@@ -40,8 +40,13 @@ from .model_cache import LPIPSModelCache, cleanup_model_cache
 # Import memory monitoring from temporal artifacts
 from .temporal_artifacts import MemoryMonitor
 
-# Lazy load heavy dependencies
-torch = lazy_import("torch")
+# Lazy load heavy dependencies. The TYPE_CHECKING import gives mypy the real
+# module (so ``torch.Tensor`` annotations resolve); at runtime the name stays
+# a LazyModule proxy.
+if TYPE_CHECKING:
+    import torch
+else:
+    torch = lazy_import("torch")
 lpips = lazy_import("lpips")
 
 # Check availability without importing
@@ -50,7 +55,7 @@ LPIPS_AVAILABLE = is_lpips_available()
 
 
 # Lazy load torch submodules
-def _get_torch_functional():
+def _get_torch_functional() -> Any:
     """Get torch.nn.functional lazily."""
     if TORCH_AVAILABLE:
         import torch.nn.functional as F
@@ -59,7 +64,7 @@ def _get_torch_functional():
     return None
 
 
-def _get_torchvision_transforms():
+def _get_torchvision_transforms() -> Any:
     """Get torchvision.transforms lazily."""
     if TORCH_AVAILABLE:
         import torchvision.transforms as transforms

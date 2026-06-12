@@ -117,9 +117,7 @@ class TestFrameCacheInstrumentationSignature:
 
         # The real FrameCache.get signature is
         # (file_path, max_frames=None, alpha_background=None).
-        result = frame_cache.get(
-            sample_gif, max_frames=5, alpha_background=(0, 0, 0)
-        )
+        result = frame_cache.get(sample_gif, max_frames=5, alpha_background=(0, 0, 0))
         assert result is None  # cold cache -> miss, but no TypeError
 
         # Miss must have been counted through the wrapper.
@@ -163,9 +161,7 @@ class TestValidationCacheInstrumentation:
         frame2 = rng.integers(0, 255, (32, 32, 3), dtype=np.uint8)
 
         # The real ValidationCache.put signature ends with metadata=None.
-        validation_cache.put(
-            frame1, frame2, "ssim", 0.95, metadata={"source": "test"}
-        )
+        validation_cache.put(frame1, frame2, "ssim", 0.95, metadata={"source": "test"})
         assert validation_cache.get(frame1, frame2, "ssim") == 0.95
 
     def test_instrumented_get_stats_emits_honest_gauges(
@@ -194,6 +190,4 @@ class TestValidationCacheInstrumentation:
         assert gauges.get("cache.validation.memory_usage_mb") == pytest.approx(
             stats.memory_bytes / (1024 * 1024)
         )
-        assert gauges.get("cache.validation.hit_rate") == pytest.approx(
-            stats.hit_rate
-        )
+        assert gauges.get("cache.validation.hit_rate") == pytest.approx(stats.hit_rate)

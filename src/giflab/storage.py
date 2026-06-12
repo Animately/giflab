@@ -1077,7 +1077,7 @@ class GifLabStorage:
                 LEFT JOIN tools ft ON p.frame_tool_id = ft.id
                 WHERE f.compression_complete = TRUE
             """
-            params: list[int | str] = []
+            params: list[Any] = []
             if pipeline_id:
                 query += " AND c.pipeline_id = ?"
                 params.append(pipeline_id)
@@ -1289,7 +1289,7 @@ class GifLabStorage:
                 LEFT JOIN tools ct ON p.color_tool_id = ct.id
                 LEFT JOIN tools ft ON p.frame_tool_id = ft.id
             """
-            params: list[str] = []
+            params: list[Any] = []
             if lossy_tool:
                 query += " WHERE lt.name = ?"
                 params.append(lossy_tool)

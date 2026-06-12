@@ -183,7 +183,7 @@ class VectorizedMetricsCalculator:
         """
         # Vectorized MSE calculation
         diff = original_batch.astype(np.float32) - compressed_batch.astype(np.float32)
-        mse_batch = np.mean(diff**2, axis=(1, 2, 3))
+        mse_batch: np.ndarray = np.mean(diff**2, axis=(1, 2, 3))
         return mse_batch
 
     def calculate_batch_psnr(
@@ -202,7 +202,7 @@ class VectorizedMetricsCalculator:
         mse_batch = self.calculate_batch_mse(original_batch, compressed_batch)
         # Avoid division by zero
         mse_batch = np.maximum(mse_batch, 1e-10)
-        psnr_batch = 20 * np.log10(255.0 / np.sqrt(mse_batch))
+        psnr_batch: np.ndarray = 20 * np.log10(255.0 / np.sqrt(mse_batch))
         return psnr_batch
 
     def process_frame_pairs_batched(
@@ -385,7 +385,7 @@ class MemoryEfficientFrameProcessor:
 
     def __init__(self, max_memory_mb: float = 500.0):
         self.max_memory_mb = max_memory_mb
-        self.frame_cache = {}
+        self.frame_cache: dict[str, Any] = {}
 
     def resize_frames_batch(
         self, frames: list[np.ndarray], target_size: tuple[int, int]
@@ -580,8 +580,9 @@ def calculate_optimized_comprehensive_metrics(
         compressed_resized
     )
 
-    # Aggregate results
-    result = {}
+    # Aggregate results (dict[str, Any]: the _optimization_* metadata
+    # entries below are bool/dict, beyond the float aggregates)
+    result: dict[str, Any] = {}
 
     # Add core metrics with aggregations
     for metric_name, values in metric_results.items():

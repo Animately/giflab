@@ -302,7 +302,9 @@ class MetricTracker:
         metric_tags = {**self.default_tags, **(tags or {})}
         self.collector.record_histogram(metric_name, value, metric_tags)
 
-    def record_error(self, error: Exception, tags: dict[str, str] | None = None) -> None:
+    def record_error(
+        self, error: Exception, tags: dict[str, str] | None = None
+    ) -> None:
         """Record error occurrence."""
         metric_tags = {
             **self.default_tags,
