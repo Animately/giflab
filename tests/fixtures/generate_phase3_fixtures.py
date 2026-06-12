@@ -109,23 +109,31 @@ class Phase3FixtureGenerator:
             img = Image.new("RGB", size, (0, 0, 0))  # Black background
             draw = ImageDraw.Draw(img)
 
+            # Use Pillow's bundled default font, never a system font: a system
+            # lookup (e.g. Courier) succeeds on macOS but raises OSError on CI
+            # runners, silently swapping in a differently-sized font and
+            # changing detected component counts per platform.
             try:
-                font = ImageFont.truetype("Courier", 12)
-            except OSError:
+                font = ImageFont.load_default(size=12)
+            except TypeError:  # Pillow < 10.1 lacks the size parameter
                 font = ImageFont.load_default()
 
+            # Multi-word lines spaced >10px apart (the region-merge proximity
+            # threshold in TextUIContentDetector) so each line survives as a
+            # distinct detected text region rather than merging with its
+            # neighbours; long single-word runs would instead be dropped by
+            # the component aspect-ratio filter.
             terminal_lines = [
-                "$ ls -la",
-                "total 64",
-                "drwxr-xr-x  12 user  staff    384 Nov  1 10:30 .",
-                "drwxr-xr-x   5 user  staff    160 Nov  1 10:29 ..",
-                "-rw-r--r--   1 user  staff   1024 Nov  1 10:30 file.txt",
+                "$ ls -la docs src tests",
+                "total 64 files 12 dirs",
+                "drwxr-x user staff 384",
+                "$ make test ... all ok",
             ]
 
-            y_offset = 10
+            y_offset = 4
             for line in terminal_lines:
                 draw.text((5, y_offset), line, fill=(0, 255, 0), font=font)
-                y_offset += 15
+                y_offset += 32
 
         elif image_type == "mixed_content":
             # Mix of text and graphics

@@ -731,7 +731,14 @@ class TestPerformanceAndQuality:
 
     @pytest.mark.external_tools
     def test_baseline_performance_comparison(self):
-        """Test that different engines perform within reasonable multiples of each other."""
+        """Test that every available engine completes the same operation in sane time.
+
+        Deliberately does NOT compare engines against each other: on a tiny
+        fixture, per-engine wall-clock is dominated by binary startup overhead
+        (gifsicle ~1-2ms vs imagemagick ~50ms on CI runners), so a cross-engine
+        ratio measures the engines' startup costs, not a giflab regression —
+        it sat at 47-59x on every CI run while nothing was wrong.
+        """
         available_color_reducers = []
 
         for reducer_cls in [
@@ -762,24 +769,9 @@ class TestPerformanceAndQuality:
                 render_time = result["render_ms"]
                 processing_times.append((reducer_cls.NAME, render_time))
 
-        # Validate no engine is extraordinarily slower than others
-        if len(processing_times) >= 2:
-            times = [time for _, time in processing_times]
-            min_time = min(times)
-            max_time = max(times)
-
-            if min_time > 0:  # Avoid division by zero
-                time_ratio = max_time / min_time
-                # Allow 10x performance difference between engines (generous but reasonable)
-                assert (
-                    time_ratio <= 10.0
-                ), f"Performance variation too high: {dict(processing_times)}, ratio: {time_ratio:.2f}x"
-
-                # All engines should complete within reasonable absolute time
-                for name, time_ms in processing_times:
-                    assert (
-                        time_ms < 10000
-                    ), f"Engine {name} took {time_ms}ms, exceeds 10s limit"
+        # All engines should complete within reasonable absolute time
+        for name, time_ms in processing_times:
+            assert time_ms < 10000, f"Engine {name} took {time_ms}ms, exceeds 10s limit"
 
     @pytest.mark.external_tools
     def test_output_quality_maintained(self):

@@ -195,10 +195,18 @@ class TestAdaptiveSampler:
 
     def test_adaptive_sampling_high_motion(self):
         """Test adaptive sampling with high motion frames."""
-        # Create frames with large differences
+        # With numpy.random.random mocked to 0.5 only frames whose difference
+        # is strictly above mean+std get sampled (max_rate 0.8 is the sole
+        # rate above 0.5), so the frame content must put a known number of
+        # diffs in that band. Black frames with 5 white spike frames yield
+        # exactly 10 maximal diffs against 39 zero diffs (mean+std ~= 0.61 of
+        # max), sampling 10 spike-adjacent frames + first + last = 12. The
+        # previous unseeded noise frames left the high-motion count hovering
+        # at the assertion boundary (sampled 8 of 50 on a bad draw).
         frames = []
-        for _i in range(50):
-            frame = np.random.randint(0, 256, (10, 10, 3), dtype=np.uint8)
+        for i in range(50):
+            value = 255 if i in (5, 10, 15, 20, 25) else 0
+            frame = np.full((10, 10, 3), value, dtype=np.uint8)
             frames.append(frame)
 
         sampler = AdaptiveSampler(base_rate=0.2, max_rate=0.8, min_frames_threshold=10)

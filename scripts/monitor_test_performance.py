@@ -33,6 +33,11 @@ DEFAULT_PYTEST_ARGS = {
         "tests/functional",
         "-n",
         "auto",
+        # xdist only honours xdist_group markers (which tests/conftest.py maps
+        # the `serial` marker onto) under loadgroup distribution; the default
+        # `load` dist silently scatters serial-marked tests across workers.
+        "--dist",
+        "loadgroup",
         "--tb=short",
     ],
     "integration": [
@@ -43,6 +48,8 @@ DEFAULT_PYTEST_ARGS = {
         "tests/integration",
         "-n",
         "4",
+        "--dist",
+        "loadgroup",
         "--tb=short",
         "--durations=10",
     ],
@@ -262,6 +269,14 @@ class TestPerformanceMonitor:
             print("   • Check if test data size has grown unexpectedly")
             print("   • Verify mock patterns are working correctly")
             print("   • Consider if parallel execution is functioning properly")
+
+        if not tests_passed:
+            # Surface the captured pytest output: without this, CI logs show
+            # only "❌ FAILED" with no indication of which test failed.
+            tail_lines = output.strip().splitlines()[-50:]
+            print(f"\n🔍 PYTEST OUTPUT (last {len(tail_lines)} lines):")
+            for line in tail_lines:
+                print(f"   {line}")
 
         # Show trend if history exists
         self._show_performance_trend(test_tier)

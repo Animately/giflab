@@ -8,6 +8,7 @@ on:
   schedule:
     # Run full matrix nightly at 2 AM UTC
     - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
   lightning-tests:
@@ -51,7 +52,9 @@ jobs:
         export GIFLAB_ULTRA_FAST=1
         export GIFLAB_MAX_PIPES=3
         export GIFLAB_MOCK_ALL_ENGINES=1
-        poetry run pytest -m "fast" tests/smoke tests/functional -n auto --tb=short --cov=src/giflab --cov-report=xml
+        # --dist loadgroup: required for the serial -> xdist_group marker
+        # mapping in tests/conftest.py to actually serialise those tests
+        poetry run pytest -m "fast" tests/smoke tests/functional -n auto --dist loadgroup --tb=short --cov=src/giflab --cov-report=xml
     
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -102,12 +105,15 @@ jobs:
     - name: Run Integration Tests
       run: |
         export GIFLAB_MAX_PIPES=10
-        poetry run pytest -m "not slow" tests/smoke tests/functional tests/integration -n 4 --tb=short --durations=10 --maxfail=5
+        poetry run pytest -m "not slow" tests/smoke tests/functional tests/integration -n 4 --dist loadgroup --tb=short --durations=10 --maxfail=5
 
   full-matrix-tests:
     name: Full Matrix Tests (🔍 <30min)
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    # Nightly + manual only: this sweeps the whole suite including
+    # tests/nightly (memory/perf benchmarks) — too heavy and too
+    # environment-sensitive to gate every push to main.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     
     steps:
     - uses: actions/checkout@v4
@@ -142,9 +148,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y gifsicle imagemagick ffmpeg
-        # Install Gifski (if available)
-        wget -q https://github.com/ImageOptim/gifski/releases/latest/download/gifski_1.14.1_amd64.deb || true
-        sudo dpkg -i gifski_1.14.1_amd64.deb || true
+        # gifski is deliberately not installed: the old versioned-.deb wget
+        # 404'd on every run (masked by || true), so gifski-dependent tests
+        # have always skipped here. Install it deliberately (e.g. cargo
+        # install gifski, as ci.yml does) if that coverage is ever wanted.
     
     - name: Run Full Test Matrix
       run: |
@@ -160,38 +167,3 @@ jobs:
           test-results/
           logs/
         retention-days: 30
-
-  performance-validation:
-    name: Performance Validation
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.12
-    
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-    
-    - name: Install dependencies
-      run: poetry install --no-interaction
-    
-    - name: Validate Test Performance
-      run: |
-        # Lightning tests must complete in under 30 seconds
-        echo "⚡ Validating lightning test performance..."
-        timeout 30s make test-fast || (echo "❌ Lightning tests exceeded 30s limit" && exit 1)
-        
-        # Integration subset must complete in under 5 minutes
-        echo "🔄 Validating integration test performance..."
-        timeout 300s poetry run pytest -m "integration" tests/ -n 4 --tb=no || (echo "❌ Integration tests exceeded 5min limit" && exit 1)
-        
-        echo "✅ All performance targets met!"

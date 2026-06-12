@@ -76,8 +76,10 @@ class TestImageMagickWrapperIntegration:
             result = wrapper.apply(many_colors_gif, output_path, params={"colors": 32})
 
             # Validate metadata structure
+            # render_ms is int-truncated; a sub-millisecond run on a tiny
+            # fixture legitimately reports 0 (asserts here use >= 0).
             assert result["engine"] == "imagemagick"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             # Since the lossy-axis change (PR #59) the 32-colour reduction of
             # this fixture compresses below 1 KB, and the metadata truncates
             # (int(bytes/1024) == 0). Assert the real file is non-empty and
@@ -111,7 +113,7 @@ class TestImageMagickWrapperIntegration:
 
             # Validate metadata
             assert result["engine"] == "imagemagick"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert output_path.exists()
 
             # Validate functional change - should have fewer frames
@@ -126,7 +128,7 @@ class TestImageMagickWrapperIntegration:
                 # If metadata extraction fails, just check file exists
                 pass
 
-    def test_lossy_compressor_functionality(self, test_gif):
+    def test_lossy_compressor_functionality(self, many_colors_gif):
         """Test ImageMagick lossy compressor reduces file size."""
         wrapper = ImageMagickLossyCompressor()
 
@@ -138,15 +140,22 @@ class TestImageMagickWrapperIntegration:
 
             # Test lossy compression (lossy_level 50 → 64-colour palette via
             # the geometric mapping in _lossy_level_to_palette_size)
-            result = wrapper.apply(test_gif, output_path, params={"lossy_level": 50})
+            result = wrapper.apply(
+                many_colors_gif, output_path, params={"lossy_level": 50}
+            )
 
             # Validate metadata
             assert result["engine"] == "imagemagick"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert output_path.exists()
 
-            # Lossy compression should reduce file size
-            original_size = test_gif.stat().st_size
+            # Lossy compression should reduce file size. The many-colour
+            # fixture is large enough (>10 KB) for the 64-colour palette to
+            # genuinely shrink it; on the few-hundred-byte simple_4frame
+            # fixture, palette overhead exceeded the savings (293 vs 237
+            # bytes) and the assert failed for reasons unrelated to lossy
+            # compression working.
+            original_size = many_colors_gif.stat().st_size
             output_size = output_path.stat().st_size
             assert output_size <= original_size
 
@@ -192,7 +201,7 @@ class TestFFmpegWrapperIntegration:
 
             # Validate metadata
             assert result["engine"] == "ffmpeg"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert output_path.exists()
 
             # Command should show two-pass operation
@@ -213,7 +222,7 @@ class TestFFmpegWrapperIntegration:
 
             # Validate metadata
             assert result["engine"] == "ffmpeg"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert (
                 "fps=" in result["command"]
             )  # Should contain fps parameter (calculated from ratio)
@@ -233,7 +242,7 @@ class TestFFmpegWrapperIntegration:
 
             # Validate metadata
             assert result["engine"] == "ffmpeg"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             # Lossy axis is palette quantisation: two-pass palettegen/paletteuse
             # (the old -q:v knob was inert for GIF output).
             assert "palettegen" in result["command"]
@@ -278,7 +287,7 @@ class TestGifskiWrapperIntegration:
 
             # Validate metadata
             assert result["engine"] == "gifski"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert "quality" in result["command"]
             assert output_path.exists()
 
@@ -337,7 +346,7 @@ class TestCrossEngineConsistency:
         expected_keys = {"render_ms", "engine", "command", "kilobytes"}
         for result in results:
             assert set(result.keys()) >= expected_keys
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert result["kilobytes"] >= 0
             assert len(result["command"]) > 0
 
@@ -400,7 +409,7 @@ class TestImageMagickDitheringWrappers:
             assert result["engine"] == "imagemagick"
             assert result["dithering_method"] == "Riemersma"
             assert result["pipeline_variant"] == "imagemagick_dither_riemersma"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert output_path.exists()
 
     def test_floyd_steinberg_wrapper(self, many_colors_gif):
@@ -452,7 +461,7 @@ class TestFFmpegDitheringWrappers:
             assert result["engine"] == "ffmpeg"
             assert result["dithering_method"] == "sierra2"
             assert result["pipeline_variant"] == "ffmpeg_dither_sierra2"
-            assert result["render_ms"] > 0
+            assert result["render_ms"] >= 0
             assert output_path.exists()
 
     def test_floyd_steinberg_wrapper(self, many_colors_gif):
@@ -514,7 +523,7 @@ class TestFFmpegDitheringWrappers:
                 # Validate metadata for each Bayer scale
                 assert result["engine"] == "ffmpeg"
                 assert result["dithering_method"] == expected_method
-                assert result["render_ms"] > 0
+                assert result["render_ms"] >= 0
                 assert output_path.exists()
 
                 # Validate pipeline variant naming
