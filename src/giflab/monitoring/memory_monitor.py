@@ -112,20 +112,24 @@ Version:
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol
+
+if TYPE_CHECKING:
+    from .cache_effectiveness import CacheEffectivenessMonitor
 
 from ..lazy_imports import check_import_available
 
 logger = logging.getLogger(__name__)
 
 # Lazy import psutil for cross-platform memory monitoring
-_psutil = None
-_psutil_available = None
+_psutil: Any = None
+_psutil_available: bool | None = None
 
 
-def _get_psutil():
+def _get_psutil() -> Any:
     """Lazy import of psutil with availability checking."""
     global _psutil, _psutil_available
 
@@ -600,7 +604,7 @@ class CacheMemoryTracker:
         Effectiveness monitoring adds negligible overhead when enabled.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the cache memory tracker.
 
         Sets up internal data structures and attempts to initialize cache
@@ -619,7 +623,7 @@ class CacheMemoryTracker:
         self._cache_sizes: dict[str, float] = {}
 
         # Cache effectiveness monitoring integration (optional)
-        self._effectiveness_monitor = None
+        self._effectiveness_monitor: CacheEffectivenessMonitor | None = None
         self._effectiveness_enabled = False
         self._init_effectiveness_monitoring()
 
@@ -1008,7 +1012,9 @@ class MemoryPressureManager:
         self._eviction_callbacks: dict[str, Any] = {}
         self._lock = threading.RLock()
 
-    def register_eviction_callback(self, cache_type: str, callback) -> None:
+    def register_eviction_callback(
+        self, cache_type: str, callback: Callable[[float], float]
+    ) -> None:
         """Register callback function for cache eviction.
 
         Registers a callback function that will be called during memory pressure

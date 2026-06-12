@@ -226,13 +226,18 @@ class LazyModule:
 
     def _load_module(self) -> Any | None:
         """Thread-safe module loading."""
-        if self._module is not None:
-            return self._module
+        # Read into locals: another thread may set self._module between the
+        # two checks (double-checked locking), which mypy cannot model on the
+        # attribute directly.
+        module = self._module
+        if module is not None:
+            return module
 
         with self._lock:
             # Double-check pattern for thread safety
-            if self._module is not None:
-                return self._module
+            module = self._module
+            if module is not None:
+                return module
 
             if self._import_attempted:
                 # Already tried and failed
@@ -283,7 +288,7 @@ class LazyImportRegistry:
     import status tracking and diagnostic capabilities.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the registry."""
         self._modules: dict[str, LazyModule] = {}
         self._lock = threading.Lock()

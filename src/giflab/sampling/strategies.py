@@ -23,7 +23,7 @@ class UniformSampler(FrameSampler):
     def __init__(
         self,
         sampling_rate: float = 0.3,
-        min_frames_threshold: int = 30,
+        min_frames_threshold: float = 30,
         confidence_level: float = 0.95,
         verbose: bool = False,
     ):
@@ -39,7 +39,7 @@ class UniformSampler(FrameSampler):
         super().__init__(min_frames_threshold, confidence_level, verbose)
         self.sampling_rate = max(0.0, min(1.0, sampling_rate))
 
-    def sample(self, frames: list[np.ndarray], **kwargs) -> SamplingResult:
+    def sample(self, frames: list[np.ndarray], **kwargs: Any) -> SamplingResult:
         """
         Sample frames uniformly at regular intervals.
 
@@ -102,7 +102,7 @@ class AdaptiveSampler(FrameSampler):
         base_rate: float = 0.2,
         motion_threshold: float = 0.1,
         max_rate: float = 0.8,
-        min_frames_threshold: int = 30,
+        min_frames_threshold: float = 30,
         confidence_level: float = 0.95,
         verbose: bool = False,
     ):
@@ -122,7 +122,7 @@ class AdaptiveSampler(FrameSampler):
         self.motion_threshold = motion_threshold
         self.max_rate = max(self.base_rate, min(1.0, max_rate))
 
-    def sample(self, frames: list[np.ndarray], **kwargs) -> SamplingResult:
+    def sample(self, frames: list[np.ndarray], **kwargs: Any) -> SamplingResult:
         """
         Sample frames adaptively based on motion/change detection.
 
@@ -214,7 +214,7 @@ class ProgressiveSampler(FrameSampler):
         increment_rate: float = 0.1,
         max_iterations: int = 5,
         target_ci_width: float = 0.1,
-        min_frames_threshold: int = 30,
+        min_frames_threshold: float = 30,
         confidence_level: float = 0.95,
         verbose: bool = False,
     ):
@@ -237,7 +237,10 @@ class ProgressiveSampler(FrameSampler):
         self.target_ci_width = target_ci_width
 
     def sample(
-        self, frames: list[np.ndarray], metric_func: Callable | None = None, **kwargs
+        self,
+        frames: list[np.ndarray],
+        metric_func: Callable | None = None,
+        **kwargs: Any,
     ) -> SamplingResult:
         """
         Sample frames progressively, refining based on confidence intervals.
@@ -264,7 +267,7 @@ class ProgressiveSampler(FrameSampler):
         # If no metric function provided, use frame differences as proxy
         if metric_func is None:
 
-            def default_metric(frame_idx):
+            def default_metric(frame_idx: int) -> float:
                 if frame_idx == 0:
                     return 0.0
                 return FrameDifferenceCalculator.calculate_histogram_difference(
@@ -274,7 +277,9 @@ class ProgressiveSampler(FrameSampler):
             metric_func = default_metric
 
         # Progressive sampling
-        sampled_indices = set()
+        sampled_indices: set[int] = set()
+        ci_lower: float | None
+        ci_upper: float | None
         current_rate = self.initial_rate
         iteration = 0
         ci_width = float("inf")
@@ -331,7 +336,11 @@ class ProgressiveSampler(FrameSampler):
             total_frames=num_frames,
             sampling_rate=len(indices) / num_frames,
             confidence_level=self.confidence_level,
-            confidence_interval=(ci_lower, ci_upper) if ci_lower is not None else None,
+            confidence_interval=(
+                (ci_lower, ci_upper)
+                if ci_lower is not None and ci_upper is not None
+                else None
+            ),
             strategy_used="progressive",
             metadata={
                 "iterations": iteration,
@@ -356,7 +365,7 @@ class SceneAwareSampler(FrameSampler):
         boundary_window: int = 2,
         min_scene_samples: int = 3,
         base_rate: float = 0.3,
-        min_frames_threshold: int = 30,
+        min_frames_threshold: float = 30,
         confidence_level: float = 0.95,
         verbose: bool = False,
     ):
@@ -410,7 +419,7 @@ class SceneAwareSampler(FrameSampler):
 
         return scenes
 
-    def sample(self, frames: list[np.ndarray], **kwargs) -> SamplingResult:
+    def sample(self, frames: list[np.ndarray], **kwargs: Any) -> SamplingResult:
         """
         Sample frames with scene awareness.
 

@@ -78,7 +78,12 @@ class TestImageMagickWrapperIntegration:
             # Validate metadata structure
             assert result["engine"] == "imagemagick"
             assert result["render_ms"] > 0
-            assert result["kilobytes"] > 0
+            # Since the lossy-axis change (PR #59) the 32-colour reduction of
+            # this fixture compresses below 1 KB, and the metadata truncates
+            # (int(bytes/1024) == 0). Assert the real file is non-empty and
+            # that the metadata agrees with it instead of assuming >= 1 KB.
+            assert output_path.stat().st_size > 0
+            assert result["kilobytes"] == int(output_path.stat().st_size / 1024)
             assert "command" in result
 
             # Validate functional change

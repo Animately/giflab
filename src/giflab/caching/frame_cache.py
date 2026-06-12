@@ -351,14 +351,14 @@ class FrameCache:
                 )
 
             # Check disk cache
-            entry = self._load_from_disk(cache_key)
-            if entry:
+            disk_entry = self._load_from_disk(cache_key)
+            if disk_entry:
                 # Validate file hasn't changed
                 try:
                     stat = file_path.stat()
                     if (
-                        entry.file_size != stat.st_size
-                        or abs(entry.file_mtime - stat.st_mtime) > 0.001
+                        disk_entry.file_size != stat.st_size
+                        or abs(disk_entry.file_mtime - stat.st_mtime) > 0.001
                     ):
                         # File has changed, invalidate cache
                         self._invalidate_disk_entry(cache_key)
@@ -369,29 +369,29 @@ class FrameCache:
                     return None
 
                 # Check TTL
-                if time.time() - entry.created_at > self.ttl_seconds:
+                if time.time() - disk_entry.created_at > self.ttl_seconds:
                     self._invalidate_disk_entry(cache_key)
                     self._stats.misses += 1
                     return None
 
                 # Check frames match requested max_frames
-                if max_frames is not None and len(entry.frames) != min(
-                    entry.frame_count, max_frames
+                if max_frames is not None and len(disk_entry.frames) != min(
+                    disk_entry.frame_count, max_frames
                 ):
                     self._stats.misses += 1
                     return None
 
                 # Promote to memory cache
-                self._add_to_memory(entry)
+                self._add_to_memory(disk_entry)
 
                 self._stats.hits += 1
                 logger.debug(f"Cache hit (disk) for {file_path.name}")
                 return (
-                    entry.frames,
-                    entry.frame_count,
-                    entry.dimensions,
-                    entry.duration_ms,
-                    entry.has_alpha,
+                    disk_entry.frames,
+                    disk_entry.frame_count,
+                    disk_entry.dimensions,
+                    disk_entry.duration_ms,
+                    disk_entry.has_alpha,
                 )
 
             self._stats.misses += 1

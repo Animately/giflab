@@ -19,7 +19,7 @@ class ValidationRule:
     def __init__(
         self,
         name: str,
-        validator: Callable[[Any], bool],
+        validator: Callable[..., bool],
         error_message: str,
         severity: str = "error",
     ):
@@ -27,7 +27,9 @@ class ValidationRule:
 
         Args:
             name: Name of the rule
-            validator: Function that returns True if valid
+            validator: Function that returns True if valid. Either 1-arg
+                ``(value)`` or 2-arg ``(value, config)`` -- 2-arg validators
+                are dispatched through ``validate_with_context``.
             error_message: Error message if validation fails
             severity: "error", "warning", or "info"
         """
@@ -44,6 +46,25 @@ class ValidationRule:
         """
         try:
             if self.validator(value):
+                return True, None
+            return False, self.error_message
+        except Exception as e:
+            return False, f"{self.error_message}: {e}"
+
+    def validate_with_context(
+        self, value: Any, config: dict[str, Any]
+    ) -> tuple[bool, str | None]:
+        """Validate a value against this rule with full config context.
+
+        Used for 2-arg validators ``(value, config)`` that need to compare a
+        value against other configuration values. Mirrors ``validate()``'s
+        contract exactly (same try/except and error-message wrapping).
+
+        Returns:
+            tuple of (is_valid, error_message)
+        """
+        try:
+            if self.validator(value, config):
                 return True, None
             return False, self.error_message
         except Exception as e:
@@ -222,7 +243,7 @@ class DependencyValidator:
     """Validators for configuration dependencies."""
 
     @staticmethod
-    def requires(other_path: str, condition: Callable) -> Callable:
+    def requires(other_path: str, condition: Callable[..., bool]) -> Callable:
         """Create a validator that depends on another config value."""
 
         def validator(value: Any, config: dict[str, Any]) -> bool:
@@ -267,11 +288,11 @@ class DependencyValidator:
 class ConfigurationValidator:
     """Main configuration validator with comprehensive rules."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.rules: dict[str, list[ValidationRule]] = {}
         self._register_default_rules()
 
-    def _register_default_rules(self):
+    def _register_default_rules(self) -> None:
         """Register default validation rules for known configurations."""
 
         # Frame cache rules
@@ -432,7 +453,7 @@ class ConfigurationValidator:
             ),
         )
 
-    def add_rule(self, path: str, rule: ValidationRule):
+    def add_rule(self, path: str, rule: ValidationRule) -> None:
         """Add a validation rule for a configuration path."""
         if path not in self.rules:
             self.rules[path] = []
@@ -444,7 +465,7 @@ class ConfigurationValidator:
         Returns:
             Dictionary mapping severity to list of messages
         """
-        results = {"error": [], "warning": [], "info": []}
+        results: dict[str, list[str]] = {"error": [], "warning": [], "info": []}
 
         for path, rules in self.rules.items():
             value = _get_value_by_path(config, path)
@@ -610,7 +631,8 @@ class ConfigurationValidator:
 def _get_value_by_path(config: dict[str, Any], path: str) -> Any:
     """Get a value from nested dict using dot-separated path."""
     parts = path.split(".")
-    value = config
+    # The cursor walks heterogeneous nested dicts; honest type is Any.
+    value: Any = config
 
     for part in parts:
         if isinstance(value, dict):
@@ -643,6 +665,8 @@ def validate_config_file(config_path: Path) -> dict[str, list[str]]:
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("config", config_path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"Cannot load config module from: {config_path}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 

@@ -424,7 +424,10 @@ class ParallelMetricsCalculator:
         return chunks
 
     def _process_with_pool(
-        self, chunks: list, metric_functions: dict[str, Callable], config: Any
+        self,
+        chunks: list,
+        metric_functions: dict[str, Callable | None],
+        config: Any,
     ) -> list[dict]:
         """Process chunks using ProcessPoolExecutor.
 
@@ -517,7 +520,10 @@ class ParallelMetricsCalculator:
         return [r for r in results if r is not None]
 
     def _process_with_threads(
-        self, chunks: list, metric_functions: dict[str, Callable], config: Any
+        self,
+        chunks: list,
+        metric_functions: dict[str, Callable | None],
+        config: Any,
     ) -> list[dict]:
         """Process chunks using ThreadPoolExecutor (for I/O-bound operations).
 
@@ -595,9 +601,13 @@ class ParallelMetricsCalculator:
 
 def _process_chunk_worker(
     chunk: list[tuple[int, tuple[np.ndarray, np.ndarray]]],
-    metric_functions: dict[str, Callable],
+    metric_functions: dict[str, Callable | None],
     config: Any,
 ) -> dict[str, list[tuple[int, float]]]:
+    # NOTE: only the KEYS of metric_functions are used (metric selection).
+    # Values may be None -- workers resolve the real callables from their own
+    # function_map below because functions must be importable in the
+    # subprocess (pickling); the dict values are never invoked.
     """Worker function to process a chunk of frame pairs.
 
     This function is designed to be pickleable for multiprocessing.
@@ -627,7 +637,7 @@ def _process_chunk_worker(
     )
 
     # Map function names to actual functions
-    function_map = {
+    function_map: dict[str, Callable[..., Any]] = {
         "ssim": ssim,
         "ms_ssim": calculate_ms_ssim,
         "psnr": calculate_safe_psnr,

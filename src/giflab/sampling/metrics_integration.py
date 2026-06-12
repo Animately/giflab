@@ -106,13 +106,13 @@ def calculate_metrics_with_sampling(
             # For progressive sampling, we need a metric function
             if strategy_enum == SamplingStrategy.PROGRESSIVE:
                 # Define a simple metric function for progressive sampling
-                def frame_diff_metric(idx):
+                def frame_diff_metric(idx: int) -> float:
                     if idx == 0 or idx >= len(original_frames):
                         return 0.0
                     # Use MSE between consecutive frames as metric
                     prev = original_frames[idx - 1].astype(np.float32)
                     curr = original_frames[idx].astype(np.float32)
-                    return np.mean((curr - prev) ** 2)
+                    return float(np.mean((curr - prev) ** 2))
 
                 sampling_result = sampler.sample(
                     original_frames, metric_func=frame_diff_metric
@@ -136,10 +136,7 @@ def calculate_metrics_with_sampling(
                     for i in sampled_indices
                 ]
                 # Remove duplicates while preserving order
-                seen = set()
-                compressed_indices = [
-                    x for x in compressed_indices if not (x in seen or seen.add(x))
-                ]
+                compressed_indices = list(dict.fromkeys(compressed_indices))
                 sampled_compressed = [compressed_frames[i] for i in compressed_indices]
 
             logger.info(
@@ -154,8 +151,9 @@ def calculate_metrics_with_sampling(
             sampled_original = original_frames
             sampled_compressed = compressed_frames
 
-    # Calculate metrics on sampled frames
-    metrics = calculate_comprehensive_metrics_from_frames(
+    # Calculate metrics on sampled frames (dict[str, Any]: the optional
+    # _sampling_info entry below nests a dict, beyond the base float|str values)
+    metrics: dict[str, Any] = calculate_comprehensive_metrics_from_frames(
         sampled_original,
         sampled_compressed,
         config=config,
@@ -270,7 +268,7 @@ def estimate_sampling_speedup(
         return 1.0  # No speedup if not sampling
 
     # Get expected sampling rate for strategy
-    strategy_rates = {
+    strategy_rates: dict[str, float] = {
         "uniform": FRAME_SAMPLING.get("uniform", {}).get("sampling_rate", 0.3),
         "adaptive": 0.4,  # Adaptive varies, use average estimate
         "progressive": 0.25,  # Progressive starts low

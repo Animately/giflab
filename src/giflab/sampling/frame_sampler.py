@@ -32,9 +32,9 @@ class SamplingResult:
     confidence_level: float | None = None  # Statistical confidence
     confidence_interval: tuple[float, float] | None = None  # CI bounds
     strategy_used: str = ""  # Name of strategy used
-    metadata: dict[str, Any] = None  # Additional strategy-specific data
+    metadata: dict[str, Any] | None = None  # Additional strategy-specific data
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.metadata is None:
             self.metadata = {}
 
@@ -57,10 +57,10 @@ class FrameSampler(ABC):
 
     def __init__(
         self,
-        min_frames_threshold: int = 30,
+        min_frames_threshold: float = 30,
         confidence_level: float = 0.95,
         verbose: bool = False,
-    ):
+    ) -> None:
         """
         Initialize frame sampler.
 
@@ -74,7 +74,7 @@ class FrameSampler(ABC):
         self.verbose = verbose
 
     @abstractmethod
-    def sample(self, frames: list[np.ndarray], **kwargs) -> SamplingResult:
+    def sample(self, frames: list[np.ndarray], **kwargs: Any) -> SamplingResult:
         """
         Sample frames based on strategy.
 
@@ -100,7 +100,7 @@ class FrameSampler(ABC):
         return num_frames >= self.min_frames_threshold
 
     def calculate_confidence_interval(
-        self, samples: list[float], confidence_level: float = None
+        self, samples: list[float], confidence_level: float | None = None
     ) -> tuple[float, float]:
         """
         Calculate confidence interval for sampled metrics.
@@ -117,12 +117,12 @@ class FrameSampler(ABC):
 
         if len(samples) < 2:
             # Can't calculate CI with < 2 samples
-            mean = np.mean(samples) if samples else 0
+            mean = float(np.mean(samples)) if samples else 0.0
             return (mean, mean)
 
         # Calculate mean and standard error
-        mean = np.mean(samples)
-        std_err = np.std(samples, ddof=1) / np.sqrt(len(samples))
+        mean = float(np.mean(samples))
+        std_err = float(np.std(samples, ddof=1) / np.sqrt(len(samples)))
 
         # Calculate confidence interval using t-distribution
         # For simplicity, using z-score approximation
@@ -136,7 +136,7 @@ class FrameSampler(ABC):
         margin = z * std_err
         return (mean - margin, mean + margin)
 
-    def log_sampling_info(self, result: SamplingResult):
+    def log_sampling_info(self, result: SamplingResult) -> None:
         """Log sampling information if verbose."""
         if self.verbose:
             logger.info(
@@ -221,10 +221,10 @@ class FrameDifferenceCalculator:
 
 def create_sampler(
     strategy: SamplingStrategy,
-    min_frames_threshold: int = 30,
+    min_frames_threshold: float = 30,
     confidence_level: float = 0.95,
     verbose: bool = False,
-    **kwargs,
+    **kwargs: Any,
 ) -> FrameSampler:
     """
     Factory function to create a sampler.
@@ -246,7 +246,7 @@ def create_sampler(
         UniformSampler,
     )
 
-    samplers = {
+    samplers: dict[SamplingStrategy, type[FrameSampler]] = {
         SamplingStrategy.UNIFORM: UniformSampler,
         SamplingStrategy.ADAPTIVE: AdaptiveSampler,
         SamplingStrategy.PROGRESSIVE: ProgressiveSampler,

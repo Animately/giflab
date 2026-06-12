@@ -4,18 +4,21 @@ Decorators for easy metric instrumentation.
 
 import functools
 import time
-from collections.abc import Callable
-from contextlib import contextmanager
-from typing import Any, Optional
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
+from typing import Any, ParamSpec, TypeVar
 
 from .metrics_collector import get_metrics_collector
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 
 def track_timing(
-    metric_name: str = None,
-    tags: dict[str, str] = None,
+    metric_name: str | None = None,
+    tags: dict[str, str] | None = None,
     include_args: bool = False,
-):
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Decorator to track function execution time.
 
@@ -30,11 +33,11 @@ def track_timing(
             return cache[key]
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         name = metric_name or f"{func.__module__}.{func.__name__}.duration"
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             collector = get_metrics_collector()
 
             # Build tags
@@ -61,11 +64,11 @@ def track_timing(
 
 
 def track_counter(
-    metric_name: str = None,
+    metric_name: str | None = None,
     value: float = 1.0,
-    tags: dict[str, str] = None,
+    tags: dict[str, str] | None = None,
     on_success_only: bool = True,
-):
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Decorator to track function call counts.
 
@@ -81,11 +84,11 @@ def track_counter(
             return cached_value
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         name = metric_name or f"{func.__module__}.{func.__name__}.calls"
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             collector = get_metrics_collector()
             metric_tags = tags.copy() if tags else {}
 
@@ -109,8 +112,8 @@ def track_counter(
 def track_gauge(
     metric_name: str,
     value_func: Callable[[Any], float],
-    tags: dict[str, str] = None,
-):
+    tags: dict[str, str] | None = None,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Decorator to track gauge values from function results.
 
@@ -129,9 +132,9 @@ def track_gauge(
             return cache.items()
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             collector = get_metrics_collector()
 
             result = func(*args, **kwargs)
@@ -152,8 +155,8 @@ def track_gauge(
 def track_histogram(
     metric_name: str,
     value_func: Callable[[Any], float],
-    tags: dict[str, str] = None,
-):
+    tags: dict[str, str] | None = None,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """
     Decorator to track histogram values from function results.
 
@@ -172,9 +175,9 @@ def track_histogram(
             return load_frame(gif_path)
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             collector = get_metrics_collector()
 
             result = func(*args, **kwargs)
@@ -193,7 +196,9 @@ def track_histogram(
 
 
 @contextmanager
-def timer_context(metric_name: str, tags: dict[str, str] = None):
+def timer_context(
+    metric_name: str, tags: dict[str, str] | None = None
+) -> Iterator[None]:
     """
     Context manager for timing code blocks.
 
@@ -215,9 +220,9 @@ def timer_context(metric_name: str, tags: dict[str, str] = None):
 def counter_context(
     metric_name: str,
     value: float = 1.0,
-    tags: dict[str, str] = None,
+    tags: dict[str, str] | None = None,
     on_success_only: bool = True,
-):
+) -> Iterator[None]:
     """
     Context manager for counting operations.
 
@@ -253,7 +258,7 @@ class MetricTracker:
                     tracker.counter("processed")
     """
 
-    def __init__(self, prefix: str, tags: dict[str, str] = None):
+    def __init__(self, prefix: str, tags: dict[str, str] | None = None) -> None:
         """
         Initialize metric tracker.
 
@@ -265,31 +270,41 @@ class MetricTracker:
         self.default_tags = tags or {}
         self.collector = get_metrics_collector()
 
-    def timer(self, name: str, tags: dict[str, str] = None):
+    def timer(
+        self, name: str, tags: dict[str, str] | None = None
+    ) -> AbstractContextManager[None]:
         """Create timer context."""
         metric_name = f"{self.prefix}.{name}"
         metric_tags = {**self.default_tags, **(tags or {})}
         return timer_context(metric_name, metric_tags)
 
-    def counter(self, name: str, value: float = 1.0, tags: dict[str, str] = None):
+    def counter(
+        self, name: str, value: float = 1.0, tags: dict[str, str] | None = None
+    ) -> None:
         """Record counter."""
         metric_name = f"{self.prefix}.{name}"
         metric_tags = {**self.default_tags, **(tags or {})}
         self.collector.record_counter(metric_name, value, metric_tags)
 
-    def gauge(self, name: str, value: float, tags: dict[str, str] = None):
+    def gauge(
+        self, name: str, value: float, tags: dict[str, str] | None = None
+    ) -> None:
         """Record gauge."""
         metric_name = f"{self.prefix}.{name}"
         metric_tags = {**self.default_tags, **(tags or {})}
         self.collector.record_gauge(metric_name, value, metric_tags)
 
-    def histogram(self, name: str, value: float, tags: dict[str, str] = None):
+    def histogram(
+        self, name: str, value: float, tags: dict[str, str] | None = None
+    ) -> None:
         """Record histogram."""
         metric_name = f"{self.prefix}.{name}"
         metric_tags = {**self.default_tags, **(tags or {})}
         self.collector.record_histogram(metric_name, value, metric_tags)
 
-    def record_error(self, error: Exception, tags: dict[str, str] = None):
+    def record_error(
+        self, error: Exception, tags: dict[str, str] | None = None
+    ) -> None:
         """Record error occurrence."""
         metric_tags = {
             **self.default_tags,
@@ -299,7 +314,9 @@ class MetricTracker:
         self.collector.record_counter(f"{self.prefix}.errors", 1.0, metric_tags)
 
 
-def track_cache_operation(cache_name: str):
+def track_cache_operation(
+    cache_name: str,
+) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """
     Specialized decorator for cache operations.
 
@@ -314,9 +331,9 @@ def track_cache_operation(cache_name: str):
             return None, False
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             collector = get_metrics_collector()
 
             start_time = time.perf_counter()

@@ -9,12 +9,15 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from ..config import VALIDATION_CACHE
 from .validation_cache import ValidationCache, get_validation_cache
+
+if TYPE_CHECKING:
+    from ..config import MetricsConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +32,7 @@ def _get_metric_config(metric_type: str) -> dict[str, Any]:
     Returns:
         Configuration dictionary for the metric
     """
-    config = {}
+    config: dict[str, Any] = {}
 
     if metric_type == "ms_ssim":
         config["scales"] = 5  # Default MS-SSIM scales
@@ -81,7 +84,9 @@ def calculate_ms_ssim_cached(
     # Try to get from cache
     cached_value = cache.get(frame1, frame2, "ms_ssim", config, frame_indices)
 
-    if cached_value is not None:
+    # Scalar metric: a non-numeric cache entry would be a corrupt/foreign
+    # entry -- treat it as a miss and recompute rather than crashing.
+    if isinstance(cached_value, int | float):
         return float(cached_value)
 
     # Calculate and cache
@@ -130,15 +135,16 @@ def calculate_ssim_cached(
             frame1_gray = frame1
             frame2_gray = frame2
 
-        return ssim(frame1_gray, frame2_gray, data_range=255)
+        return float(ssim(frame1_gray, frame2_gray, data_range=255))
 
     cache = get_validation_cache()
-    config = {}
+    config = _get_metric_config("ssim")
 
     # Try to get from cache
     cached_value = cache.get(frame1, frame2, "ssim", config, frame_indices)
 
-    if cached_value is not None:
+    # Scalar metric: non-numeric cache entry -> treat as miss (see ms_ssim).
+    if isinstance(cached_value, int | float):
         return float(cached_value)
 
     # Calculate and cache
@@ -153,7 +159,7 @@ def calculate_ssim_cached(
         frame1_gray = frame1
         frame2_gray = frame2
 
-    value = ssim(frame1_gray, frame2_gray, data_range=255)
+    value = float(ssim(frame1_gray, frame2_gray, data_range=255))
 
     cache.put(frame1, frame2, "ssim", value, config, frame_indices)
 
@@ -196,7 +202,8 @@ def calculate_lpips_cached(
         # The key is always present (NaN on failure), so this default is dead;
         # use NaN ("not measured") rather than a 0.5 sentinel for the
         # never-hit case so the shape stays honest if the contract changes.
-        return result.get("lpips_quality_mean", float("nan"))
+        lpips_value = result.get("lpips_quality_mean", float("nan"))
+        return lpips_value if isinstance(lpips_value, float) else float("nan")
 
     cache = get_validation_cache()
     config = {"net": net, "version": version}
@@ -204,7 +211,8 @@ def calculate_lpips_cached(
     # Try to get from cache
     cached_value = cache.get(frame1, frame2, "lpips", config, frame_indices)
 
-    if cached_value is not None:
+    # Scalar metric: non-numeric cache entry -> treat as miss (see ms_ssim).
+    if isinstance(cached_value, int | float):
         return float(cached_value)
 
     # Calculate and cache
@@ -214,7 +222,8 @@ def calculate_lpips_cached(
         [frame1], [frame2], config={"device": "auto"}
     )
     # Key always present (NaN on failure); dead default kept honest with NaN.
-    value = result.get("lpips_quality_mean", float("nan"))
+    raw_value = result.get("lpips_quality_mean", float("nan"))
+    value = raw_value if isinstance(raw_value, float) else float("nan")
 
     cache.put(frame1, frame2, "lpips", value, config, frame_indices)
 
@@ -277,7 +286,10 @@ def calculate_gradient_color_cached(
                     logger.debug(
                         f"Cache hit (memory): gradient_color for {len(frames1)} frames"
                     )
-                    return entry.value
+                    # This key caches the whole result dict; a non-dict entry
+                    # would be foreign -- fall through and recompute.
+                    if isinstance(entry.value, dict):
+                        return entry.value
 
     # Calculate and cache
     from ..gradient_color_artifacts import calculate_gradient_color_metrics
@@ -309,6 +321,7 @@ def calculate_ssimulacra2_cached(
     frames1: list[np.ndarray],
     frames2: list[np.ndarray],
     use_validation_cache: bool = True,
+    config: "MetricsConfig | None" = None,
 ) -> dict[str, Any]:
     """
     Calculate SSIMulacra2 metrics with ValidationCache support.
@@ -317,10 +330,19 @@ def calculate_ssimulacra2_cached(
         frames1: First set of frames
         frames2: Second set of frames
         use_validation_cache: Whether to use validation cache
+        config: Metrics configuration forwarded to the underlying
+            calculate_ssimulacra2_quality_metrics call (which requires it);
+            defaults to DEFAULT_METRICS_CONFIG, matching the live metrics.py
+            call path.
 
     Returns:
         Dictionary of SSIMulacra2 metrics
     """
+    if config is None:
+        from ..config import DEFAULT_METRICS_CONFIG
+
+        config = DEFAULT_METRICS_CONFIG
+
     if (
         not use_validation_cache
         or not VALIDATION_CACHE.get("enabled", True)
@@ -329,7 +351,7 @@ def calculate_ssimulacra2_cached(
         # Cache disabled, calculate directly
         from ..ssimulacra2_metrics import calculate_ssimulacra2_quality_metrics
 
-        return calculate_ssimulacra2_quality_metrics(frames1, frames2)
+        return calculate_ssimulacra2_quality_metrics(frames1, frames2, config)
 
     cache = get_validation_cache()
 
@@ -340,12 +362,12 @@ def calculate_ssimulacra2_cached(
         all_frames_hash.update(cache.get_frame_hash(f2).encode())
 
     cache_key = all_frames_hash.hexdigest()[:32]
-    config = {"enable_gpu": False}
+    cache_config = _get_metric_config("ssimulacra2")
 
     # Try to get from cache
     if frames1 and frames2:
         special_key = cache.generate_cache_key(
-            cache_key, cache_key, "ssimulacra2", config
+            cache_key, cache_key, "ssimulacra2", cache_config
         )
 
         with cache._lock:
@@ -357,12 +379,14 @@ def calculate_ssimulacra2_cached(
                     logger.debug(
                         f"Cache hit (memory): ssimulacra2 for {len(frames1)} frames"
                     )
-                    return entry.value
+                    # Whole-result dict cache; non-dict entry -> recompute.
+                    if isinstance(entry.value, dict):
+                        return entry.value
 
     # Calculate and cache
     from ..ssimulacra2_metrics import calculate_ssimulacra2_quality_metrics
 
-    result = calculate_ssimulacra2_quality_metrics(frames1, frames2)
+    result = calculate_ssimulacra2_quality_metrics(frames1, frames2, config)
 
     # Store in cache
     if frames1 and frames2:
@@ -372,7 +396,7 @@ def calculate_ssimulacra2_cached(
             metric_type="ssimulacra2",
             value=result,
             config_hash=hashlib.md5(
-                json.dumps(config, sort_keys=True).encode()
+                json.dumps(cache_config, sort_keys=True).encode()
             ).hexdigest()[:16],
             timestamp=time.time(),
             metadata={"num_frames": len(frames1)},
@@ -403,16 +427,23 @@ def integrate_validation_cache_with_metrics() -> None:
 
         # Store original functions
         if not hasattr(metrics, "_original_calculate_ms_ssim"):
-            metrics._original_calculate_ms_ssim = metrics.calculate_ms_ssim
+            # Deliberate runtime module patching for cache integration.
+            metrics._original_calculate_ms_ssim = metrics.calculate_ms_ssim  # type: ignore[attr-defined]
 
         # Replace with cached versions
-        def wrapped_ms_ssim(frame1, frame2, scales=5, use_cache=True):
+        def wrapped_ms_ssim(
+            frame1: np.ndarray,
+            frame2: np.ndarray,
+            scales: int = 5,
+            use_cache: bool = True,
+        ) -> float:
             if use_cache and VALIDATION_CACHE.get("cache_ms_ssim", True):
                 return calculate_ms_ssim_cached(
                     frame1, frame2, scales, use_validation_cache=True
                 )
             else:
-                return metrics._original_calculate_ms_ssim(
+                # Deliberate runtime module patching for cache integration.
+                return metrics._original_calculate_ms_ssim(  # type: ignore[attr-defined, no-any-return]
                     frame1, frame2, scales, use_cache
                 )
 

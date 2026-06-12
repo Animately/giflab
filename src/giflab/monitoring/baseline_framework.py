@@ -17,7 +17,7 @@ import statistics
 import threading
 import time
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -571,7 +571,7 @@ def baseline_performance_test(
     framework: PerformanceBaselineFramework,
     operation_type: str,
     force_baseline: bool = False,
-):
+) -> Iterator[bool]:
     """Context manager for automatic performance measurement."""
     cache_enabled = not (
         force_baseline or framework.should_run_baseline_test(operation_type)
@@ -608,8 +608,9 @@ def is_baseline_testing_enabled() -> bool:
     try:
         from ..config import MONITORING
 
-        return MONITORING.get("enabled", True) and MONITORING.get("systems", {}).get(
-            "frame_cache", True
+        return bool(
+            MONITORING.get("enabled", True)
+            and MONITORING.get("systems", {}).get("frame_cache", True)
         )
     except ImportError:
         return False

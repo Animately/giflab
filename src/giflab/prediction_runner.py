@@ -335,9 +335,7 @@ class PredictionRunner:
 
             # Calculate full quality metrics
             try:
-                metrics = calculate_comprehensive_metrics(
-                    str(gif_path), str(output_path)
-                )
+                metrics = calculate_comprehensive_metrics(gif_path, output_path)
             except Exception as e:
                 self.logger.warning(f"Metrics calculation failed: {e}")
                 metrics = {}

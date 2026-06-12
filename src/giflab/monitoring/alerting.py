@@ -8,7 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from ..config import MONITORING
 from .metrics_collector import MetricSummary, MetricType, get_metrics_collector
@@ -94,7 +94,7 @@ class AlertManager:
     Manages alert rules and evaluates metrics against thresholds.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize alert manager with default rules."""
         self.rules: list[AlertRule] = []
         self.alerts: list[Alert] = []
@@ -104,7 +104,7 @@ class AlertManager:
         # Load default rules from config
         self._load_default_rules()
 
-    def _load_default_rules(self):
+    def _load_default_rules(self) -> None:
         """Load default alert rules from configuration."""
         alerts_config = MONITORING.get("alerts", {})
 
@@ -130,12 +130,17 @@ class AlertManager:
             "resize": 200,
         }
 
+        def _make_memory_condition(lim: float) -> Callable[[float], bool]:
+            # Captures the per-cache limit at call time (same semantics as the
+            # previous default-argument lambda idiom, but typeable by mypy).
+            return lambda x: x / lim > 0.8
+
         for cache_type, limit in memory_limits.items():
             self.add_rule(
                 AlertRule(
                     name=f"cache.{cache_type}.memory_usage",
                     metric_pattern=f"cache.{cache_type}.memory_usage_mb",
-                    condition=lambda x, lim=limit: x / lim > 0.8,
+                    condition=_make_memory_condition(limit),
                     warning_threshold=limit
                     * alerts_config.get("memory_usage_warning", 0.8),
                     critical_threshold=limit
@@ -171,11 +176,11 @@ class AlertManager:
                 )
             )
 
-    def add_rule(self, rule: AlertRule):
+    def add_rule(self, rule: AlertRule) -> None:
         """Add a new alert rule."""
         self.rules.append(rule)
 
-    def remove_rule(self, name: str):
+    def remove_rule(self, name: str) -> None:
         """Remove an alert rule by name."""
         self.rules = [r for r in self.rules if r.name != name]
 
@@ -201,7 +206,7 @@ class AlertManager:
         summaries = collector.get_summary(window_seconds=window_seconds)
 
         # Group metrics by type for easier processing
-        metrics_by_name = {}
+        metrics_by_name: dict[str, MetricSummary] = {}
         for summary in summaries:
             key = summary.name
             metrics_by_name[key] = summary
@@ -281,7 +286,7 @@ class AlertManager:
 
         return history
 
-    def clear_alerts(self):
+    def clear_alerts(self) -> None:
         """Clear all active alerts."""
         self.alerts.clear()
 
@@ -328,7 +333,7 @@ class AlertNotifier:
     Handles alert notifications to various channels.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize notifier."""
         self.handlers: dict[str, Callable[[Alert], None]] = {}
 
@@ -336,7 +341,7 @@ class AlertNotifier:
         self.register_handler("log", self._log_handler)
         self.register_handler("console", self._console_handler)
 
-    def register_handler(self, name: str, handler: Callable[[Alert], None]):
+    def register_handler(self, name: str, handler: Callable[[Alert], None]) -> None:
         """
         Register a notification handler.
 
@@ -346,7 +351,7 @@ class AlertNotifier:
         """
         self.handlers[name] = handler
 
-    def notify(self, alert: Alert, handlers: list[str] | None = None):
+    def notify(self, alert: Alert, handlers: list[str] | None = None) -> None:
         """
         Send alert notification.
 
@@ -364,7 +369,7 @@ class AlertNotifier:
                 except Exception as e:
                     logger.error(f"Error in alert handler {handler_name}: {e}")
 
-    def _log_handler(self, alert: Alert):
+    def _log_handler(self, alert: Alert) -> None:
         """Log alert to logger."""
         if alert.level == AlertLevel.CRITICAL:
             logger.critical(str(alert))
@@ -373,7 +378,7 @@ class AlertNotifier:
         else:
             logger.info(str(alert))
 
-    def _console_handler(self, alert: Alert):
+    def _console_handler(self, alert: Alert) -> None:
         """Print alert to console."""
         from rich.console import Console
 

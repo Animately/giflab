@@ -91,12 +91,12 @@ class FrameHashCache:
 
     def get_similarity(self, hash1: str, hash2: str) -> float | None:
         """Retrieve cached similarity score between two frames."""
-        key = tuple(sorted([hash1, hash2]))
+        key = (hash1, hash2) if hash1 <= hash2 else (hash2, hash1)
         return self.similarity_cache.get(key)
 
-    def cache_similarity(self, hash1: str, hash2: str, similarity: float):
+    def cache_similarity(self, hash1: str, hash2: str, similarity: float) -> None:
         """Cache similarity score between two frames."""
-        key = tuple(sorted([hash1, hash2]))
+        key = (hash1, hash2) if hash1 <= hash2 else (hash2, hash1)
 
         if len(self.similarity_cache) >= self.max_size:
             # Simple eviction
@@ -156,7 +156,7 @@ class ConditionalMetricsCalculator:
         self.metrics_calculated = 0
         self.time_saved = 0.0
 
-    def _load_env_config(self):
+    def _load_env_config(self) -> None:
         """Load configuration from environment variables."""
         # Enable/disable conditional processing
         self.enabled = (
@@ -220,7 +220,7 @@ class ConditionalMetricsCalculator:
             # Sample evenly across the GIF
             indices = np.linspace(0, len(frames_original) - 1, num_frames, dtype=int)
         else:
-            indices = range(num_frames)
+            indices = np.arange(num_frames)
 
         # Calculate quick metrics on sampled frames
         mse_values = []
@@ -415,7 +415,7 @@ class ConditionalMetricsCalculator:
             if self.frame_cache:
                 self.frame_cache.cache_similarity(hash1, hash2, similarity)
 
-        return np.mean(similarities) if similarities else 1.0
+        return float(np.mean(similarities)) if similarities else 1.0
 
     def _detect_edges_quick(self, frame: np.ndarray) -> np.ndarray:
         """Quick edge detection using Sobel-like filter."""
@@ -435,7 +435,7 @@ class ConditionalMetricsCalculator:
         edges[:, :-1] += edges_v
 
         threshold = 20 if frame.dtype == np.uint8 else 0.08
-        return edges > threshold
+        return np.asarray(edges > threshold)
 
     def _has_rectangular_regions(self, edges: np.ndarray) -> bool:
         """Check if edge map contains rectangular regions (suggesting UI/text)."""
@@ -626,9 +626,10 @@ class ConditionalMetricsCalculator:
         if force_all or not self.enabled:
             # Bypass optimization, calculate all metrics
             logger.debug("Conditional metrics bypassed, calculating all metrics")
-            return metrics_calculator.calculate_all_metrics(
+            all_results: dict[str, Any] = metrics_calculator.calculate_all_metrics(
                 frames_original, frames_compressed
             )
+            return all_results
 
         start_time = time.time()
 
@@ -656,7 +657,7 @@ class ConditionalMetricsCalculator:
         logger.info(f"Calculating {num_selected} metrics, skipping {num_skipped}")
 
         # Step 4: Calculate selected metrics
-        results = metrics_calculator.calculate_selected_metrics(
+        results: dict[str, Any] = metrics_calculator.calculate_selected_metrics(
             frames_original, frames_compressed, selected_metrics
         )
 
@@ -678,7 +679,7 @@ class ConditionalMetricsCalculator:
 
     def get_optimization_stats(self) -> dict[str, Any]:
         """Get statistics about optimization performance."""
-        stats = {
+        stats: dict[str, Any] = {
             "metrics_calculated": self.metrics_calculated,
             "metrics_skipped": self.metrics_skipped,
             "estimated_time_saved": self.time_saved,
@@ -691,7 +692,7 @@ class ConditionalMetricsCalculator:
 
         return stats
 
-    def reset_stats(self):
+    def reset_stats(self) -> None:
         """Reset optimization statistics."""
         self.metrics_calculated = 0
         self.metrics_skipped = 0
