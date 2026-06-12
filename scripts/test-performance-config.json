@@ -1,7 +1,7 @@
 {
   "thresholds": {
-    "fast": 45,
-    "integration": 300,
+    "fast": 35,
+    "integration": 150,
     "full": 1800
   },
   "alert_on_regression": true,
