@@ -434,11 +434,13 @@ def test_frame_drop_and_clamp_warnings_co_occur(tmp_path: Path) -> None:
 #     now-real palette/dither lossy axis): measured GRADUAL, banding-free
 #     degradation (no posterisation cliff — the failure mode the ceiling
 #     guards against).
-#   - imagemagick (2026-06-12, also a real axis now): gradual after a one-off
-#     quantiser entry-step at L0→10 (~0.24 composite on gradients, banding 0);
-#     whether that step warrants a ceiling is deferred to the follow-up task
-#     giflab-imagemagick-lossy-entry-step-ceiling-calibration — no ceiling
-#     until that calibration lands.
+#   - imagemagick (2026-06-12, also a real axis now; entry-step calibration
+#     closed the same day): a fixed, content-dependent axis-entry cost paid
+#     in full at L=1 (~0.24 composite on colour-dense gradients, zero on
+#     small well-separated palettes, banding 0) — no positive ceiling value
+#     could avoid it — then gradual degradation. NO ceiling (see the
+#     2026-06-12 entry-step finding in
+#     scripts/audit/engine_lossy_calibration.py).
 # Either way the ceiling must never fire for them today. This freezes that
 # invariant.
 _NON_ANIMATELY_WRAPPER_SYMBOLS = {
