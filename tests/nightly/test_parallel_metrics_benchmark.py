@@ -64,6 +64,21 @@ class TestParallelMetricsBenchmark:
                 "test_metric_accuracy_vs_sequential, which is core-count-independent"
             )
 
+        # Untimed warm-up: the first metrics call pays one-time costs (LPIPS
+        # model load). Without it that cost lands in the first timed series —
+        # sequential/small — fabricating an inflated small-scenario "speedup"
+        # (measured locally 2026-06-12: 1.87x cold vs ~1.1x genuine) that the
+        # large >= small * 0.8 shape assert can never beat.
+        warmup_frames = self.test_scenarios["small"]
+        warmup_comp = [
+            np.clip(f.astype(np.float32) * 0.95, 0, 255).astype(np.uint8)
+            for f in warmup_frames
+        ]
+        with mock.patch.dict(os.environ, {"GIFLAB_ENABLE_PARALLEL_METRICS": "false"}):
+            calculate_comprehensive_metrics_from_frames(
+                warmup_frames, warmup_comp, config=DEFAULT_METRICS_CONFIG
+            )
+
         results = []
 
         for scenario_name, frames in self.test_scenarios.items():
