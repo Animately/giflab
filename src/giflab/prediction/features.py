@@ -405,10 +405,10 @@ def _calculate_dct_energy_ratio(frame: np.ndarray) -> float:
 
     High ratio = more detail = harder to compress with lossy.
     """
-    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    gray: np.ndarray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY).astype(np.float32)
 
     # Resize to standard size for consistent DCT
-    gray = cv2.resize(gray, (64, 64)).astype(np.float32)
+    gray = cv2.resize(gray, (64, 64))
 
     # Apply DCT
     dct = cv2.dct(gray)

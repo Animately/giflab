@@ -452,9 +452,7 @@ _NON_ANIMATELY_WRAPPER_SYMBOLS = {
 @pytest.mark.parametrize(
     "engine", sorted(_NON_ANIMATELY_WRAPPER_SYMBOLS), ids=lambda e: e
 )
-def test_ceiling_skipped_for_non_animately_engine(
-    engine: str, tmp_path: Path
-) -> None:
+def test_ceiling_skipped_for_non_animately_engine(engine: str, tmp_path: Path) -> None:
     """The ceiling is animately-calibrated only — every other lossy engine skips
     classification entirely (no clamp, no warning), even at a ``lossy_level``
     (60) well above animately's photographic ceiling (20).

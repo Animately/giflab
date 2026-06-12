@@ -221,7 +221,7 @@ class FrameDifferenceCalculator:
 
 def create_sampler(
     strategy: SamplingStrategy,
-    min_frames_threshold: int = 30,
+    min_frames_threshold: float = 30,
     confidence_level: float = 0.95,
     verbose: bool = False,
     **kwargs: Any,
