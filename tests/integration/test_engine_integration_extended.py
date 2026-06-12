@@ -338,7 +338,8 @@ class TestLossyCompression:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "output.gif"
 
-            # Test lossy compression (lossy_level 15 → quality 85 via inversion)
+            # Test lossy compression (lossy_level 15 → 169-colour palette via
+            # the geometric mapping in _lossy_level_to_palette_size)
             result = compressor.apply(
                 SIMPLE_4FRAME, output_path, params={"lossy_level": 15}
             )
@@ -372,7 +373,8 @@ class TestLossyCompression:
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "output.gif"
 
-            # Test with moderate compression (lossy_level 50 → q_scale ~16)
+            # Test with moderate compression (lossy_level 50 → 64-colour
+            # palettegen/paletteuse via _lossy_level_to_palette_size)
             result = compressor.apply(
                 SIMPLE_4FRAME, output_path, params={"lossy_level": 50}
             )

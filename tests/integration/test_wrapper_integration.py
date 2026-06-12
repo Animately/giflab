@@ -131,7 +131,8 @@ class TestImageMagickWrapperIntegration:
         with tempfile.NamedTemporaryFile(suffix=".gif") as tmp:
             output_path = Path(tmp.name)
 
-            # Test lossy compression (lossy_level 50 → quality 50 via inversion)
+            # Test lossy compression (lossy_level 50 → 64-colour palette via
+            # the geometric mapping in _lossy_level_to_palette_size)
             result = wrapper.apply(test_gif, output_path, params={"lossy_level": 50})
 
             # Validate metadata
@@ -228,7 +229,10 @@ class TestFFmpegWrapperIntegration:
             # Validate metadata
             assert result["engine"] == "ffmpeg"
             assert result["render_ms"] > 0
-            assert "q:v" in result["command"]
+            # Lossy axis is palette quantisation: two-pass palettegen/paletteuse
+            # (the old -q:v knob was inert for GIF output).
+            assert "palettegen" in result["command"]
+            assert "paletteuse" in result["command"]
             assert output_path.exists()
 
     def test_parameter_validation(self, test_gif):

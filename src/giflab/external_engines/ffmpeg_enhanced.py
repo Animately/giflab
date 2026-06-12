@@ -16,7 +16,6 @@ from .common import run_command
 __all__ = [
     "color_reduce_with_dithering",
     "frame_reduce",
-    "lossy_compress",
     "FFMPEG_DITHERING_METHODS",
 ]
 
@@ -149,31 +148,6 @@ def frame_reduce(
         str(input_path),
         "-filter_complex",
         f"fps={fps}",
-        str(output_path),
-    ]
-    return run_command(cmd, engine="ffmpeg", output_path=output_path)
-
-
-def lossy_compress(
-    input_path: Path,
-    output_path: Path,
-    *,
-    qv: int = 30,
-    fps: float = 15.0,
-) -> dict[str, Any]:
-    """Single-pass lossy compression using quantiser *qv* and *fps* filter."""
-    ffmpeg = _ffmpeg_binary()
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-v",
-        "error",
-        "-i",
-        str(input_path),
-        "-lavfi",
-        f"fps={fps}",
-        "-q:v",
-        str(qv),
         str(output_path),
     ]
     return run_command(cmd, engine="ffmpeg", output_path=output_path)

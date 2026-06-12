@@ -174,19 +174,51 @@ def lossy_compress(
     input_path: Path,
     output_path: Path,
     *,
-    quality: int = 80,
+    colors: int = 256,
+    dithering_method: str = "Riemersma",
 ) -> dict[str, Any]:
-    """Lossy compression using ImageMagick's -quality flag."""
-    if quality < 0 or quality > 100:
-        raise ValueError("quality must be in 0–100 range")
+    """Lossy GIF compression via palette-size reduction + dithering.
 
-    cmd = [
-        _magick_binary(),
-        str(input_path),
-        "-quality",
-        str(quality),
-        str(output_path),
-    ]
+    GIF is palette-based, so ImageMagick's engine-native lossy axis is
+    quantisation: ``-dither {method} -colors {N}``. The previous
+    implementation routed lossiness to ``-quality`` — the PNG/JPEG
+    compression-level knob, which does NOT touch GIF pixels — producing
+    byte-identical output at every level (md5-verified, 2026-06-09
+    calibration in ``scripts/audit/engine_lossy_calibration.py``).
+
+    ``colors >= 256`` is a plain re-save (``magick in.gif out.gif``): a GIF
+    palette already fits in 256 entries per frame, so there is nothing to
+    quantise away. This keeps ``lossy_level=0`` honestly untouched
+    (per-frame palettes preserved) — unlike FFmpeg's
+    :func:`~giflab.external_engines.ffmpeg.lossy_compress`, which always
+    re-encodes through a single global palette.
+
+    The public ``lossy_level`` (0–100) maps to *colors* geometrically in
+    ``tool_wrappers._lossy_level_to_palette_size`` (256→16, halving every
+    25 levels). Dithering keeps the degradation smooth
+    (continuous-over-discrete).
+
+    Parameters
+    ----------
+    input_path
+        Source GIF.
+    output_path
+        Destination GIF.
+    colors
+        Target palette size (1–256); >= 256 means plain re-save.
+    dithering_method
+        ImageMagick dither method (default ``Riemersma``, the best
+        all-round performer from the dithering research).
+    """
+    if colors < 1 or colors > 256:
+        raise ValueError("colors must be between 1 and 256 inclusive")
+
+    cmd = [_magick_binary(), str(input_path)]
+
+    if colors < 256:
+        cmd += ["-dither", dithering_method, "-colors", str(colors)]
+
+    cmd.append(str(output_path))
 
     return run_command(cmd, engine="imagemagick", output_path=output_path)
 

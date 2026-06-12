@@ -427,14 +427,20 @@ def test_frame_drop_and_clamp_warnings_co_occur(tmp_path: Path) -> None:
 
 
 # engine → the wrapper symbol looked up inside ``giflab.public_api`` (the patch
-# target). Every non-animately lossy engine is calibrated (2026-06-09,
-# scripts/audit/engine_lossy_calibration.py) and needs NO content ceiling:
-#   - gifsicle / gifski: measured GRADUAL, banding-free degradation (no
-#     posterisation cliff — the failure mode the ceiling guards against).
-#   - ffmpeg / imagemagick: their public ``lossy_level`` is INERT for GIF output
-#     (byte-identical output across all levels — ``-q:v`` / ``-quality`` are
-#     video-DCT / zlib knobs that do not touch GIF pixels), so they cannot cliff.
-# Either way the ceiling must never fire for them. This freezes that invariant.
+# target). Every non-animately lossy engine is calibrated
+# (scripts/audit/engine_lossy_calibration.py) and currently has NO content
+# ceiling:
+#   - gifsicle (2026-06-05) / gifski (2026-06-09) / ffmpeg (2026-06-12, on its
+#     now-real palette/dither lossy axis): measured GRADUAL, banding-free
+#     degradation (no posterisation cliff — the failure mode the ceiling
+#     guards against).
+#   - imagemagick (2026-06-12, also a real axis now): gradual after a one-off
+#     quantiser entry-step at L0→10 (~0.24 composite on gradients, banding 0);
+#     whether that step warrants a ceiling is deferred to the follow-up task
+#     giflab-imagemagick-lossy-entry-step-ceiling-calibration — no ceiling
+#     until that calibration lands.
+# Either way the ceiling must never fire for them today. This freezes that
+# invariant.
 _NON_ANIMATELY_WRAPPER_SYMBOLS = {
     "gifsicle": "GifsicleLossyCompressor",
     "gifski": "GifskiLossyCompressor",

@@ -210,27 +210,90 @@ def lossy_compress(
     input_path: Path,
     output_path: Path,
     *,
-    q_scale: int = 4,
+    colors: int = 256,
+    dithering_method: str = "sierra2_4a",
 ) -> dict[str, Any]:
-    """Lossy compression via FFmpeg."""
-    if q_scale < 1 or q_scale > 31:
-        raise ValueError("q_scale must be in 1–31 range")
+    """Lossy GIF compression via palette-size reduction + dithering.
+
+    GIF is palette-based, so FFmpeg's engine-native lossy axis is the
+    palette: a two-pass ``palettegen=max_colors={colors}`` /
+    ``paletteuse=dither={dithering_method}`` chain (mirroring the
+    long-tested :func:`color_reduce` two-pass structure). FFmpeg has no
+    error-bounded GIF lossy mode like gifsicle's ``--lossy`` — the previous
+    implementation routed lossiness to ``-q:v``, an MPEG/DCT video-quality
+    knob that does NOT touch GIF pixels, producing byte-identical output at
+    every level (md5-verified, 2026-06-09 calibration in
+    ``scripts/audit/engine_lossy_calibration.py``).
+
+    The public ``lossy_level`` (0–100) maps to *colors* geometrically in
+    ``tool_wrappers._lossy_level_to_palette_size`` (256→16, halving every
+    25 levels). Dithering keeps the degradation smooth
+    (continuous-over-discrete).
+
+    Note: unlike ImageMagick's :func:`~giflab.external_engines.imagemagick.lossy_compress`
+    (which plain re-saves at ``colors >= 256``), this always re-encodes
+    through a single palettegen-optimised global palette — slightly lossy
+    for >256-colour animations even at ``colors=256``, but a quality
+    *improvement* over FFmpeg's default generic-palette GIF encode.
+
+    Parameters
+    ----------
+    input_path
+        Source GIF.
+    output_path
+        Destination GIF.
+    colors
+        Target palette size (4–256, FFmpeg's ``palettegen`` ``max_colors``
+        range).
+    dithering_method
+        ``paletteuse`` dither algorithm (default ``sierra2_4a``, FFmpeg's
+        own default).
+    """
+    if colors < 4 or colors > 256:
+        raise ValueError("colors must be in 4–256 range (ffmpeg palettegen max_colors)")
 
     ffmpeg = _ffmpeg_binary()
 
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-v",
-        "error",
-        "-i",
-        str(input_path),
-        "-q:v",
-        str(q_scale),
-        str(output_path),
-    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        palette_path = Path(tmpdir) / "palette.png"
 
-    return run_command(cmd, engine="ffmpeg", output_path=output_path)
+        # 1️⃣ generate a palette capped at *colors* entries
+        gen_cmd = [
+            ffmpeg,
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(input_path),
+            "-filter_complex",
+            f"palettegen=max_colors={colors}",
+            str(palette_path),
+        ]
+        meta1 = run_command(gen_cmd, engine="ffmpeg", output_path=palette_path)
+
+        # 2️⃣ re-encode through the palette with dithering
+        use_cmd = [
+            ffmpeg,
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(input_path),
+            "-i",
+            str(palette_path),
+            "-filter_complex",
+            f"paletteuse=dither={dithering_method}",
+            str(output_path),
+        ]
+        meta2 = run_command(use_cmd, engine="ffmpeg", output_path=output_path)
+
+        # 3️⃣ Combine metadata from both passes (same shape as color_reduce)
+        return {
+            "render_ms": meta1.get("render_ms", 0) + meta2.get("render_ms", 0),
+            "engine": "ffmpeg",
+            "command": f"{meta1.get('command', '')}\n{meta2.get('command', '')}",
+            "kilobytes": meta2.get("kilobytes", 0),
+        }
 
 
 def export_png_sequence(
