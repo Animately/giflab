@@ -656,8 +656,9 @@ def is_cache_effectiveness_monitoring_enabled() -> bool:
     try:
         from ..config import MONITORING
 
-        return MONITORING.get("enabled", True) and MONITORING.get("systems", {}).get(
-            "frame_cache", True
+        return bool(
+            MONITORING.get("enabled", True)
+            and MONITORING.get("systems", {}).get("frame_cache", True)
         )
     except ImportError:
         return False

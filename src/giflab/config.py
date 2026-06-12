@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from giflab.content_classifier import ContentClass
@@ -394,7 +394,9 @@ FRAME_CACHE = {
 }
 
 # Frame sampling configuration for efficient validation
-FRAME_SAMPLING = {
+# Heterogeneous nested dict — annotated as dict[str, Any] so consumers' nested
+# .get() chains type-check (mypy otherwise infers dict[str, object]).
+FRAME_SAMPLING: dict[str, Any] = {
     "enabled": True,  # Enable frame sampling for large GIFs
     "min_frames_threshold": 30,  # Don't sample if fewer frames
     "default_strategy": "adaptive",  # Options: uniform, adaptive, progressive, scene_aware, full
@@ -438,7 +440,9 @@ VALIDATION_CACHE = {
 }
 
 # Performance monitoring configuration for optimization systems
-MONITORING = {
+# Heterogeneous nested dict — annotated as dict[str, Any] so consumers' nested
+# .get() chains type-check (mypy otherwise infers dict[str, object]).
+MONITORING: dict[str, Any] = {
     "enabled": True,  # Enable performance monitoring
     "backend": "sqlite",  # Backend type: "memory", "sqlite", or "statsd"
     "buffer_size": 10000,  # In-memory ring buffer size for recent metrics
