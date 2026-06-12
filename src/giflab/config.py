@@ -316,14 +316,17 @@ class ClassifierConfig:
       every archetype (rich gradient 0.686→0.458 over L0→100, max adjacent
       grid step 0.052, banding 0 throughout) — no cliff, NO ceiling.
     * imagemagick (recalibrated 2026-06-12 after its inert ``-quality``
-      mapping was replaced with ``-dither Riemersma -colors N``): L=0 is an
-      honest plain re-save (composite 1.000); the FIRST quantisation step
-      (L0→10) costs ~0.24 composite on gradient archetypes with banding 0 —
-      an entry-step discontinuity of its quantiser, not progressive
-      posterisation (gradual 0.758→0.508 over L10→100). Whether that entry
-      step warrants a ceiling is deferred to the follow-up task
-      ``giflab-imagemagick-lossy-entry-step-ceiling-calibration``; until that
-      calibration lands, no imagemagick ceiling.
+      mapping was replaced with ``-dither Riemersma -colors N``; entry-step
+      calibration closed the same day): L=0 is an honest plain re-save
+      (composite 1.000); ANY positive level pays a one-off axis-entry cost —
+      content-dependent (~0.19–0.24 composite on colour-dense gradients,
+      zero on small well-separated palettes), paid in full at L=1 even at
+      the gentlest palette target (colors=249), so no positive ceiling
+      value could avoid it, and clamping to 0 would just disable lossy (the
+      PR #40 over-trigger lesson). After entry the curve is GRADUAL and
+      banding-free (0.812→0.508 over L1→100, banding 0 throughout) — not
+      posterisation. NO ceiling (see the 2026-06-12 entry-step finding in
+      ``scripts/audit/engine_lossy_calibration.py``).
 
     The values below are animately-specific. ``ClassifierConfig`` has no
     per-engine dimension because the data says no second engine needs one; if a

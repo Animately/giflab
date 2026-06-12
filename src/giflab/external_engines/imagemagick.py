@@ -198,6 +198,18 @@ def lossy_compress(
     25 levels). Dithering keeps the degradation smooth
     (continuous-over-discrete).
 
+    Measured axis-entry cost (2026-06-12 calibration, ImageMagick 7.1.2-0
+    Q16-HDRI): ANY ``colors < 256`` invocation pays a one-off,
+    content-dependent quantise+dither cost — ~0.19–0.24 ``composite_quality``
+    on colour-dense gradients, ~0 (byte-identical no-op) on small
+    well-separated palettes — even when ``colors`` exceeds the content's
+    unique-colour count (the quantiser remaps colours regardless). After
+    entry, degradation is gradual and banding-free across the whole range.
+    Calibrated as NO content ceiling: the cost is paid in full at the
+    gentlest target, so no positive ceiling could avoid it. See the
+    2026-06-12 entry-step finding in
+    ``scripts/audit/engine_lossy_calibration.py``.
+
     Parameters
     ----------
     input_path

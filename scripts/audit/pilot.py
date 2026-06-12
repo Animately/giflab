@@ -37,8 +37,10 @@ from _common import (  # noqa: E402
     measure_pair,
     open_csv_for_append,
     read_gif_timing,
+    tie_average_unit_ranks,
 )
 from build_sample import sample_balanced, stratify, walk_corpus  # noqa: E402
+from sanity import _classify_metric  # noqa: E402
 
 # Synthetic specs to include in the pilot (must exist in
 # SyntheticGifGenerator.synthetic_specs).
@@ -320,6 +322,14 @@ def analyse_pilot(
         # gif_path -> per-metric normalised rank in [0,1]
         gif_metric_rank: dict[str, dict[str, float]] = defaultdict(dict)
         for m, by_lossy in values_by_metric.items():
+            # Only pairwise-quality metrics vote on disagreement: dispersion
+            # siblings (_std/_min/...), single-stream *_compressed keys and
+            # diagnostic/system metrics (kilobytes, render_ms, ...) don't
+            # measure fidelity to the original, so their "disagreement" with
+            # pair metrics is structural noise (mirrors the PR #54 sanity
+            # DIAGNOSTIC triage — see sanity._classify_metric).
+            if _classify_metric(m) != "pairwise_quality":
+                continue
             vals = by_lossy.get(lossy, [])
             if len(vals) < 3:
                 continue
@@ -344,10 +354,11 @@ def analyse_pilot(
             if v_arr.max() - v_arr.min() < 1e-6:
                 continue
             # Rank-normalize: 1 = best (highest value here; direction
-            # doesn't matter since we take spread)
-            order = np.argsort(v_arr)
-            ranks = np.empty_like(order, dtype=float)
-            ranks[order] = np.linspace(0.0, 1.0, len(order))
+            # doesn't matter since we take spread). Tie-aware: tied values
+            # share their average rank, so partial tie blocks (common at low
+            # lossy where most metrics are tied-perfect) don't get arbitrary
+            # distinct linspace ranks that saturate the spread at 1.0.
+            ranks = tie_average_unit_ranks(v_arr)
             for (p, _), r_val in zip(usable, ranks):
                 gif_metric_rank[p][m] = float(r_val)
 
