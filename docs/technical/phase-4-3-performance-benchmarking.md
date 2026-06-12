@@ -4,6 +4,15 @@
 **Created:** 2025-01-11  
 **Status:** ✅ COMPLETED  
 
+> **⚠️ Historical record.** The benchmarking framework this document describes
+> (`src/giflab/benchmarks/`, the `make benchmark-*` targets, and the
+> Performance Regression Detection workflow) was removed in `648db9a`
+> ("Remove legacy subsystems") and the remaining dead references were cleaned
+> up in 2026-06. The measured results and conclusions below remain valid as a
+> record of the Phase 4.3 validation. Test-suite timing regressions are now
+> monitored by `scripts/monitor_test_performance.py` via the
+> Test Performance Monitoring workflow.
+
 ## Overview
 
 Phase 4.3 completed the comprehensive validation of all architectural improvements implemented in Phases 1-3 through systematic performance benchmarking and optimization validation. This phase established evidence-based conclusions about the effectiveness of experimental features and provided the foundation for data-driven optimization decisions.
