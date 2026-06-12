@@ -380,7 +380,8 @@ class ClassifierConfig:
 # EXPERIMENTAL: Caching disabled by default due to performance degradation found in Phase 4.3 benchmarking
 ENABLE_EXPERIMENTAL_CACHING = False
 
-FRAME_CACHE = {
+# Heterogeneous nested dict -- see MONITORING/FRAME_SAMPLING note below.
+FRAME_CACHE: dict[str, Any] = {
     "enabled": ENABLE_EXPERIMENTAL_CACHING,  # Enable frame caching
     "memory_limit_mb": 500,  # Maximum memory usage for in-memory cache
     "disk_path": None,  # Path to disk cache (None for default ~/.giflab_cache)
@@ -426,7 +427,8 @@ FRAME_SAMPLING: dict[str, Any] = {
 }
 
 # Validation cache configuration for caching metric results
-VALIDATION_CACHE = {
+# Heterogeneous nested dict -- see MONITORING/FRAME_SAMPLING note below.
+VALIDATION_CACHE: dict[str, Any] = {
     "enabled": True,  # Enable validation result caching
     "memory_limit_mb": 100,  # Maximum memory usage for in-memory cache
     "disk_path": None,  # Path to disk cache (None for default ~/.giflab_cache/validation_cache.db)

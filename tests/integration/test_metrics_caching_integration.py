@@ -194,7 +194,8 @@ class TestValidationCacheMetricsIntegration:
                 }
 
                 with patch(
-                    "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics"
+                    "giflab.ssimulacra2_metrics.calculate_ssimulacra2_quality_metrics",
+                    autospec=True,
                 ) as mock_calc:
                     mock_calc.return_value = mock_result
 

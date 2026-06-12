@@ -236,7 +236,7 @@ class ResizedFrameCache:
         frame: np.ndarray,
         target_size: tuple[int, int],
         interpolation: int = cv2.INTER_AREA,
-    ) -> np.ndarray | None:
+    ) -> np.ndarray:
         """
         Get a resized frame from cache or resize and cache it.
 
@@ -246,7 +246,7 @@ class ResizedFrameCache:
             interpolation: OpenCV interpolation method
 
         Returns:
-            Resized frame or None if not in cache
+            Resized frame (computed and cached on a miss -- never None)
         """
         # Convert interpolation to enum
         interp_method = InterpolationMethod.from_cv2(interpolation)
@@ -329,7 +329,7 @@ class ResizedFrameCache:
             total_misses = self._stats["misses"]
             total_requests = total_hits + total_misses
 
-            stats = {
+            stats: dict[str, Any] = {
                 **self._stats,
                 "entries": len(self._cache),
                 "memory_mb": self._current_memory / (1024 * 1024),
