@@ -278,7 +278,7 @@ def _frame_has_transparency(img: Image.Image) -> bool:
         rgba = img.convert("RGBA")
         alpha = rgba.getchannel("A")
         # getextrema returns (min, max); any pixel below 255 means transparency.
-        return alpha.getextrema()[0] < 255
+        return bool(alpha.getextrema()[0] < 255)
     if img.mode == "P":
         # Palette image without a declared transparency index has no alpha.
         return False
@@ -351,7 +351,7 @@ def extract_gif_frames(
     # Try to get from cache first (only if caching is enabled). The background
     # is folded into the cache key for non-white passes, so the white and black
     # passes never collide.
-    if use_cache:
+    if use_cache and get_frame_cache is not None:
         frame_cache = get_frame_cache()
         cached = frame_cache.get(gif_path, max_frames, alpha_background=background)
 
@@ -483,7 +483,7 @@ def _compute_frame_indices(
         return list(range(total_frames))
     # Sample evenly across the entire animation to capture quality issues
     # that may appear later in the animation
-    return np.linspace(0, total_frames - 1, frames_to_extract, dtype=int).tolist()
+    return [int(i) for i in np.linspace(0, total_frames - 1, frames_to_extract, dtype=int)]
 
 
 def resize_to_common_dimensions(
@@ -2170,14 +2170,19 @@ def _nan_fallback_dict(keys: list[str]) -> dict[str, float]:
 # ("not computed" on the normalised [0, 1] scale); ``_frame_count`` and
 # ``_triggered`` are real bookkeeping values, not scores, so they stay 0.0.
 # Mirrors Ssimulacra2Validator._nan_result() — both must emit the same shape.
-def _default_ssimulacra2_fallback() -> dict[str, float]:
+def _default_ssimulacra2_fallback() -> dict[str, float | str]:
     """Return a fresh copy of the canonical SSIMULACRA2 fallback dict.
 
     Returns a new dict each call so callers can safely mutate / cast in place.
+    All values are floats; the declared value type is ``float | str`` so the
+    result is directly assignable to the ``dict[str, float | str]`` metric
+    accumulators it feeds (dict value types are invariant).
     """
-    fallback = _nan_fallback_dict(
-        ["ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min"]
-    )
+    fallback: dict[str, float | str] = {
+        **_nan_fallback_dict(
+            ["ssimulacra2_mean", "ssimulacra2_p95", "ssimulacra2_min"]
+        )
+    }
     fallback["ssimulacra2_frame_count"] = 0.0
     fallback["ssimulacra2_triggered"] = 0.0
     return fallback
@@ -2929,30 +2934,36 @@ def calculate_comprehensive_metrics_from_frames(
                                     "SSIMULACRA2 metrics skipped based on conditional logic"
                                 )
                                 for (
-                                    ssim2_key,
-                                    ssim2_value,
+                                    default_ssim2_key,
+                                    default_ssim2_value,
                                 ) in default_ssimulacra2_metrics.items():
                                     # All default values are floats, safe to cast directly
-                                    optimized_results[ssim2_key] = float(ssim2_value)  # type: ignore[assignment]
+                                    optimized_results[default_ssim2_key] = float(
+                                        default_ssim2_value
+                                    )
                         except Exception as e:
                             logger.warning(
                                 f"SSIMULACRA2 metrics failed in optimized path: {e}, using defaults"
                             )
                             # Add default values
                             for (
-                                ssim2_key,
-                                ssim2_value,
+                                default_ssim2_key,
+                                default_ssim2_value,
                             ) in default_ssimulacra2_metrics.items():
                                 # All default values are floats, safe to cast directly
-                                optimized_results[ssim2_key] = float(ssim2_value)  # type: ignore[assignment]
+                                optimized_results[default_ssim2_key] = float(
+                                    default_ssim2_value
+                                )
                     else:
                         logger.debug("SSIMULACRA2 metrics calculation disabled")
                         for (
-                            ssim2_key,
-                            ssim2_value,
+                            default_ssim2_key,
+                            default_ssim2_value,
                         ) in default_ssimulacra2_metrics.items():
                             # All default values are floats, safe to cast directly
-                            optimized_results[ssim2_key] = float(ssim2_value)  # type: ignore[assignment]
+                            optimized_results[default_ssim2_key] = float(
+                                default_ssim2_value
+                            )
 
                     # Calculate temporal consistency metrics
                     # These are fast metrics that should always be included
@@ -3743,12 +3754,14 @@ def calculate_comprehensive_metrics_from_frames(
                 result[deep_key] = str(deep_value)
 
         # Add SSIMULACRA2 metrics (Phase 3.2)
-        for ssim2_key, ssim2_value in ssimulacra2_metrics.items():
+        # (fresh loop-var names: ssim2_value is bound to a float-valued dict
+        # earlier in this function and mypy pins the loop-variable type)
+        for s2_key, s2_value in ssimulacra2_metrics.items():
             # Convert values to appropriate types for storage
-            result[ssim2_key] = (  # type: ignore[assignment]
-                float(ssim2_value)
-                if isinstance(ssim2_value, int | float)
-                else str(ssim2_value)
+            result[s2_key] = (
+                float(s2_value)
+                if isinstance(s2_value, int | float)
+                else str(s2_value)
             )
 
         # Add text/UI validation metrics (Phase 3.1)

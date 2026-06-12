@@ -250,8 +250,12 @@ def instrument_resize_cache() -> None:
 
         collector = get_metrics_collector()
 
-        # Instrument ResizedFrameCache
-        original_get = ResizedFrameCache.get
+        # Instrument ResizedFrameCache.
+        # Type-erase the original binding: instrumentation wrappers must not
+        # assume the wrapped signature/return type (ResizedFrameCache.get
+        # returns ndarray, never None -- without erasure mypy proves the
+        # miss-counter branch unreachable).
+        original_get: Any = ResizedFrameCache.get
 
         @functools.wraps(original_get)
         def instrumented_get(*args: Any, **kwargs: Any) -> Any:
