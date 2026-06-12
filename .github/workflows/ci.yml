@@ -268,7 +268,6 @@ jobs:
     
     - name: Run mypy (type checking)
       run: poetry run mypy src/giflab/
-      continue-on-error: true  # Allow mypy failures for now
 
   # MacOS tests - repository binary support + Homebrew tools
   macos-tests:
