@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from PIL import Image
 
 # Per-frame GIF delays are stored in centiseconds (10ms granularity).  When a
@@ -170,6 +171,46 @@ def classify_frame_reduction(
         base["frame_reduction_class"] = "frame_loss"
         base["frame_loss"] = True
     return base
+
+
+def tie_average_unit_ranks(vals: np.ndarray) -> np.ndarray:
+    """Tie-aware ranks scaled to [0, 1] (0 = lowest value, 1 = highest).
+
+    Tied values share the average of the 0-based sort positions they span —
+    the behaviour of ``scipy.stats.rankdata(method="average")`` /
+    ``pandas.Series.rank(method="average")`` rescaled to [0, 1]. With no ties
+    this reduces exactly to the old ``linspace(0, 1, n)``-over-argsort scheme.
+
+    Why tie-aware: the audit corpora are heavily tie-saturated (232/371 sweep
+    rows tied at ``banding_score_mean == 0.0``), and assigning arbitrary
+    DISTINCT linspace ranks across a tie block let a tie member land at rank
+    ~1.0 by argsort luck — which pinned the cross-metric disagreement spread
+    near 1.0 and drowned the genuine metric-family disagreement. See
+    ~/repos/obsidian/Work/Tasks/giflab-disagreement-table-saturation.md.
+
+    Args:
+        vals: 1-D array of FINITE values (callers mask NaN/inf beforehand).
+
+    Returns:
+        Array of the same length with ranks in [0, 1]; ``[0.5]`` for a single
+        value, empty for empty input.
+    """
+    v = np.asarray(vals, dtype=float)
+    n = len(v)
+    if n == 0:
+        return np.empty(0, dtype=float)
+    if n == 1:
+        return np.full(1, 0.5)
+    order = np.argsort(v, kind="stable")
+    sorted_v = v[order]
+    # Tie-block boundaries over the sorted values; average the 0-based
+    # positions within each block.
+    block_starts = np.concatenate(([0], np.flatnonzero(np.diff(sorted_v) != 0) + 1))
+    block_ends = np.concatenate((block_starts[1:], [n]))  # exclusive
+    ranks = np.empty(n, dtype=float)
+    for start, end in zip(block_starts, block_ends, strict=True):
+        ranks[order[start:end]] = (start + end - 1) / 2.0
+    return ranks / (n - 1)
 
 
 def open_csv_for_append(

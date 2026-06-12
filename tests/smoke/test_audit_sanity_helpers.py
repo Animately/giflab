@@ -19,6 +19,7 @@ as SUSPICIOUS even when they were well within the metric's resolution.
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 
@@ -1158,3 +1159,76 @@ class TestFixtureMonotonicityBasesIntegration:
             "Expected 'transparency_bearing' in config.fixture_monotonicity_bases; "
             f"got: {cfg['fixture_monotonicity_bases']}"
         )
+
+
+class TestDirectionNaNGuard:
+    """NaN-over-sentinels contract for `_direction`.
+
+    See ~/repos/obsidian/Work/Tasks/giflab-audit-disagreement-tie-aware-ranks.md
+    (validate-edge findings §3): if any identity/pathological aggregate is NaN
+    (possible post-#54 for genuinely edgeless identity content), `_direction`
+    must return "flat" — never silently fall through to "lower_better" via
+    `NaN < 0 == False`.
+    """
+
+    def test_nan_identity_returns_flat(self) -> None:
+        assert sanity._direction(float("nan"), 1.0) == "flat"
+
+    def test_nan_pathological_returns_flat(self) -> None:
+        assert sanity._direction(1.0, float("nan")) == "flat"
+
+    def test_both_nan_returns_flat(self) -> None:
+        assert sanity._direction(float("nan"), float("nan")) == "flat"
+
+    def test_finite_directions_unchanged(self) -> None:
+        assert sanity._direction(1.0, 0.0) == "higher_better"
+        assert sanity._direction(0.0, 1.0) == "lower_better"
+        assert sanity._direction(0.5, 0.5) == "flat"
+
+
+class TestNanAggregate:
+    """`_nan_aggregate` backs the identity mean/std (run_sanity verdict loop):
+    NaN identity samples must be excluded instead of poisoning the aggregate."""
+
+    def test_ignores_nan_values(self) -> None:
+        import numpy as np
+
+        assert sanity._nan_aggregate([1.0, float("nan"), 3.0], np.mean) == 2.0
+
+    def test_all_nan_returns_nan_without_warning(self) -> None:
+        import warnings
+
+        import numpy as np
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            out = sanity._nan_aggregate([float("nan"), float("nan")], np.mean)
+        assert math.isnan(out)
+
+    def test_empty_returns_nan(self) -> None:
+        import numpy as np
+
+        assert math.isnan(sanity._nan_aggregate([], np.mean))
+
+    def test_std_aggregate(self) -> None:
+        import numpy as np
+
+        assert sanity._nan_aggregate([1.0, float("nan"), 1.0], np.std) == 0.0
+
+
+class TestDecideVerdictNaNIsInconclusive:
+    def test_flat_with_nan_identity_is_inconclusive_not_pass(self) -> None:
+        # A metric whose identity aggregate is NaN could not be measured on
+        # the reference pairs — that must surface as INCONCLUSIVE, never as a
+        # quiet PASS.
+        verdict, note, _ = sanity._decide_verdict(
+            "ssim", "flat", float("nan"), 0.5, [], "solid"
+        )
+        assert verdict == "INCONCLUSIVE"
+        assert "NaN" in note
+
+    def test_flat_with_nan_pathological_is_inconclusive(self) -> None:
+        verdict, _, _ = sanity._decide_verdict(
+            "ssim", "flat", 1.0, float("nan"), [], "solid"
+        )
+        assert verdict == "INCONCLUSIVE"
