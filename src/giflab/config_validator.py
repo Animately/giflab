@@ -19,7 +19,7 @@ class ValidationRule:
     def __init__(
         self,
         name: str,
-        validator: Callable[[Any], bool],
+        validator: Callable[..., bool],
         error_message: str,
         severity: str = "error",
     ):
@@ -27,7 +27,9 @@ class ValidationRule:
 
         Args:
             name: Name of the rule
-            validator: Function that returns True if valid
+            validator: Function that returns True if valid. Either 1-arg
+                ``(value)`` or 2-arg ``(value, config)`` -- 2-arg validators
+                are dispatched through ``validate_with_context``.
             error_message: Error message if validation fails
             severity: "error", "warning", or "info"
         """
@@ -44,6 +46,25 @@ class ValidationRule:
         """
         try:
             if self.validator(value):
+                return True, None
+            return False, self.error_message
+        except Exception as e:
+            return False, f"{self.error_message}: {e}"
+
+    def validate_with_context(
+        self, value: Any, config: dict[str, Any]
+    ) -> tuple[bool, str | None]:
+        """Validate a value against this rule with full config context.
+
+        Used for 2-arg validators ``(value, config)`` that need to compare a
+        value against other configuration values. Mirrors ``validate()``'s
+        contract exactly (same try/except and error-message wrapping).
+
+        Returns:
+            tuple of (is_valid, error_message)
+        """
+        try:
+            if self.validator(value, config):
                 return True, None
             return False, self.error_message
         except Exception as e:
