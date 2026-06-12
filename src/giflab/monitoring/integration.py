@@ -1,11 +1,16 @@
 """
 Integration module for instrumenting GifLab optimization systems with metrics.
+
+All instrumented wrappers are ``(*args, **kwargs)`` passthroughs: they must
+never restate the wrapped method's signature, because signature drift between
+a wrapper and the real method turns instrumentation into a TypeError factory
+(bug class fixed 2026-06-12; pinned by
+tests/functional/test_monitoring_instrumentation.py).
 """
 
 import functools
 import logging
 import time
-from collections.abc import Callable
 from typing import Any
 
 from .decorators import MetricTracker
@@ -14,7 +19,7 @@ from .metrics_collector import get_metrics_collector
 logger = logging.getLogger(__name__)
 
 
-def instrument_frame_cache():
+def instrument_frame_cache() -> None:
     """
     Instrument FrameCache with performance metrics.
 
@@ -34,10 +39,10 @@ def instrument_frame_cache():
         original_get = FrameCache.get
 
         @functools.wraps(original_get)
-        def instrumented_get(self, file_path):
+        def instrumented_get(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_get(self, file_path)
+            result = original_get(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
             collector.record_timer(
@@ -51,30 +56,34 @@ def instrument_frame_cache():
                 collector.record_counter("cache.frame.misses", 1.0)
 
             # Track memory usage
-            if hasattr(self, "_memory_bytes"):
+            cache_self = args[0] if args else None
+            if cache_self is not None and hasattr(cache_self, "_memory_bytes"):
                 collector.record_gauge(
-                    "cache.frame.memory_usage_mb", self._memory_bytes / (1024 * 1024)
+                    "cache.frame.memory_usage_mb",
+                    cache_self._memory_bytes / (1024 * 1024),
                 )
 
             return result
 
-        FrameCache.get = instrumented_get
+        # Runtime class patching is invisible to the type system; deliberate.
+        FrameCache.get = instrumented_get  # type: ignore[method-assign]
 
         # Wrap put method
         original_put = FrameCache.put
 
         @functools.wraps(original_put)
-        def instrumented_put(self, file_path, frames):
+        def instrumented_put(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_put(self, file_path, frames)
+            result = original_put(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
             collector.record_timer(
                 "cache.frame.operation.duration", duration, tags={"operation": "put"}
             )
 
-            # Track frame count
+            # Track frame count (signature: put(self, file_path, frames, ...))
+            frames = kwargs.get("frames", args[2] if len(args) > 2 else None)
             if frames:
                 collector.record_histogram(
                     "cache.frame.entry_size", len(frames), tags={"type": "frame_count"}
@@ -82,19 +91,22 @@ def instrument_frame_cache():
 
             return result
 
-        FrameCache.put = instrumented_put
+        # Runtime class patching is invisible to the type system; deliberate.
+        FrameCache.put = instrumented_put  # type: ignore[method-assign]
 
         # Wrap evict method if it exists
         if hasattr(FrameCache, "_evict_if_needed"):
             original_evict = FrameCache._evict_if_needed
 
             @functools.wraps(original_evict)
-            def instrumented_evict(self):
-                evicted = original_evict(self)
+            def instrumented_evict(*args: Any, **kwargs: Any) -> Any:
+                evicted = original_evict(*args, **kwargs)
                 if evicted > 0:
                     collector.record_counter("cache.frame.evictions", evicted)
                 return evicted
 
+            # Runtime class patching (no ignore needed: inside the hasattr
+            # guard mypy types the attribute as Any).
             FrameCache._evict_if_needed = instrumented_evict
 
         logger.info("FrameCache instrumented with metrics")
@@ -105,7 +117,7 @@ def instrument_frame_cache():
         logger.error(f"Error instrumenting FrameCache: {e}")
 
 
-def instrument_validation_cache():
+def instrument_validation_cache() -> None:
     """
     Instrument ValidationCache with performance metrics.
 
@@ -124,16 +136,16 @@ def instrument_validation_cache():
         original_get = ValidationCache.get
 
         @functools.wraps(original_get)
-        def instrumented_get(
-            self, frame1, frame2, metric_type, config=None, frame_indices=None
-        ):
+        def instrumented_get(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_get(
-                self, frame1, frame2, metric_type, config, frame_indices
-            )
+            result = original_get(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
+            # Signature: get(self, frame1, frame2, metric_type, ...)
+            metric_type = kwargs.get(
+                "metric_type", args[3] if len(args) > 3 else "unknown"
+            )
             tags = {"metric_type": metric_type, "operation": "get"}
 
             collector.record_timer(
@@ -152,22 +164,24 @@ def instrument_validation_cache():
 
             return result
 
-        ValidationCache.get = instrumented_get
+        # Runtime class patching is invisible to the type system; deliberate.
+        ValidationCache.get = instrumented_get  # type: ignore[method-assign]
 
         # Wrap put method
         original_put = ValidationCache.put
 
         @functools.wraps(original_put)
-        def instrumented_put(
-            self, frame1, frame2, metric_type, result, config=None, frame_indices=None
-        ):
+        def instrumented_put(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            ret_val = original_put(
-                self, frame1, frame2, metric_type, result, config, frame_indices
-            )
+            ret_val = original_put(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
+            # Signature: put(self, frame1, frame2, metric_type, value, ...)
+            metric_type = kwargs.get(
+                "metric_type", args[3] if len(args) > 3 else "unknown"
+            )
+            value = kwargs.get("value", args[4] if len(args) > 4 else None)
             collector.record_timer(
                 "cache.validation.operation.duration",
                 duration,
@@ -175,37 +189,43 @@ def instrument_validation_cache():
             )
 
             # Track result values
-            if isinstance(result, int | float):
-                collector.record_histogram(f"validation.{metric_type}.values", result)
+            if isinstance(value, int | float):
+                collector.record_histogram(f"validation.{metric_type}.values", value)
 
             return ret_val
 
-        ValidationCache.put = instrumented_put
+        # Runtime class patching is invisible to the type system; deliberate.
+        ValidationCache.put = instrumented_put  # type: ignore[method-assign]
 
         # Wrap get_stats method
         if hasattr(ValidationCache, "get_stats"):
             original_get_stats = ValidationCache.get_stats
 
             @functools.wraps(original_get_stats)
-            def instrumented_get_stats(self):
-                stats = original_get_stats(self)
+            def instrumented_get_stats(*args: Any, **kwargs: Any) -> Any:
+                stats = original_get_stats(*args, **kwargs)
 
-                # Report stats as gauges
+                # Report stats as gauges. ValidationCacheStats fields are
+                # hits/misses/memory_entries/disk_entries/memory_bytes/
+                # disk_bytes/evictions (+ hit_rate property).
                 if stats:
                     collector.record_gauge("cache.validation.hit_rate", stats.hit_rate)
+                    # "total_entries" reports entries actually resident
+                    # (memory + disk). Operations are already emitted honestly
+                    # as the cache.validation.hits/misses counters above.
                     collector.record_gauge(
                         "cache.validation.total_entries",
-                        stats.total_gets + stats.total_puts,
+                        stats.memory_entries + stats.disk_entries,
                     )
-
-                    if hasattr(stats, "memory_usage_mb"):
-                        collector.record_gauge(
-                            "cache.validation.memory_usage_mb", stats.memory_usage_mb
-                        )
+                    collector.record_gauge(
+                        "cache.validation.memory_usage_mb",
+                        stats.memory_bytes / (1024 * 1024),
+                    )
 
                 return stats
 
-            ValidationCache.get_stats = instrumented_get_stats
+            # Runtime class patching is invisible to the type system; deliberate.
+            ValidationCache.get_stats = instrumented_get_stats  # type: ignore[method-assign]
 
         logger.info("ValidationCache instrumented with metrics")
 
@@ -215,7 +235,7 @@ def instrument_validation_cache():
         logger.error(f"Error instrumenting ValidationCache: {e}")
 
 
-def instrument_resize_cache():
+def instrument_resize_cache() -> None:
     """
     Instrument ResizedFrameCache with performance metrics.
 
@@ -234,10 +254,10 @@ def instrument_resize_cache():
         original_get = ResizedFrameCache.get
 
         @functools.wraps(original_get)
-        def instrumented_get(self, frame_hash, target_size, interpolation):
+        def instrumented_get(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_get(self, frame_hash, target_size, interpolation)
+            result = original_get(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
             collector.record_timer(
@@ -250,34 +270,42 @@ def instrument_resize_cache():
                 collector.record_counter("cache.resize.misses", 1.0)
 
             # Track memory usage
-            if hasattr(self, "_current_memory"):
+            cache_self = args[0] if args else None
+            if cache_self is not None and hasattr(cache_self, "_current_memory"):
                 collector.record_gauge(
-                    "cache.resize.memory_usage_mb", self._current_memory / (1024 * 1024)
+                    "cache.resize.memory_usage_mb",
+                    cache_self._current_memory / (1024 * 1024),
                 )
 
             return result
 
-        ResizedFrameCache.get = instrumented_get
+        # Runtime class patching is invisible to the type system; deliberate.
+        ResizedFrameCache.get = instrumented_get  # type: ignore[method-assign]
 
         # Instrument FrameBufferPool
         if hasattr(FrameBufferPool, "get_buffer"):
             original_get_buffer = FrameBufferPool.get_buffer
 
             @functools.wraps(original_get_buffer)
-            def instrumented_get_buffer(self, shape):
-                result = original_get_buffer(self, shape)
+            def instrumented_get_buffer(*args: Any, **kwargs: Any) -> Any:
+                result = original_get_buffer(*args, **kwargs)
 
-                # Track buffer pool efficiency
-                if hasattr(self, "_reuse_count") and hasattr(self, "_total_requests"):
-                    if self._total_requests > 0:
-                        reuse_rate = self._reuse_count / self._total_requests
-                        collector.record_gauge(
-                            "cache.resize.buffer_pool.reuse_rate", reuse_rate
-                        )
+                # Track buffer pool efficiency from the pool's real counters
+                # (same formula as FrameBufferPool.get_stats).
+                pool_self = args[0] if args else None
+                if pool_self is not None and hasattr(pool_self, "_stats"):
+                    pool_stats = pool_self._stats
+                    reuse_rate = pool_stats["reuses"] / max(
+                        1, pool_stats["allocations"] + pool_stats["reuses"]
+                    )
+                    collector.record_gauge(
+                        "cache.resize.buffer_pool.reuse_rate", reuse_rate
+                    )
 
                 return result
 
-            FrameBufferPool.get_buffer = instrumented_get_buffer
+            # Runtime class patching is invisible to the type system; deliberate.
+            FrameBufferPool.get_buffer = instrumented_get_buffer  # type: ignore[method-assign]
 
         logger.info("ResizedFrameCache instrumented with metrics")
 
@@ -287,7 +315,7 @@ def instrument_resize_cache():
         logger.error(f"Error instrumenting ResizedFrameCache: {e}")
 
 
-def instrument_sampling():
+def instrument_sampling() -> None:
     """
     Instrument frame sampling system with performance metrics.
 
@@ -306,10 +334,10 @@ def instrument_sampling():
         original_sample = FrameSampler.sample
 
         @functools.wraps(original_sample)
-        def instrumented_sample(self, frames, **kwargs):
+        def instrumented_sample(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_sample(self, frames, **kwargs)
+            result = original_sample(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
 
@@ -328,7 +356,8 @@ def instrument_sampling():
                     )
 
                 # Track strategy usage
-                strategy_name = result.strategy_used or self.__class__.__name__
+                sampler_self = args[0] if args else None
+                strategy_name = result.strategy_used or type(sampler_self).__name__
                 collector.record_counter(
                     "sampling.strategy_usage", 1.0, tags={"strategy": strategy_name}
                 )
@@ -347,7 +376,8 @@ def instrument_sampling():
 
             return result
 
-        FrameSampler.sample = instrumented_sample
+        # Runtime class patching is invisible to the type system; deliberate.
+        FrameSampler.sample = instrumented_sample  # type: ignore[method-assign]
 
         logger.info("Frame sampling instrumented with metrics")
 
@@ -357,7 +387,7 @@ def instrument_sampling():
         logger.error(f"Error instrumenting frame sampling: {e}")
 
 
-def instrument_lazy_imports():
+def instrument_lazy_imports() -> None:
     """
     Instrument lazy import system with performance metrics.
 
@@ -375,32 +405,39 @@ def instrument_lazy_imports():
         original_load = LazyModule._load_module
 
         @functools.wraps(original_load)
-        def instrumented_load(self):
+        def instrumented_load(*args: Any, **kwargs: Any) -> Any:
             start_time = time.perf_counter()
 
-            result = original_load(self)
+            result = original_load(*args, **kwargs)
 
             duration = time.perf_counter() - start_time
 
+            module_self = args[0] if args else None
+            module_name = getattr(module_self, "_module_name", "unknown")
+
             # Track module load time
             collector.record_timer(
-                "lazy_import.load_time", duration, tags={"module": self._module_name}
+                "lazy_import.load_time", duration, tags={"module": module_name}
             )
 
             # Track load count
             collector.record_counter(
-                "lazy_import.load_count", 1.0, tags={"module": self._module_name}
+                "lazy_import.load_count", 1.0, tags={"module": module_name}
             )
 
             # Track fallback usage
-            if result is None and self._fallback_value is not None:
+            if (
+                result is None
+                and getattr(module_self, "_fallback_value", None) is not None
+            ):
                 collector.record_counter(
-                    "lazy_import.fallback_used", 1.0, tags={"module": self._module_name}
+                    "lazy_import.fallback_used", 1.0, tags={"module": module_name}
                 )
 
             return result
 
-        LazyModule._load_module = instrumented_load
+        # Runtime class patching is invisible to the type system; deliberate.
+        LazyModule._load_module = instrumented_load  # type: ignore[method-assign]
 
         logger.info("Lazy imports instrumented with metrics")
 
@@ -410,7 +447,7 @@ def instrument_lazy_imports():
         logger.error(f"Error instrumenting lazy imports: {e}")
 
 
-def instrument_metrics_calculation():
+def instrument_metrics_calculation() -> None:
     """
     Instrument core metrics calculation functions.
 
@@ -430,7 +467,14 @@ def instrument_metrics_calculation():
             original_calc = metrics.calculate_comprehensive_metrics_from_frames
 
             @functools.wraps(original_calc)
-            def instrumented_calc(original_frames, compressed_frames, config=None):
+            def instrumented_calc(*args: Any, **kwargs: Any) -> Any:
+                # Signature: (original_frames, compressed_frames, ...)
+                original_frames = kwargs.get(
+                    "original_frames", args[0] if len(args) > 0 else []
+                )
+                compressed_frames = kwargs.get(
+                    "compressed_frames", args[1] if len(args) > 1 else []
+                )
                 with tracker.timer("calculation.total"):
                     # Track frame counts
                     tracker.histogram(
@@ -442,7 +486,7 @@ def instrument_metrics_calculation():
                         tags={"type": "compressed"},
                     )
 
-                    result = original_calc(original_frames, compressed_frames, config)
+                    result = original_calc(*args, **kwargs)
 
                     # Track quality scores
                     for metric_name, value in result.items():
@@ -455,6 +499,7 @@ def instrument_metrics_calculation():
 
                     return result
 
+            # Deliberate runtime module patching for instrumentation.
             metrics.calculate_comprehensive_metrics_from_frames = instrumented_calc
 
         logger.info("Metrics calculation instrumented")
@@ -465,7 +510,7 @@ def instrument_metrics_calculation():
         logger.error(f"Error instrumenting metrics calculation: {e}")
 
 
-def instrument_all_systems():
+def instrument_all_systems() -> None:
     """
     Instrument all GifLab optimization systems with metrics.
 
@@ -507,7 +552,7 @@ def instrument_all_systems():
     logger.info("All systems instrumented successfully")
 
 
-def remove_instrumentation():
+def remove_instrumentation() -> None:
     """
     Remove instrumentation from all systems (mainly for testing).
 
