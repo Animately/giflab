@@ -100,12 +100,12 @@ class ConfigMetadata:
 class ConfigValidator:
     """Validates configuration values and relationships."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.validators: dict[str, list[Callable]] = {}
         self.relationship_validators: list[Callable] = []
         self._register_default_validators()
 
-    def _register_default_validators(self):
+    def _register_default_validators(self) -> None:
         """Register built-in validators for known configuration sections."""
 
         # Frame cache validators
@@ -196,14 +196,14 @@ class ConfigValidator:
 
     def add_validator(
         self, path: str, validator: Callable, error_msg: str | None = None
-    ):
+    ) -> None:
         """Add a validator for a specific configuration path."""
         if path not in self.validators:
             self.validators[path] = []
 
         if error_msg:
             # Wrap validator with custom error message
-            def wrapped(value):
+            def wrapped(value: Any) -> bool:
                 if not validator(value):
                     raise ConfigValidationError(f"{path}: {error_msg}")
                 return True
@@ -212,7 +212,7 @@ class ConfigValidator:
         else:
             self.validators[path].append(validator)
 
-    def add_relationship_validator(self, validator: Callable):
+    def add_relationship_validator(self, validator: Callable) -> None:
         """Add a validator that checks relationships between config values."""
         self.relationship_validators.append(validator)
 
@@ -249,7 +249,8 @@ class ConfigValidator:
     def _get_value_by_path(self, config: dict[str, Any], path: str) -> Any:
         """Get a value from nested dict using dot-separated path."""
         parts = path.split(".")
-        value = config
+        # The cursor walks heterogeneous nested dicts; honest type is Any.
+        value: Any = config
 
         for part in parts:
             if isinstance(value, dict):
@@ -265,12 +266,12 @@ class ConfigValidator:
 class ConfigFileWatcher(FileSystemEventHandler):
     """Watches configuration files for changes."""
 
-    def __init__(self, config_manager: "ConfigManager"):
+    def __init__(self, config_manager: "ConfigManager") -> None:
         self.config_manager = config_manager
-        self.last_reload = 0
+        self.last_reload = 0.0
         self.reload_cooldown = 1.0  # Minimum seconds between reloads
 
-    def on_modified(self, event):
+    def on_modified(self, event: Any) -> None:
         """Handle file modification events."""
         if not WATCHDOG_AVAILABLE or not isinstance(event, FileModifiedEvent):
             return
@@ -301,7 +302,7 @@ class ConfigManager:
     _instance = None
     _lock = threading.Lock()
 
-    def __new__(cls):
+    def __new__(cls) -> "ConfigManager":
         """Ensure singleton instance."""
         if cls._instance is None:
             with cls._lock:
@@ -309,7 +310,7 @@ class ConfigManager:
                     cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize configuration manager."""
         if hasattr(self, "_initialized"):
             return
@@ -336,7 +337,7 @@ class ConfigManager:
         # Set up signal handler for manual reload
         self._setup_signal_handler()
 
-    def _load_defaults(self):
+    def _load_defaults(self) -> None:
         """Load default configuration from existing config module."""
         with self._config_lock:
             # Load dataclass configs
@@ -355,7 +356,7 @@ class ConfigManager:
             # Calculate checksum
             self._update_checksum()
 
-    def _load_profiles(self):
+    def _load_profiles(self) -> None:
         """Load configuration profiles for different environments."""
 
         # Development profile - aggressive caching, verbose logging
@@ -525,7 +526,7 @@ class ConfigManager:
             },
         }
 
-    def _apply_environment_overrides(self):
+    def _apply_environment_overrides(self) -> None:
         """Apply configuration overrides from environment variables."""
         # Format: GIFLAB_CONFIG_<SECTION>_<KEY>=value
         # Example: GIFLAB_CONFIG_FRAME_CACHE_MEMORY_LIMIT_MB=1000
@@ -566,7 +567,9 @@ class ConfigManager:
 
             logger.info(f"Applied environment override: {config_path} = {value}")
 
-    def _set_value_by_parts(self, config: dict[str, Any], parts: list[str], value: Any):
+    def _set_value_by_parts(
+        self, config: dict[str, Any], parts: list[str], value: Any
+    ) -> None:
         """Set a value in nested dict using parts list."""
         # Navigate to the parent
         current = config
@@ -589,10 +592,10 @@ class ConfigManager:
         else:
             current[final_key] = value
 
-    def _setup_signal_handler(self):
+    def _setup_signal_handler(self) -> None:
         """Set up signal handler for configuration reload."""
 
-        def handle_reload_signal(signum, frame):
+        def handle_reload_signal(signum: int, frame: Any) -> None:
             logger.info("Received SIGHUP signal, reloading configuration")
             try:
                 self.reload_config(source="signal")
@@ -603,7 +606,7 @@ class ConfigManager:
         if hasattr(signal, "SIGHUP"):
             signal.signal(signal.SIGHUP, handle_reload_signal)
 
-    def _update_checksum(self):
+    def _update_checksum(self) -> None:
         """Update configuration checksum."""
 
         def path_encoder(obj: Any) -> str:
@@ -614,7 +617,7 @@ class ConfigManager:
         config_str = json.dumps(self._config, sort_keys=True, default=path_encoder)
         self._metadata.checksum = hashlib.sha256(config_str.encode()).hexdigest()[:16]
 
-    def start_file_watcher(self, watch_paths: list[Path] | None = None):
+    def start_file_watcher(self, watch_paths: list[Path] | None = None) -> None:
         """Start watching configuration files for changes."""
         if not WATCHDOG_AVAILABLE:
             logger.warning("File watching not available - install watchdog package")
@@ -638,7 +641,7 @@ class ConfigManager:
         self._observer.start()
         logger.info(f"Started configuration file watcher for: {watch_paths}")
 
-    def stop_file_watcher(self):
+    def stop_file_watcher(self) -> None:
         """Stop watching configuration files."""
         if self._observer is not None:
             self._observer.stop()
@@ -646,7 +649,7 @@ class ConfigManager:
             self._observer = None
             logger.info("Stopped configuration file watcher")
 
-    def load_profile(self, profile: ConfigProfile):
+    def load_profile(self, profile: ConfigProfile) -> None:
         """Load a configuration profile."""
         if profile not in self._profiles:
             raise ConfigValidationError(f"Unknown profile: {profile}")
@@ -674,7 +677,7 @@ class ConfigManager:
 
             logger.info(f"Loaded configuration profile: {profile.value}")
 
-    def _merge_config(self, base: dict[str, Any], overlay: dict[str, Any]):
+    def _merge_config(self, base: dict[str, Any], overlay: dict[str, Any]) -> None:
         """Recursively merge overlay configuration into base."""
         for key, value in overlay.items():
             if key in base and isinstance(base[key], dict) and isinstance(value, dict):
@@ -687,7 +690,7 @@ class ConfigManager:
         old_config: dict[str, Any],
         new_config: dict[str, Any],
         profile: ConfigProfile,
-    ):
+    ) -> None:
         """Record configuration changes from profile application."""
         changes = self._diff_configs(old_config, new_config)
 
@@ -791,7 +794,7 @@ class ConfigManager:
                 logger.error(f"Configuration reload failed: {e}")
                 return False
 
-    def _set_value_by_path(self, config: dict[str, Any], path: str, value: Any):
+    def _set_value_by_path(self, config: dict[str, Any], path: str, value: Any) -> None:
         """Set a value in nested dict using dot-separated path."""
         parts = path.split(".")
         current = config
@@ -806,7 +809,8 @@ class ConfigManager:
     def get(self, path: str, default: Any = None) -> Any:
         """Get a configuration value by path."""
         parts = path.split(".")
-        value = self._config
+        # The cursor walks heterogeneous nested dicts; honest type is Any.
+        value: Any = self._config
 
         for part in parts:
             if isinstance(value, dict):
@@ -818,7 +822,7 @@ class ConfigManager:
 
         return value
 
-    def set(self, path: str, value: Any, validate: bool = True):
+    def set(self, path: str, value: Any, validate: bool = True) -> None:
         """Set a configuration value with optional validation."""
         with self._config_lock:
             old_value = self.get(path)
@@ -849,11 +853,11 @@ class ConfigManager:
             self._change_history.append(change)
             self._notify_change(change)
 
-    def register_change_callback(self, callback: Callable[[ConfigChange], None]):
+    def register_change_callback(self, callback: Callable[[ConfigChange], None]) -> None:
         """Register a callback for configuration changes."""
         self._change_callbacks.append(callback)
 
-    def _notify_change(self, change: ConfigChange):
+    def _notify_change(self, change: ConfigChange) -> None:
         """Notify all registered callbacks of a configuration change."""
         for callback in self._change_callbacks:
             try:
@@ -888,7 +892,7 @@ class ConfigManager:
                 else None,
             }
 
-    def import_config(self, config_data: dict[str, Any], validate: bool = True):
+    def import_config(self, config_data: dict[str, Any], validate: bool = True) -> None:
         """Import configuration from exported data."""
         with self._config_lock:
             old_config = copy.deepcopy(self._config)
@@ -940,7 +944,7 @@ def get_config_manager() -> ConfigManager:
     return _config_manager
 
 
-def load_profile(profile: str | ConfigProfile):
+def load_profile(profile: str | ConfigProfile) -> None:
     """Convenience function to load a configuration profile."""
     if isinstance(profile, str):
         profile = ConfigProfile(profile)
@@ -955,7 +959,7 @@ def get_config(path: str, default: Any = None) -> Any:
     return manager.get(path, default)
 
 
-def set_config(path: str, value: Any, validate: bool = True):
+def set_config(path: str, value: Any, validate: bool = True) -> None:
     """Convenience function to set a configuration value."""
     manager = get_config_manager()
     manager.set(path, value, validate)
