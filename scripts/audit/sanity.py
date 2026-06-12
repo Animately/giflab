@@ -234,11 +234,31 @@ def _direction(identity_v: float, pathological_v: float, tol: float = 1e-3) -> s
     Pathological is, by construction, the worse comparison. If its value is
     lower than identity, lower-numbers-equal-worse, i.e. higher-is-better.
     If higher, the opposite.
+
+    NaN-aware: if either reference value is NaN (the metric could not be
+    computed on a reference pair — possible post-#54 for genuinely edgeless
+    identity content), the direction is unknowable and we return ``"flat"``.
+    Without this guard ``NaN < 0`` is False and the metric would be silently
+    mislabelled ``"lower_better"``.
     """
+    if math.isnan(identity_v) or math.isnan(pathological_v):
+        return "flat"
     delta = pathological_v - identity_v
     if abs(delta) < tol:
         return "flat"
     return "higher_better" if delta < 0 else "lower_better"
+
+
+def _nan_aggregate(vals: list[float], fn: Any) -> float:
+    """Aggregate ``vals`` with ``fn`` over finite samples only.
+
+    NaN samples are excluded (NaN-over-sentinels contract: a metric that
+    couldn't be computed on one identity GIF must not poison the aggregate).
+    Returns NaN — without numpy's all-NaN RuntimeWarning — when no finite
+    samples remain.
+    """
+    finite = [v for v in vals if not math.isnan(v)]
+    return float(fn(finite)) if finite else float("nan")
 
 
 def _range_derived_tol(values: list[float], tol_floor: float = 1e-4, relative_eps: float = 0.05) -> float:
@@ -407,6 +427,14 @@ def _decide_verdict(
     genuine pairwise-quality inversions. The raw failures are still recorded.
     """
     classification = _classify_metric(metric)
+    if direction == "flat" and (math.isnan(ident_mean) or math.isnan(patho_val)):
+        return (
+            "INCONCLUSIVE",
+            "identity or pathological aggregate is NaN — the metric could "
+            "not be computed on the reference pairs, so its direction (and "
+            "any monotonicity verdict) is unknowable",
+            classification,
+        )
     if direction == "flat" and abs(patho_val - ident_mean) < 1e-3:
         return (
             "INCONCLUSIVE",
@@ -545,7 +573,7 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
     patho_metrics: dict[str, float] = {}
     patho_source: dict[str, str] = {}
     for k in set(patho_solid) | set(patho_structural):
-        ident = float(np.mean(identity_results.get(k, [float("nan")]))) if identity_results.get(k) else float("nan")
+        ident = _nan_aggregate(identity_results.get(k, []), np.mean)
         solid_v = patho_solid.get(k, float("nan"))
         struct_v = patho_structural.get(k, float("nan"))
         solid_delta = abs(solid_v - ident) if not (math.isnan(solid_v) or math.isnan(ident)) else 0.0
@@ -784,8 +812,10 @@ def run_sanity(workdir: Path, *, skip_lossy: bool = False) -> dict[str, Any]:
     verdicts: list[PerMetricVerdict] = []
     for metric in metric_keys:
         ident_vals = identity_results.get(metric, [])
-        ident_mean = float(np.mean(ident_vals)) if ident_vals else float("nan")
-        ident_std = float(np.std(ident_vals)) if ident_vals else float("nan")
+        # NaN-aware aggregation: a metric that returned NaN on one identity
+        # GIF (legitimately uncomputable there) must not poison the aggregate.
+        ident_mean = _nan_aggregate(ident_vals, np.mean)
+        ident_std = _nan_aggregate(ident_vals, np.std)
         patho_val = float(patho_metrics.get(metric, float("nan")))
         direction = _direction(ident_mean, patho_val)
 

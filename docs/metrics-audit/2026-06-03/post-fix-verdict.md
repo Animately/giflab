@@ -148,13 +148,65 @@ invariant for all four. The default `LEVELS` grid was capped at 100 (the public
 lossy range) — it previously included 120, which crashed the imagemagick column
 (`quality = 100 - 120 = -20 → ValueError`).
 
+### E. 2026-06-12 sanity re-run — fix B corpus-validated, SUSPICIOUS 18 → 15, all adjudicated
+
+A sanity-only re-run on merged `main` (PR #54 in; animately 1.1.30.0, seed 42 —
+same binary version and config as this audit) validated fix B at the harness
+level. Across all 143 metrics exactly **four verdicts changed**, every one
+attributable to the `union==0 → NaN` change:
+
+| metric | pre-fix | post-fix |
+|---|---|---|
+| `composite_quality` | SUSPICIOUS | **PASS** |
+| `edge_similarity` | SUSPICIOUS | **PASS** |
+| `edge_similarity_mean` | SUSPICIOUS | **PASS** |
+| `edge_similarity_std` | DIAGNOSTIC | INCONCLUSIVE |
+
+`composite_quality` on `lossy::smooth_gradient` went `[0.970, 0.769, 0.730,
+0.760]` (the dip-then-recover that motivated the fix) → `[0.970, 0.711, 0.701,
+0.700]` — monotone non-increasing on all four degradation arms. Identity is
+unharmed. **No new SUSPICIOUS appeared**: 18 → **15** (fresh totals: PASS 46,
+SUSPICIOUS 15, DIAGNOSTIC 55, INCONCLUSIVE 27). The remaining 15 (9 distinct
+metrics; bare + `_mean` are the same signal) were adjudicated per-metric and
+are **all content-sensitivity at degradation extremes or metric-saturation
+float noise — zero metric bugs**: `chist` (histogram-correlation properties at
+out-of-domain extremes), `deltae_pct_gt2` (step function of content geometry;
+the continuous `deltae_mean` sibling PASSes), `disposal_artifacts_delta`
+(detector out of domain at extremes), `fsim` (saturation noise + extreme-blur
+flattening), `gmsd` (deviation-pooling property: std of the GMS map falls as
+degradation becomes spatially *uniform* — don't use it to order severe uniform
+degradations), `mse` (honest arithmetic on two different distortions),
+`palette_distance` (noise floor, <0.1% of range), `sharpness_similarity`
+(false sharpness from σ60 noise), `texture_similarity` (known LBP collapse,
+PR #44/#48). Reproduction is bit-for-bit deterministic against the 2026-06-03
+baseline. Evidence: `audit-rerun-2026-06-12/` (repo root, gitignored); full
+per-metric adjudication table in the giflab-validate-edge-fix task record.
+
+## Staleness note: this report's disagreement table (added 2026-06-12)
+
+The 2026-06-03 `report.md` cross-metric disagreement table is **stale at the
+top** — keep it as the historical baseline but do not re-litigate its rows:
+
+- Its #1 row (gradient_small, spread 1.00, best=`edge_similarity`) rests on
+  the pre-#54 `union==0 → 1.0` sentinel that fix B removed. Current code
+  returns NaN on those frames, so the row cannot reproduce on any future sweep.
+- 9/10 of its best-metric attributions are **tie-block noise**: the old
+  `rank_normalise` (argsort + linspace) assigned arbitrary distinct ranks
+  across tie blocks, and the corpus is heavily tie-saturated (232/371 rows
+  tied at `banding_score_mean == 0.0`, 65 at `edge_similarity == 1.0`).
+  Tie-aware average ranks + single-stream `_compressed` exclusion landed in
+  `scripts/audit/report.py` / `pilot.py` (2026-06-12); a re-render on the same
+  CSV drops the max spread to ~0.92, and the residual top entries are genuine
+  metric-family disagreement (binary `edge_similarity` vs continuous
+  `fsim`/`gmsd` on gradients) — acceptable for a diagnostic aid.
+
 ## What was deliberately NOT changed
 
-- The remaining **18 SUSPICIOUS** pairwise-quality metrics (`gmsd`/`chist`/
+- The remaining **15 SUSPICIOUS** pairwise-quality metrics (`gmsd`/`chist`/
   `fsim` on blur, `texture_similarity` on photographic noise, `mse` on
   transparency, `palette_distance`, `disposal_artifacts_delta`, etc.) are
-  **content-sensitivity, not bugs** — the metrics correctly track genuine
-  compression difficulty on hard synthetic content. No change.
+  **content-sensitivity, not bugs** — verified per-metric on the 2026-06-12
+  sanity re-run (section E above). No change.
 
 ## Methodology caveat for the next pilot
 
@@ -165,3 +217,12 @@ disagreement" is true of almost every level ≥20). A future pilot should use a
 disagreement statistic that doesn't saturate — e.g. a rank-spread normalised so
 intermediate levels remain distinguishable — so it can actually select the most
 *informative* lossy levels rather than tying at the ceiling.
+
+**Resolved 2026-06-12:** the saturation was root-caused to the same tie-handling
+artifact as the report table (partial tie blocks at low lossy got arbitrary
+distinct linspace ranks; the constant-metric skip only caught *fully* constant
+metrics). `scripts/audit/pilot.py` now uses tie-aware average ranks and only
+lets pairwise-quality metrics vote (dispersion siblings, single-stream
+`_compressed` keys and diagnostic/system metrics are excluded, mirroring the
+sanity triage). The next pilot's disagreement-by-lossy curve should
+discriminate between levels.

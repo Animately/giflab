@@ -33,6 +33,11 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from PIL import Image  # noqa: E402
 
+# Local helpers (scripts/audit/ is not a package)
+sys.path.insert(0, str(Path(__file__).parent))
+from _common import tie_average_unit_ranks  # noqa: E402
+from sanity import _classify_metric  # noqa: E402
+
 # Curated set of metrics to chart in detail. Histograms, correlations, and
 # outlier callouts focus on these — everything else still appears in the
 # sanity verdict table.
@@ -296,13 +301,16 @@ def top_outliers_per_metric(
 
 
 def rank_normalise(vals: np.ndarray, higher_better: bool) -> np.ndarray:
-    """Map values to [0,1] where 1 = best for the metric."""
-    order = np.argsort(vals)
-    ranks = np.empty_like(order, dtype=float)
-    if len(order) > 1:
-        ranks[order] = np.linspace(0.0, 1.0, len(order))
-    else:
-        ranks[order] = np.array([0.5])
+    """Map values to [0,1] where 1 = best for the metric.
+
+    Tie-aware: tied values share their average rank (see
+    ``_common.tie_average_unit_ranks``). The sweep corpus is heavily
+    tie-saturated (232/371 rows tied at ``banding_score_mean == 0.0``), and
+    the previous argsort+linspace scheme assigned arbitrary distinct ranks
+    across tie blocks — pinning the disagreement-table spread near 1.0 with
+    tie noise instead of genuine metric-family disagreement.
+    """
+    ranks = tie_average_unit_ranks(vals)
     if not higher_better:
         ranks = 1.0 - ranks
     return ranks
@@ -313,11 +321,20 @@ def disagreement_table(
 ) -> pd.DataFrame:
     """For each row, compute per-metric rank in [0,1] (1=best) and return
     top-N rows by (max_rank - min_rank). Only considers metrics with a
-    known direction in HIGHER_IS_BETTER / LOWER_IS_BETTER."""
+    known direction in HIGHER_IS_BETTER / LOWER_IS_BETTER.
+
+    Only pairwise-quality metrics vote: single-stream ``_compressed`` keys
+    (e.g. ``temporal_consistency_compressed``) don't measure fidelity to the
+    original, so their "disagreement" with pair metrics is structural, not a
+    signal that a metric is mis-firing. They keep their outlier tables and
+    response curves — this exclusion is disagreement-only (mirrors the PR #54
+    sanity DIAGNOSTIC triage; see ``sanity._classify_metric``)."""
     metrics_to_use = [
         m
         for m in KEY_METRICS
-        if m in sweep_df.columns and _metric_direction(m) != "unknown"
+        if m in sweep_df.columns
+        and _metric_direction(m) != "unknown"
+        and _classify_metric(m) == "pairwise_quality"
     ]
     if len(metrics_to_use) < min_metrics:
         return pd.DataFrame()
@@ -356,12 +373,22 @@ def disagreement_table(
         metrics_to_use[i] if not np.isnan(spreads[k]) else ""
         for k, i in enumerate(arg_low)
     ]
+    # Absolute values of the best/worst metric per row, so range-compression
+    # cases stay visible (e.g. chist's whole corpus range is [0.9866, 1.0] —
+    # its rank-0.0 "worst" is a near-perfect absolute value).
+    metric_arr = df[metrics_to_use].to_numpy(dtype=float)
+    row_idx = np.arange(len(df))
+    df["best_value"] = metric_arr[row_idx, arg_high]
+    df["worst_value"] = metric_arr[row_idx, arg_low]
 
     return (
         df.dropna(subset=["rank_spread"])
         .sort_values("rank_spread", ascending=False)
         .head(top_n)
-        [["path", "lossy", "source", "content_type", "rank_spread", "best_metric", "worst_metric"]]
+        [[
+            "path", "lossy", "source", "content_type", "rank_spread",
+            "best_metric", "best_value", "worst_metric", "worst_value",
+        ]]
     )
 
 
@@ -574,7 +601,11 @@ def render_report(
         md.append(
             "GIFs where the best-ranked metric and the worst-ranked metric "
             "are far apart. Inspect these to see whether one of the metrics "
-            "is mis-firing on this kind of content."
+            "is mis-firing on this kind of content. Ranks are tie-aware "
+            "(tied values share their average rank) and only pairwise-quality "
+            "metrics vote — single-stream `_compressed` keys are excluded. "
+            "The absolute best/worst values are shown so range-compressed "
+            "metrics (rank extreme, near-perfect absolute value) are visible."
         )
         md.append("")
         rows = []
@@ -589,11 +620,11 @@ def render_report(
                     str(r["source"]) if pd.notna(r["source"]) else "",
                     str(r["content_type"]) if pd.notna(r["content_type"]) else "",
                     f"{r['rank_spread']:.2f}",
-                    str(r["best_metric"]),
-                    str(r["worst_metric"]),
+                    f"{r['best_metric']} ({r['best_value']:.4f})",
+                    f"{r['worst_metric']} ({r['worst_value']:.4f})",
                 ]
             )
-        md.append(md_table(rows, ["thumb", "gif", "lossy", "source", "content_type", "spread", "best→", "worst→"]))
+        md.append(md_table(rows, ["thumb", "gif", "lossy", "source", "content_type", "spread", "best→ (value)", "worst→ (value)"]))
         md.append("")
 
     # Per-content-type breakdown (synthetic only)
