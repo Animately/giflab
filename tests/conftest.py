@@ -8,7 +8,6 @@ import shutil
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 
 def pytest_collection_modifyitems(items):
@@ -23,31 +22,6 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.xdist_group("serial"))
 
 
-def _create_dummy_gif(path: Path, frames: int = 1, colors: int = 2) -> None:
-    """Create a small dummy GIF at *path* with *frames* and *colors*."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    size = (10, 10)
-    imgs = []
-    for i in range(frames):
-        val = int((i % colors) * 255 / max(colors - 1, 1))
-        imgs.append(Image.new("RGB", size, (val, 0, 255 - val)))
-    imgs[0].save(path, save_all=True, append_images=imgs[1:], duration=100, loop=0)
-
-
-def _ensure_required_gif_fixtures() -> None:
-    """Regenerate core GIF fixtures if they were cleaned from git."""
-    fixtures = {
-        "simple_4frame.gif": (4, 4),
-        "single_frame.gif": (1, 2),
-        "many_colors.gif": (2, 16),
-    }
-    base = Path(__file__).parent / "fixtures"
-    for name, (frames, colors) in fixtures.items():
-        gif_path = base / name
-        if not gif_path.exists():
-            _create_dummy_gif(gif_path, frames=frames, colors=colors)
-
-
 # Gitignored canonical fixtures that tests reference directly. Mapped to their
 # generator function in scripts/fixtures/generate.py (the `make fixtures` path).
 # These are under tests/fixtures/ but excluded by `tests/fixtures/*.gif`, so they
@@ -57,6 +31,14 @@ def _ensure_required_gif_fixtures() -> None:
 # `make fixtures` (a divergent local generator would desync the two). See task:
 # giflab-missing-test-fixture-test-4-frames-gif.
 _REFERENCED_CANONICAL_FIXTURES = {
+    # Core fixtures. These previously fell back to a 10x10 2-16-colour dummy
+    # generated here in conftest, which silently desynced CI from `make
+    # fixtures`: e.g. many_colors.gif was 256 colours / 13KB locally but 16
+    # colours / 135 bytes on CI, so palette-reduction size assertions tested
+    # nothing and failed on byte-level noise.
+    "simple_4frame.gif": "create_simple_4frame_gif",
+    "single_frame.gif": "create_single_frame_gif",
+    "many_colors.gif": "create_many_colors_gif",
     "test_4_frames.gif": "create_test_4_frames_gif",
     "test_10_frames.gif": "create_test_10_frames_gif",
     "test_256_colors.gif": "create_test_256_colors_gif",
@@ -98,7 +80,6 @@ def _ensure_referenced_canonical_fixtures() -> None:
 
 
 # Run at import time so all downstream fixtures see the files
-_ensure_required_gif_fixtures()
 _ensure_referenced_canonical_fixtures()
 
 
