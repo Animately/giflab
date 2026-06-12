@@ -16,6 +16,7 @@ for nightly CI rather than per-commit runs.
 
 import hashlib
 import json
+import math
 import multiprocessing as mp
 import os
 import queue
@@ -53,6 +54,8 @@ from giflab.optimization_validation import (
 )
 from giflab.parallel_metrics import ParallelMetricsCalculator
 from giflab.synthetic_gifs import SyntheticFrameGenerator, SyntheticGifGenerator
+
+from tests.nightly.helpers import nan_aware_close, performance_threshold_multiplier
 
 # ---------------------------------------------------------------------------
 # Full Pipeline Integration Tests (from test_phase5_full_pipeline.py)
@@ -239,6 +242,8 @@ class TestFullPipelineIntegration:
             "computation_time_ms",
         }
 
+        both_nan_keys = []
+
         for key in baseline_metrics:
             if (
                 key in optimized_metrics
@@ -249,7 +254,29 @@ class TestFullPipelineIntegration:
                 optimized_val = optimized_metrics[key]
 
                 if isinstance(baseline_val, int | float):
-                    if baseline_val != 0:
+                    # NaN check MUST precede the != 0 branch: nan != 0 is
+                    # True and nan < tolerance is False, so a NaN-blind
+                    # compare fails on honestly-NaN metrics (e.g.
+                    # ssimulacra2 when the binary is unavailable on CI).
+                    optimized_is_num = isinstance(optimized_val, int | float)
+                    baseline_nan = math.isnan(float(baseline_val))
+                    optimized_nan = optimized_is_num and math.isnan(
+                        float(optimized_val)
+                    )
+
+                    if baseline_nan or optimized_nan:
+                        # Both-NaN is honest equivalence (both paths could
+                        # not compute the metric). One-sided NaN IS a real
+                        # divergence — one path fabricated a number — and
+                        # must fail loudly.
+                        assert optimized_is_num and nan_aware_close(
+                            baseline_val, optimized_val
+                        ), (
+                            f"Metric {key} NaN mismatch: baseline={baseline_val}, "
+                            f"optimized={optimized_val} (one-sided NaN is a real divergence)"
+                        )
+                        both_nan_keys.append(key)
+                    elif baseline_val != 0:
                         relative_diff = abs(optimized_val - baseline_val) / abs(
                             baseline_val
                         )
@@ -260,6 +287,12 @@ class TestFullPipelineIntegration:
                         assert (
                             abs(optimized_val) < tolerance
                         ), f"Metric {key} differs from zero: {optimized_val}"
+
+        if both_nan_keys:
+            print(
+                "Both-NaN metrics (honestly not computable on this host, "
+                f"treated as equivalent): {sorted(both_nan_keys)}"
+            )
 
         print(
             f"Accuracy validation passed: {len(baseline_metrics)} metrics within {tolerance:.1%} tolerance"
@@ -283,6 +316,8 @@ class TestFullPipelineIntegration:
             results.append(metrics)
             cleanup_all_validators()
 
+        both_nan_keys = set()
+
         for i in range(1, len(results)):
             for key in results[0]:
                 if key in results[i] and not key.endswith("_ms"):
@@ -290,9 +325,23 @@ class TestFullPipelineIntegration:
                     vali = results[i][key]
 
                     if isinstance(val0, int | float):
-                        assert (
-                            abs(val0 - vali) < 1e-6
+                        # NaN-aware compare: abs(nan - nan) < 1e-6 is False,
+                        # so a NaN-blind compare flags an honestly-NaN metric
+                        # (e.g. ssimulacra2 with no binary on CI) as
+                        # non-deterministic. Both-NaN IS deterministic — the
+                        # metric failed the same way every run; one-sided NaN
+                        # fails loudly as genuine non-determinism.
+                        assert nan_aware_close(
+                            val0, vali, rel_tol=0.0, abs_tol=1e-6
                         ), f"Non-deterministic result for {key}: run 1={val0}, run {i + 1}={vali}"
+                        if math.isnan(float(val0)):
+                            both_nan_keys.add(key)
+
+        if both_nan_keys:
+            print(
+                "Both-NaN metrics (honestly not computable on this host, "
+                f"identical across runs): {sorted(both_nan_keys)}"
+            )
 
         print(
             f"Deterministic validation passed: {len(results)} runs produced identical results"
@@ -366,6 +415,14 @@ class TestFullPipelineIntegration:
 
     def test_pipeline_performance_thresholds(self):
         """Test that performance meets expected thresholds."""
+        # Bounds are calibrated on dev hardware; CI runners (2 cores,
+        # shared load) measured 189.7s for the large case vs the 180s
+        # dev bound, so both bounds get the environment multiplier
+        # (CI: 2.0x -> 360s, ~1.9x headroom over the measured time).
+        threshold_multiplier = performance_threshold_multiplier()
+        small_bound = 2.0 * threshold_multiplier
+        large_bound = 180.0 * threshold_multiplier
+
         frames_orig, frames_comp = self.generate_test_gif_frames(
             10, (100, 100), "high", "static"
         )
@@ -378,7 +435,9 @@ class TestFullPipelineIntegration:
         calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         small_time = time.perf_counter() - start_time
 
-        assert small_time < 2.0, f"Small GIF took too long: {small_time:.3f}s"
+        assert (
+            small_time < small_bound
+        ), f"Small GIF took too long: {small_time:.3f}s (bound {small_bound:.1f}s)"
 
         frames_orig, frames_comp = self.generate_test_gif_frames(
             100, (800, 600), "low", "animation"
@@ -388,10 +447,13 @@ class TestFullPipelineIntegration:
         calculate_comprehensive_metrics_from_frames(frames_orig, frames_comp)
         large_time = time.perf_counter() - start_time
 
-        assert large_time < 180.0, f"Large GIF took too long: {large_time:.3f}s"
+        assert (
+            large_time < large_bound
+        ), f"Large GIF took too long: {large_time:.3f}s (bound {large_bound:.1f}s)"
 
         print(
-            f"Performance thresholds met: Small={small_time:.3f}s, Large={large_time:.3f}s"
+            f"Performance thresholds met: Small={small_time:.3f}s, Large={large_time:.3f}s "
+            f"(multiplier: {threshold_multiplier:.1f}x)"
         )
 
     def test_pipeline_cache_effectiveness(self):

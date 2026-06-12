@@ -24,40 +24,7 @@ from giflab.gradient_color_artifacts import (
 from giflab.metrics import calculate_comprehensive_metrics
 from PIL import Image
 
-
-def _get_performance_threshold_multiplier():
-    """Get performance threshold multiplier based on environment.
-
-    Returns higher multipliers for CI environments to account for:
-    - Shared resources and variable load
-    - Different hardware characteristics
-    - Concurrent test execution
-    - Cold start effects
-
-    Returns:
-        float: Multiplier for performance thresholds (1.0 = local dev, >1.0 = CI)
-    """
-    # Common CI environment variables
-    ci_indicators = [
-        "CI",  # Generic CI flag
-        "CONTINUOUS_INTEGRATION",  # Common CI flag
-        "GITHUB_ACTIONS",  # GitHub Actions
-        "TRAVIS",  # Travis CI
-        "JENKINS_URL",  # Jenkins
-        "BUILDKITE",  # Buildkite
-        "CIRCLECI",  # Circle CI
-    ]
-
-    # Check if running in CI environment
-    is_ci = any(os.getenv(var) for var in ci_indicators)
-
-    if is_ci:
-        # Use 2.0x multiplier for CI environments
-        # This accounts for shared resources, variable load, and hardware differences
-        return 2.0
-    else:
-        # Local development environment - use strict thresholds
-        return 1.0
+from tests.nightly.helpers import performance_threshold_multiplier
 
 
 @pytest.mark.benchmark
@@ -208,7 +175,7 @@ class TestPerformanceBenchmarks:
 
         # Performance should scale reasonably with frame count
         # Use environment-aware thresholds for CI reliability
-        threshold_multiplier = _get_performance_threshold_multiplier()
+        threshold_multiplier = performance_threshold_multiplier()
         max_scaling = 7.0 * threshold_multiplier
 
         for size in sizes:
@@ -326,7 +293,7 @@ class TestPerformanceBenchmarks:
         concurrent_time = time.perf_counter() - start_time
 
         # Use environment-aware thresholds for CI reliability
-        threshold_multiplier = _get_performance_threshold_multiplier()
+        threshold_multiplier = performance_threshold_multiplier()
         max_concurrent_ratio = 2.0 * threshold_multiplier
 
         print(f"Sequential: {sequential_time:.3f}s, Concurrent: {concurrent_time:.3f}s")
@@ -344,12 +311,17 @@ class TestPerformanceBenchmarks:
             concurrent_time <= sequential_time * max_concurrent_ratio
         ), f"Concurrent execution too slow: {concurrent_time/sequential_time:.1f}x > {max_concurrent_ratio:.1f}x"
 
-    @pytest.mark.fast
     def test_comprehensive_metrics_performance_impact(self):
         """Test performance impact on comprehensive metrics calculation."""
         # Create test GIFs
         original_gif = self._create_test_gif("original.gif", (128, 128), frames=5)
         compressed_gif = self._create_test_gif("compressed.gif", (128, 128), frames=5)
+
+        # Untimed warm-up: the first call pays one-time costs (LPIPS model
+        # load, cache warm-up). Without it those costs are billed entirely
+        # to the "with gradient metrics" series — which runs first — so the
+        # ratio measures cold-start, not gradient-metric overhead.
+        calculate_comprehensive_metrics(original_gif, compressed_gif)
 
         # Measure time with new metrics
         times_with = []
@@ -358,7 +330,8 @@ class TestPerformanceBenchmarks:
             calculate_comprehensive_metrics(original_gif, compressed_gif)
             times_with.append(time.perf_counter() - start_time)
 
-        avg_time_with = statistics.mean(times_with)
+        # Median is robust to one-off scheduling/GC spikes (PR #62 precedent)
+        med_time_with = statistics.median(times_with)
 
         # Mock out gradient/color metrics to measure without them
         from unittest.mock import patch
@@ -373,16 +346,24 @@ class TestPerformanceBenchmarks:
                 calculate_comprehensive_metrics(original_gif, compressed_gif)
                 times_without.append(time.perf_counter() - start_time)
 
-        avg_time_without = statistics.mean(times_without)
-        overhead = avg_time_with / max(avg_time_without, 0.001)
+        med_time_without = statistics.median(times_without)
+        overhead = med_time_with / max(med_time_without, 0.001)
+
+        threshold_multiplier = performance_threshold_multiplier()
+        max_overhead = 3.0 * threshold_multiplier
+        max_total_time = 10.0 * threshold_multiplier
 
         print(
-            f"Metrics performance: {avg_time_without:.3f}s -> {avg_time_with:.3f}s (overhead: {overhead:.2f}x)"
+            f"Metrics performance: {med_time_without:.3f}s -> {med_time_with:.3f}s "
+            f"(overhead: {overhead:.2f}x, thresholds: {max_overhead:.1f}x / {max_total_time:.1f}s, "
+            f"multiplier: {threshold_multiplier:.1f}x)"
         )
 
         # Overhead should be reasonable
-        assert overhead < 3.0, f"Too much overhead: {overhead:.2f}x"
-        assert avg_time_with < 10.0, f"Total time too high: {avg_time_with:.2f}s"
+        assert overhead < max_overhead, f"Too much overhead: {overhead:.2f}x"
+        assert (
+            med_time_with < max_total_time
+        ), f"Total time too high: {med_time_with:.2f}s"
 
     # Helper methods for creating test data
     def _create_gradient_frames(self, size, num_frames):
