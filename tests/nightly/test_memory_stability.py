@@ -21,7 +21,6 @@ import time
 import tracemalloc
 import weakref
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import psutil
@@ -47,6 +46,8 @@ from giflab.temporal_artifacts import (
 )
 from giflab.text_ui_validation import TextUIContentDetector
 
+from tests.nightly.helpers import analyze_memory_samples, is_ci
+
 
 class MemoryLeakDetector:
     """Comprehensive memory leak detection for GifLab metrics."""
@@ -62,22 +63,38 @@ class MemoryLeakDetector:
         """Start memory monitoring."""
         gc.collect()
         self.initial_memory = self.process.memory_info().rss / 1024 / 1024  # MB
-        self.memory_samples = [self.initial_memory]
+        self.memory_samples = [(0, self.initial_memory)]
         tracemalloc.start()
 
-    def sample_memory(self) -> float:
+    def sample_memory(self, iteration: int | None = None) -> float:
         """Sample current memory usage.
+
+        Args:
+            iteration: Real iteration number this sample belongs to. Slope
+                analysis regresses memory against these indices, so the
+                reported growth rate is honestly MB per *iteration*
+                regardless of sampling cadence (the old detector regressed
+                over sample positions, making the rate 10x off for tests
+                that sample every 10 iterations). None falls back to the
+                sequential sample index (pre-existing behaviour).
 
         Returns:
             Current memory usage in MB
         """
         gc.collect()
         current_memory = self.process.memory_info().rss / 1024 / 1024
-        self.memory_samples.append(current_memory)
+        if iteration is None:
+            iteration = len(self.memory_samples)
+        self.memory_samples.append((iteration, current_memory))
         return current_memory
 
     def stop_monitoring(self) -> dict:
         """Stop monitoring and analyze results.
+
+        Slope / monotonic-growth / potential-leak analysis is delegated to
+        tests.nightly.helpers.analyze_memory_samples, which excludes the
+        warm-up samples (one-time LPIPS/cache ramp) and regresses against
+        real iteration indices.
 
         Returns:
             Dictionary with memory analysis results
@@ -87,26 +104,12 @@ class MemoryLeakDetector:
         final_memory = self.process.memory_info().rss / 1024 / 1024
 
         # Calculate statistics
+        memory_values = [memory_mb for _, memory_mb in self.memory_samples]
         memory_growth = final_memory - self.initial_memory
-        max_memory = max(self.memory_samples)
-        mean_memory = np.mean(self.memory_samples)
+        max_memory = max(memory_values)
+        mean_memory = np.mean(memory_values)
 
-        # Check for monotonic growth (potential leak)
-        is_monotonic = all(
-            self.memory_samples[i]
-            <= self.memory_samples[i + 1] * 1.1  # Allow 10% variation
-            for i in range(len(self.memory_samples) - 1)
-        )
-
-        # Calculate growth rate
-        if len(self.memory_samples) > 10:
-            # Linear regression on last 10 samples
-            x = np.arange(10)
-            y = self.memory_samples[-10:]
-            slope = np.polyfit(x, y, 1)[0]
-            growth_rate_mb_per_iteration = slope
-        else:
-            growth_rate_mb_per_iteration = 0
+        analysis = analyze_memory_samples(self.memory_samples, warmup_samples=2)
 
         return {
             "initial_memory_mb": self.initial_memory,
@@ -115,9 +118,9 @@ class MemoryLeakDetector:
             "max_memory_mb": max_memory,
             "mean_memory_mb": mean_memory,
             "samples": len(self.memory_samples),
-            "is_monotonic_growth": is_monotonic,
-            "growth_rate_mb_per_iteration": growth_rate_mb_per_iteration,
-            "potential_leak": is_monotonic and growth_rate_mb_per_iteration > 0.5,
+            "is_monotonic_growth": analysis["is_monotonic_growth"],
+            "growth_rate_mb_per_iteration": analysis["growth_rate_mb_per_iteration"],
+            "potential_leak": analysis["potential_leak"],
         }
 
     def track_object(self, obj):
@@ -211,7 +214,7 @@ class TestMemoryStability:
 
             # Track memory every 10 iterations
             if i % 10 == 0:
-                memory = detector.sample_memory()
+                memory = detector.sample_memory(iteration=i)
                 print(f"Iteration {i}: Memory = {memory:.1f} MB")
 
             # Explicitly delete to help GC
@@ -260,7 +263,11 @@ class TestMemoryStability:
             (30, (800, 600)),  # Standard
         ]
 
-        iterations = 20
+        # CI runners (2 cores, CPU-only LPIPS) cannot finish 20 cycles of
+        # this workload inside the 1800s pytest-timeout — the size-thrash
+        # pattern is the test, so all 5 size configs are kept per cycle and
+        # only the cycle count drops.
+        iterations = 5 if is_ci() else 20
 
         for iteration in range(iterations):
             for frame_count, size in size_configs:
@@ -273,7 +280,7 @@ class TestMemoryStability:
                 del frames_orig, frames_comp, metrics
 
             # Sample memory each iteration
-            memory = detector.sample_memory()
+            memory = detector.sample_memory(iteration=iteration)
             print(f"Iteration {iteration}: Memory = {memory:.1f} MB")
 
             # Cleanup periodically
@@ -318,7 +325,7 @@ class TestMemoryStability:
 
             # Track memory
             if i % 5 == 0:
-                memory = detector.sample_memory()
+                memory = detector.sample_memory(iteration=i)
                 print(f"Cache iteration {i}: Memory = {memory:.1f} MB")
 
         # Final cleanup
@@ -356,7 +363,7 @@ class TestMemoryStability:
             del frames_orig, frames_comp, metrics
 
             if i % 5 == 0:
-                memory = detector.sample_memory()
+                memory = detector.sample_memory(iteration=i)
                 print(f"Parallel iteration {i}: Memory = {memory:.1f} MB")
                 gc.collect()
 
@@ -407,7 +414,7 @@ class TestMemoryStability:
             # Cleanup globals
             if i % 5 == 0:
                 cleanup_all_validators()
-                memory = detector.sample_memory()
+                memory = detector.sample_memory(iteration=i)
                 print(f"Validator iteration {i}: Memory = {memory:.1f} MB")
 
         # Final cleanup
@@ -459,7 +466,7 @@ class TestMemoryStability:
                 # Always cleanup
                 if i % 5 == 0:
                     cleanup_all_validators()
-                    memory = detector.sample_memory()
+                    memory = detector.sample_memory(iteration=i)
                     print(f"Error recovery iteration {i}: Memory = {memory:.1f} MB")
                     gc.collect()
 
@@ -526,7 +533,7 @@ class TestMemoryStability:
 
             if i % 10 == 0:
                 cleanup_all_validators()
-                memory = detector.sample_memory()
+                memory = detector.sample_memory(iteration=i)
                 print(f"Stress iteration {i}: Memory = {memory:.1f} MB")
                 gc.collect()
 

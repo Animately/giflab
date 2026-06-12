@@ -24,6 +24,8 @@ from giflab.config import DEFAULT_METRICS_CONFIG
 from giflab.metrics import calculate_comprehensive_metrics_from_frames
 from giflab.parallel_metrics import ParallelConfig, ParallelMetricsCalculator
 
+from tests.nightly.helpers import effective_cpu_count
+
 
 class TestParallelMetricsBenchmark:
     """Benchmark tests for parallel metrics calculation."""
@@ -54,6 +56,14 @@ class TestParallelMetricsBenchmark:
 
     def test_parallel_vs_sequential_performance(self):
         """Compare performance of parallel vs sequential processing."""
+        if effective_cpu_count() < 4:
+            pytest.skip(
+                "Parallel-speedup shape assertions are meaningless below 4 cores "
+                "(2-core CI runners measure ~1.1x plus sub-second timing noise); "
+                "accuracy of parallel results is covered by "
+                "test_metric_accuracy_vs_sequential, which is core-count-independent"
+            )
+
         results = []
 
         for scenario_name, frames in self.test_scenarios.items():
@@ -137,6 +147,13 @@ class TestParallelMetricsBenchmark:
 
     def test_worker_count_scaling(self):
         """Test performance with different worker counts."""
+        if effective_cpu_count() < 4:
+            pytest.skip(
+                "Worker-count scaling (multi-worker faster than single-worker) "
+                "is a coin flip below 4 cores; accuracy is covered by "
+                "test_metric_accuracy_vs_sequential"
+            )
+
         frames = self.test_scenarios["large"]
         compressed_frames = [
             np.clip(f.astype(np.float32) * 0.95, 0, 255).astype(np.uint8)

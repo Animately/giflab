@@ -35,6 +35,8 @@ from giflab.text_ui_validation import (
     should_validate_text_ui,
 )
 
+from tests.nightly.helpers import effective_cpu_count
+
 # Import fixture generator for consistent test data
 try:
     from tests.fixtures.generate_phase3_fixtures import Phase3FixtureGenerator
@@ -489,6 +491,13 @@ class TestPhase3PipelinePerformance:
 
     def test_parallel_processing_scalability(self):
         """Test scalability with parallel processing simulation."""
+        if effective_cpu_count() < 4:
+            pytest.skip(
+                "Parallel-speedup shape assertion is meaningless below 4 cores: "
+                "ThreadPoolExecutor(3) over GIL-bound compute on a 2-core runner "
+                "cannot reach the 1.2x speedup floor"
+            )
+
         # Simulate processing multiple frame pairs concurrently
         frame_pairs = [
             (

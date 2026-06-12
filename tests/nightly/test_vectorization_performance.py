@@ -6,7 +6,6 @@ execution under pytest-xdist (-n auto). They belong in the nightly layer
 per the project's 4-layer test architecture.
 """
 
-import os
 import time
 
 import numpy as np
@@ -14,27 +13,9 @@ import pytest
 from giflab.synthetic_gifs import SyntheticFrameGenerator
 from PIL import Image
 
+from tests.nightly.helpers import performance_threshold_multiplier
+
 pytestmark = [pytest.mark.performance, pytest.mark.nightly]
-
-
-def _get_performance_threshold_multiplier():
-    """Get performance threshold multiplier based on environment.
-
-    Returns higher multipliers for CI environments to account for
-    shared resources, variable load, and concurrent test execution.
-    """
-    ci_indicators = [
-        "CI",
-        "CONTINUOUS_INTEGRATION",
-        "GITHUB_ACTIONS",
-        "TRAVIS",
-        "JENKINS_URL",
-        "BUILDKITE",
-        "CIRCLECI",
-    ]
-    if any(os.getenv(var) for var in ci_indicators):
-        return 3.0
-    return 1.0
 
 
 class TestPerformanceCharacteristics:
@@ -47,7 +28,7 @@ class TestPerformanceCharacteristics:
     def test_large_image_performance_reasonable(self):
         """Test that large images generate in reasonable time."""
         large_size = (500, 500)
-        multiplier = _get_performance_threshold_multiplier()
+        multiplier = performance_threshold_multiplier(ci=3.0)
 
         start_time = time.time()
         img = self.generator.create_frame("gradient", large_size, 0, 8)
@@ -67,7 +48,7 @@ class TestPerformanceCharacteristics:
         """Test that generating multiple frames is efficient."""
         size = (200, 200)
         num_frames = 10
-        multiplier = _get_performance_threshold_multiplier()
+        multiplier = performance_threshold_multiplier(ci=3.0)
 
         start_time = time.time()
         for frame_idx in range(num_frames):
@@ -87,7 +68,7 @@ class TestPerformanceCharacteristics:
         """Test that all vectorized content types perform well."""
         content_types = ["gradient", "complex_gradient", "noise", "texture", "solid"]
         size = (150, 150)
-        multiplier = _get_performance_threshold_multiplier()
+        multiplier = performance_threshold_multiplier(ci=3.0)
 
         for content_type in content_types:
             start_time = time.time()
@@ -111,7 +92,7 @@ class TestPerformanceRegression:
         """Test that medium-sized images generate quickly (regression test)."""
         generator = SyntheticFrameGenerator()
         size = (200, 200)
-        multiplier = _get_performance_threshold_multiplier()
+        multiplier = performance_threshold_multiplier(ci=3.0)
 
         times = []
         for i in range(5):
@@ -130,7 +111,7 @@ class TestPerformanceRegression:
     def test_vectorization_still_active(self):
         """Test that vectorized operations are still being used."""
         generator = SyntheticFrameGenerator()
-        multiplier = _get_performance_threshold_multiplier()
+        multiplier = performance_threshold_multiplier(ci=3.0)
 
         # Generate a complex gradient which uses heavy numpy operations
         start_time = time.time()
