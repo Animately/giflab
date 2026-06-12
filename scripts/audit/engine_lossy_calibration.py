@@ -94,10 +94,10 @@ but for two structurally different reasons. Be honest about which:
       NOT animately-style progressive posterisation (after the step the curve
       is gradual: 0.758→0.508 over L=10→100). By the pre-registered decision
       rule (any >=0.2 adjacent-grid-level drop by L=40 raises the ceiling
-      question), this is deferred to the follow-up calibration task
-      ``giflab-imagemagick-lossy-entry-step-ceiling-calibration`` rather than
-      granting a ceiling here (ClassifierConfig mandates a data-backed
-      per-engine dimension before any non-animately ceiling).
+      question), this raised the ceiling question; the follow-up calibration
+      ran the same day and CLOSED it with NO ceiling — see the entry-step
+      finding below (ClassifierConfig mandates a data-backed per-engine
+      dimension before any non-animately ceiling, and the data says no).
     - data-viz-flat content is byte-stable across all levels for both engines
       (palette reduction is honestly a no-op when the 16-colour floor still
       covers every unique colour) — a flat 1.000 there now means "nothing to
@@ -105,8 +105,86 @@ but for two structurally different reasons. Be honest about which:
       "nothing was attempted".
 
     Conclusion: the content ceiling remains animately-only. ffmpeg is
-    confirmed no-ceiling on a real axis; imagemagick's entry step is tracked
-    in the follow-up task above.
+    confirmed no-ceiling on a real axis; imagemagick's entry step was
+    calibrated and closed the same day — next finding.
+
+2026-06-12 entry-step finding (imagemagick follow-up — CLOSED: NO ceiling,
+no mapping change; ImageMagick 7.1.2-0 Q16-HDRI):
+
+    The ~0.24 entry step flagged above was isolated with a fine grid plus
+    direct ``magick`` probes. Verdict: it is a one-off, content-dependent
+    cost of ENTERING the quantise+dither axis at all — paid in full at the
+    FIRST positive level — not a level-dependent cliff a ceiling could avoid.
+
+    Fine grid (this harness: ``--engines imagemagick --levels 0 1 2 3 5 7
+    10``; palette targets 249→194 over L=1→10) — composite_quality:
+
+       content              L=0    L=1    L=2    L=3    L=5    L=7   L=10
+       rich_gradient       1.000  0.812  0.806  0.795  0.784  0.772  0.758
+       smooth_gradient     1.000  0.756  0.756  0.756  0.756  0.756  0.756
+       photographic_noise  1.000  0.908  0.908  0.908  0.908  0.908  0.909
+       data_viz_flat       1.000  1.000  1.000  1.000  1.000  1.000  1.000
+
+    - rich_gradient (per-frame uniques 256, union across frames 1024): the
+      whole step lands at L=1 (colors=249); after it the curve is GRADUAL
+      (max adjacent fine-grid step 0.014; 0.812→0.508 over L=1→100).
+    - smooth_gradient (union 129 unique colours): output is BYTE-IDENTICAL
+      at every level L=1–10 (one md5 across all targets 249→194 — each
+      exceeds the 129 uniques; deltae flat at 0.798). The flat L1–10
+      segment is NOT an inert axis (bytes DO change vs L=0): the step is
+      invocation cost, level-independent below the unique-count threshold.
+    - Direct probes (exact commands, mirroring lossy_compress's invocation):
+        magick rich.gif -dither Riemersma -colors 255 out.gif  -> 0.8169
+          (the gentlest possible target still pays the step; colour union
+          1024→839 — the quantiser remaps colours even when the target
+          exceeds the per-frame unique count of 256)
+        magick rich.gif -dither None -colors 255 out.gif       -> 0.8928
+          (quantiser-only cost ~0.107; Riemersma dither adds ~0.076)
+        magick rich.gif -dither None -colors 194 out.gif       -> 0.8100
+          (vs Riemersma at 194: 0.7579)
+        45-unique-colour spread-palette control: ``-colors 255`` AND
+          ``-colors 194`` -> composite 1.0000, byte-identical outputs,
+          palette untouched. Small well-separated palettes pay ZERO.
+
+    Why NO ceiling (and no mapping change):
+    - A ceiling clamps lossy_level DOWN to a POSITIVE value (existing
+      animately ceilings: 20–40); the step is paid in full at L=1, so every
+      positive ceiling value still pays it. Only L=0 avoids it, and "clamp
+      to 0" is disabling lossy, not a ceiling (the PR #40 over-trigger
+      lesson).
+    - A smoother entry mapping cannot help: the cost is internal to
+      ImageMagick's quantise+dither invocation, paid even at colors=255/249
+      when the target exceeds the content's unique-colour count (smooth:
+      129 uniques, target 249, still −0.244). There is no gentler entry
+      than colors=255; the mapping is already geometric and smooth.
+    - It is not the posterisation failure mode the ceiling exists for:
+      after entry the curve is gradual with banding_score == 0 at every
+      measurement. Structurally this is ffmpeg's verdict — ffmpeg's L=0
+      base is 0.686 on identical content because it always pays its
+      global-palette cost — and imagemagick at L=1 (0.812) is strictly
+      better than ffmpeg at ANY level; a ceiling for imagemagick but not
+      ffmpeg would be incoherent.
+    - A "skip -colors when target >= unique count" guard is also ruled out:
+      the spread-palette control shows IM already no-ops byte-identically
+      there; on dense palettes the perturbation is the real cost of
+      entering the axis, not waste.
+
+    Recorded, not acted on:
+    - banding_score == 0 at every measurement: the entry step is invisible
+      to the banding metric; the SSIM-family composite terms carry the
+      entire signal (composite −0.244 for a deltae of 0.8 on smooth
+      gradients — the ssim-composite-divergence audit's territory, not
+      chased here).
+    - ``-dither None -colors 194`` scores BOTH higher composite (0.810 vs
+      0.758) AND smaller bytes (19.9 vs 21.4 kB) than Riemersma on
+      rich_gradient. Riemersma stays: it is the banding guard chosen by the
+      dithering research, and a level-conditional dither switch would be a
+      discrete cliff (continuous-over-discrete). Candidate future
+      dither-calibration task.
+
+    Conclusion: all four non-animately engines are now calibrated CLOSED
+    with no ceiling. The ``engine == "animately"`` gate in
+    public_api.compress is correct and fully data-backed.
 
 Note: the default ``LEVELS`` grid stops at 100 (the public lossy range).
 Levels outside 0-100 now raise a clear range error from BOTH the ffmpeg and

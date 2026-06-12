@@ -289,15 +289,15 @@ def compress(
     # placeholder. animately's re-quantising lossy cliffs on photographic /
     # gradient / data-viz content (the posterisation failure mode the ceiling
     # prevents). All four non-animately engines are calibrated
-    # (scripts/audit/engine_lossy_calibration.py) and currently get NO ceiling:
+    # (scripts/audit/engine_lossy_calibration.py) and get NO ceiling:
     # gifsicle (2026-06-05), gifski (2026-06-09) and ffmpeg (2026-06-12, on
     # its now-real palette/dither lossy axis) degrade gradually with banding 0
     # at every level (no cliff); imagemagick (2026-06-12, also a real axis
-    # now) is gradual after a one-off entry-step at L0→10 (~0.24 composite on
-    # gradients, banding 0 — its quantiser's cost of entering the axis, not
-    # progressive posterisation). Whether that entry step warrants a ceiling
-    # is deferred to the follow-up calibration task
-    # giflab-imagemagick-lossy-entry-step-ceiling-calibration. Skip for
+    # now; entry-step calibration closed the same day) pays a one-off
+    # content-dependent axis-entry cost at ANY positive level (~0.24
+    # composite on colour-dense gradients, zero on small palettes, banding 0)
+    # and is gradual after it — paid in full at L=1, so no positive ceiling
+    # value could avoid it; not progressive posterisation. Skip for
     # lossless / colour-only calls (no positive lossy_level), and when the
     # caller opts out (audit sweeps).
     if (
