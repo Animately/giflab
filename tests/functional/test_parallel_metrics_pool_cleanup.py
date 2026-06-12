@@ -72,15 +72,28 @@ def _executor_processes(executor) -> list:
     return list(processes.values()) if processes else []
 
 
-def _wait_until_dead(processes, timeout: float = 5.0) -> list[int]:
-    """Return the PIDs from *processes* that are still alive after *timeout*."""
+def _wait_until_dead(processes, timeout: float = 15.0) -> list[int]:
+    """Return the PIDs from *processes* that are still alive after *timeout*.
+
+    Liveness is probed at the OS level (``_pid_alive``), NOT via
+    ``Process.is_alive()``: once the reaper's ``waitpid`` has reaped a worker
+    ahead of the executor's own machinery, multiprocessing's internal
+    ``poll()`` swallows the ``ChildProcessError`` and ``is_alive()`` reports
+    True forever — a dead, fully-reaped worker then reads as an "orphan"
+    (false positive observed ~2/15 runs under parallel load).
+
+    Polls and returns early, so the generous timeout only costs time when
+    workers genuinely leak; 5s proved too tight for reaping spawned workers
+    on loaded 2-core CI runners.
+    """
+    pids = [p.pid for p in processes]
     deadline = time.time() + timeout
     while time.time() < deadline:
-        alive = [p.pid for p in processes if p.is_alive()]
+        alive = [pid for pid in pids if _pid_alive(pid)]
         if not alive:
             return []
         time.sleep(0.05)
-    return [p.pid for p in processes if p.is_alive()]
+    return [pid for pid in pids if _pid_alive(pid)]
 
 
 def _make_pairs(n: int) -> list[tuple[np.ndarray, np.ndarray]]:

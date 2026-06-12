@@ -8,6 +8,7 @@ This test suite validates:
 """
 
 import csv
+import statistics
 import subprocess
 import tempfile
 import time
@@ -976,8 +977,13 @@ class TestMetricsPerformanceIntegration:
             shutil.rmtree(self.temp_dir)
 
     @pytest.mark.fast
+    @pytest.mark.serial
     def test_metrics_performance_impact(self):
-        """Measure performance overhead of new metrics."""
+        """Measure performance overhead of new metrics.
+
+        Serial + median-of-3: a single time.time() sample under parallel
+        xdist load produced 2.04-2.25x phantom overheads on CI runners.
+        """
         original_gif = self._create_test_gif("original.gif", frames=5)
         compressed_gif = self._create_test_gif("compressed.gif", frames=5)
 
@@ -986,29 +992,35 @@ class TestMetricsPerformanceIntegration:
             original_path=original_gif, compressed_path=compressed_gif
         )
 
-        # Now measure without gradient/color metrics
+        def median_runtime_s(repeats: int = 3) -> float:
+            samples = []
+            for _ in range(repeats):
+                start = time.perf_counter()
+                calculate_comprehensive_metrics(
+                    original_path=original_gif, compressed_path=compressed_gif
+                )
+                samples.append(time.perf_counter() - start)
+            return statistics.median(samples)
+
+        # Measure without gradient/color metrics
         with patch(
             "giflab.gradient_color_artifacts.calculate_gradient_color_metrics",
             return_value={},
         ):
-            start_time = time.time()
-            calculate_comprehensive_metrics(
-                original_path=original_gif, compressed_path=compressed_gif
-            )
-            time_without_metrics = time.time() - start_time
+            time_without_metrics = median_runtime_s()
 
-        # Measure time with new metrics (models already cached)
-        start_time = time.time()
-        calculate_comprehensive_metrics(
-            original_path=original_gif, compressed_path=compressed_gif
-        )
-        time_with_metrics = time.time() - start_time
+        # Measure with new metrics (models already cached)
+        time_with_metrics = median_runtime_s()
 
-        # Performance overhead should be reasonable (<2x slower)
-        overhead = time_with_metrics / max(
-            time_without_metrics, 0.001
-        )  # Avoid division by zero
-        assert overhead < 2.0, f"Performance overhead too high: {overhead:.2f}x"
+        if time_without_metrics < 0.1:
+            # Baseline too small for a meaningful ratio (a few ms of scheduler
+            # noise reads as 2x); bound the absolute added cost instead.
+            added = time_with_metrics - time_without_metrics
+            assert added < 1.0, f"Metrics added {added:.2f}s to a sub-100ms baseline"
+        else:
+            # Performance overhead should be reasonable (<2x slower)
+            overhead = time_with_metrics / time_without_metrics
+            assert overhead < 2.0, f"Performance overhead too high: {overhead:.2f}x"
 
         # Overall time should still be reasonable (<5 seconds for test)
         assert time_with_metrics < 5.0, f"Total time too high: {time_with_metrics:.2f}s"

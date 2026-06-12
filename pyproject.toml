@@ -48,6 +48,7 @@ types-pyyaml = "^6.0.12.20250822"
 types-tqdm = "^4.67.0.20250809"
 types-psutil = "^7.2.2.20260518"
 scipy-stubs = "^1.17.1.5"
+pytest-timeout = "^2.4.0"
 
 [tool.poetry.scripts]
 giflab = "giflab.cli:main"
