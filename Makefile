@@ -14,7 +14,7 @@ CSV_PATH := $(CSV_DIR)/results_$(DATE).csv
 # TARGETS
 # -----------------------------------------------------------------------------
 
-.PHONY: data help clean-temp clean-testing-mess test-workspace fixtures test test-ci test-nightly test-file benchmark-baseline benchmark-compare benchmark-ci performance-status performance-baseline performance-monitor performance-ci
+.PHONY: data help clean-temp clean-testing-mess test-workspace fixtures test test-ci test-nightly test-file
 
 fixtures: ## Regenerate all gitignored GIF test fixtures deterministically (run after clone / in worktrees)
 	@echo "Generating GIF test fixtures into tests/fixtures/ ..."
@@ -66,46 +66,6 @@ test-nightly: ## Nightly: everything including perf/memory
 
 test-file: ## Run a single test file: make test-file F=tests/functional/test_metrics.py
 	poetry run pytest $(F) -v
-
-benchmark-baseline: ## Run Phase 4.3 performance baseline measurements
-	@echo "📊 Running Phase 4.3 performance baseline measurements..."
-	@echo "🔧 Configuration: Caching disabled (baseline mode)"
-	poetry run python src/giflab/benchmarks/phase_4_3_benchmarking.py --iterations 3
-	@echo "✅ Baseline performance measurements complete!"
-
-benchmark-compare: ## Compare cached vs non-cached performance (requires both baselines)
-	@echo "📈 Running Phase 4.3 performance comparison analysis..."
-	poetry run python src/giflab/benchmarks/performance_comparison.py --save-report benchmark_results/latest_comparison.json
-	@echo "✅ Performance comparison analysis complete!"
-
-benchmark-ci: ## Run performance regression detection for CI
-	@echo "🚨 Running performance regression detection for CI..."
-	@echo "📊 Quick baseline measurement (current configuration)..."
-	@poetry run python src/giflab/benchmarks/phase_4_3_benchmarking.py --iterations 2 --scenario small_gif_basic
-	@echo "✅ Performance CI check complete! (Validates current performance baseline)"
-	@echo "💡 Use 'make benchmark-compare' to analyze cached vs non-cached performance"
-
-# -----------------------------------------------------------------------------
-# Phase 7: Performance Monitoring & Regression Detection
-# -----------------------------------------------------------------------------
-
-performance-status: ## Show performance monitoring status and recent alerts
-	@echo "📊 Performance Monitoring Status..."
-	poetry run python -m giflab performance status --verbose
-
-performance-baseline: ## Create or update performance baselines
-	@echo "📈 Creating Performance Baselines..."
-	poetry run python -m giflab performance baseline create --iterations 3
-
-performance-monitor: ## Start continuous performance monitoring (requires baselines)
-	@echo "🔍 Starting Performance Monitoring..."
-	@echo "⚠️  This requires GIFLAB_ENABLE_PERFORMANCE_MONITORING=true"
-	poetry run python -m giflab performance monitor start
-
-performance-ci: ## Run performance regression check for CI/CD pipelines
-	@echo "🚨 Running Performance CI Check..."
-	poetry run python -m giflab performance ci gate --threshold 0.15
-	@echo "✅ Performance regression check complete!"
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+: .*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ": |## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$3}' 

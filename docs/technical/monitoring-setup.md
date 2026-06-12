@@ -710,13 +710,7 @@ cache.cleanup(force=True)
 print('Cache cleaned')
 "
 
-# 3. Analyze performance trends
-python analyze_weekly_metrics.py
-
-# 4. Generate performance report
-python generate_performance_report.py > /tmp/weekly_report.html
-
-# 5. Check for updates
+# 3. Check for updates
 poetry show --outdated
 
 echo "Weekly maintenance completed"
