@@ -18,7 +18,6 @@ from .common import run_command
 __all__ = [
     "color_reduce_with_dithering",
     "frame_reduce",
-    "lossy_compress",
     "IMAGEMAGICK_DITHERING_METHODS",
 ]
 
@@ -152,30 +151,6 @@ def frame_reduce(
         delete_pattern,
         "-layers",
         "optimize",
-        str(output_path),
-    ]
-
-    return run_command(cmd, engine="imagemagick", output_path=output_path)
-
-
-def lossy_compress(
-    input_path: Path,
-    output_path: Path,
-    *,
-    quality: int = 85,
-) -> dict[str, Any]:
-    """Apply simple lossy compression via sampling-factor and *-quality*."""
-    if quality < 1 or quality > 100:
-        raise ValueError("quality must be in 1–100 range")
-
-    cmd = [
-        _magick_binary(),
-        str(input_path),
-        "-sampling-factor",
-        "4:2:0",
-        "-strip",
-        "-quality",
-        str(quality),
         str(output_path),
     ]
 

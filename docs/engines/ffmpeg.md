@@ -11,7 +11,7 @@ FFmpeg can read & write GIFs and offers fine-grained control via filters.
 |--------|------------------------|-------|
 | **Color reduction** | 2-pass palette method:<br>1) `ffmpeg -i in.gif -vf "fps={fps},palettegen" palette.png`<br>2) `ffmpeg -i in.gif -i palette.png -lavfi "fps={fps},paletteuse" out.gif` | If a preceding **frame** tool has already decided a lower FPS it can be supplied via the helper to avoid re-sampling twice. |
 | **Frame reduction** | `ffmpeg -i in.gif -vf "fps={fps}" out.gif` | Keeps the full color palette. |
-| **Lossy compression** | `ffmpeg -i in.gif -q:v {qscale} out.gif` | `qscale` maps to our `lossy_level` (lower = better quality). |
+| **Lossy compression** | 2-pass palette method:<br>1) `ffmpeg -i in.gif -filter_complex "palettegen=max_colors={colors}" palette.png`<br>2) `ffmpeg -i in.gif -i palette.png -filter_complex "paletteuse=dither=sierra2_4a" out.gif` | `colors` is mapped from our `lossy_level` geometrically (256→16; level 0 → 256, 25 → 128, 50 → 64, 75 → 32, 100 → 16). FFmpeg has no error-bounded GIF lossy mode, so palette size + dithering **is** its engine-native lossy axis. (The previous `-q:v {qscale}` recipe was a video-DCT knob — inert for palette-based GIF output; see the 2026-06-09 calibration finding.) |
 
 > **Combinations**: The pipeline builder may chain these wrappers — e.g. a `FFmpegFrameReducer` followed by `FFmpegColorReducer` and then `FFmpegLossyCompressor`.  Because each wrapper operates on the GIF produced by the previous step, you do **not** need a dedicated “all-in-one” command; the helpers automatically accept optional hints (such as target FPS) so we don’t duplicate expensive work, but conceptually each wrapper still owns exactly one variable.
 

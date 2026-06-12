@@ -63,11 +63,57 @@ but for two structurally different reasons. Be honest about which:
     a content ceiling. The ``engine == "animately"`` gate in public_api.compress
     is correct and fully data-backed.
 
-Note: the default ``LEVELS`` grid stops at 100 (the public lossy range). It used
-to include 120, which crashed the imagemagick column: that wrapper maps
-``quality = 100 - lossy_level`` with no clamp, so level 120 -> quality -20 ->
-``ValueError``. Pass ``--levels`` explicitly to probe above 100 (and expect that
-crash for imagemagick until its wrapper clamps quality).
+2026-06-12 finding (ffmpeg / imagemagick, POST-FIX — lossy axis made real):
+
+    The two inert wrappers were fixed: ``lossy_level`` now maps geometrically
+    (256→16 colours, halving every 25 levels) onto palette-size reduction +
+    dithering — ffmpeg via two-pass ``palettegen=max_colors`` /
+    ``paletteuse=dither=sierra2_4a``, imagemagick via ``-dither Riemersma
+    -colors N`` (plain re-save at L=0). Re-running this harness now exercises
+    a REAL axis: distinct md5s, bytes decline monotonically, deltae rises
+    monotonically, and banding_score == 0.00 at EVERY measurement for both
+    engines across all four content archetypes.
+
+    Rich RGB gradient — composite_quality by public lossy level:
+       engine   L=0    L=10   L=40   L=80   L=100
+       ffmpeg  0.686  0.664  0.602  0.505  0.458   <- GRADUAL (max adjacent
+                                  grid step 0.052): no cliff, needs NO ceiling
+  imagemagick  1.000  0.758  0.663  0.545  0.508   <- ENTRY STEP -0.242 at
+                                  L=0→10, then gradual — see below
+
+    - ffmpeg's L=0 base is 0.686, not 1.000: it always re-encodes through a
+      single palettegen-optimised global palette, slightly lossy for
+      >256-colour content (still an improvement over its old generic-palette
+      GIF encode, which measured 0.492). Its curve never drops >=0.2 between
+      adjacent grid levels — gifsicle-profile gradual degradation, NO ceiling.
+    - imagemagick's L=0 is an honest plain re-save (1.000). Its FIRST
+      quantisation step costs ~0.24 composite on gradient archetypes
+      (1.000→0.758 rich, 1.000→0.756 smooth, at L=10) with banding == 0 —
+      an entry-step discontinuity from ImageMagick's quantiser remapping
+      colours even when the target palette exceeds the unique-colour count,
+      NOT animately-style progressive posterisation (after the step the curve
+      is gradual: 0.758→0.508 over L=10→100). By the pre-registered decision
+      rule (any >=0.2 adjacent-grid-level drop by L=40 raises the ceiling
+      question), this is deferred to the follow-up calibration task
+      ``giflab-imagemagick-lossy-entry-step-ceiling-calibration`` rather than
+      granting a ceiling here (ClassifierConfig mandates a data-backed
+      per-engine dimension before any non-animately ceiling).
+    - data-viz-flat content is byte-stable across all levels for both engines
+      (palette reduction is honestly a no-op when the 16-colour floor still
+      covers every unique colour) — a flat 1.000 there now means "nothing to
+      remove", which IS graceful, unlike the pre-fix flat curves that meant
+      "nothing was attempted".
+
+    Conclusion: the content ceiling remains animately-only. ffmpeg is
+    confirmed no-ceiling on a real axis; imagemagick's entry step is tracked
+    in the follow-up task above.
+
+Note: the default ``LEVELS`` grid stops at 100 (the public lossy range).
+Levels outside 0-100 now raise a clear range error from BOTH the ffmpeg and
+imagemagick wrappers (``validate_lossy_level_for_engine``: "lossy_level must
+be between 0 and 100 for <engine>") — replacing ffmpeg's old silent clamp and
+imagemagick's old confusing ``quality must be in 0-100 range`` crash at level
+120. Pass ``--levels`` explicitly to probe other grids within 0-100.
 """
 
 from __future__ import annotations
@@ -152,10 +198,9 @@ CONTENTS = {
     "data_viz_flat": _data_viz_flat,
     "rich_gradient": _rich_gradient,
 }
-# Default grid stops at 100 (the public lossy range). Levels above 100 are not
-# part of the public scale and crash the imagemagick column (its wrapper does
-# ``quality = 100 - lossy_level`` with no clamp, so level 120 -> quality -20 ->
-# ValueError). Pass ``--levels`` explicitly to probe above 100 if needed.
+# Default grid stops at 100 (the public lossy range). Levels outside 0-100
+# raise a clear range error from every 0-100 engine wrapper
+# (validate_lossy_level_for_engine), so probing above 100 is gifsicle-only.
 LEVELS = [0, 10, 20, 30, 40, 60, 80, 100]
 
 

@@ -22,9 +22,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from PIL import Image
-
 from giflab.tool_wrappers import FFmpegLossyCompressor, ImageMagickLossyCompressor
+from PIL import Image
 
 
 def _make_rich_gradient_gif(path: Path, n_frames: int = 4) -> None:

@@ -19,7 +19,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from giflab.external_engines import ffmpeg as ffmpeg_engine
 from giflab.external_engines import imagemagick as imagemagick_engine
 from giflab.tool_wrappers import (
@@ -48,9 +47,9 @@ class TestLossyLevelToPaletteSize:
 
     def test_monotone_non_increasing(self):
         sizes = [_lossy_level_to_palette_size(level) for level in range(101)]
-        assert all(a >= b for a, b in zip(sizes, sizes[1:])), (
-            "palette size must never grow as lossy_level increases"
-        )
+        assert all(
+            a >= b for a, b in zip(sizes, sizes[1:], strict=False)
+        ), "palette size must never grow as lossy_level increases"
 
     def test_bounds(self):
         for level in range(101):
@@ -70,15 +69,11 @@ class TestLossyLevelToPaletteSize:
 class TestWrapperValidation:
     def test_missing_lossy_level_raises(self, wrapper_cls, tmp_path):
         with pytest.raises(ValueError, match="lossy_level"):
-            wrapper_cls().apply(
-                tmp_path / "in.gif", tmp_path / "out.gif", params={}
-            )
+            wrapper_cls().apply(tmp_path / "in.gif", tmp_path / "out.gif", params={})
 
     def test_none_params_raises(self, wrapper_cls, tmp_path):
         with pytest.raises(ValueError, match="lossy_level"):
-            wrapper_cls().apply(
-                tmp_path / "in.gif", tmp_path / "out.gif", params=None
-            )
+            wrapper_cls().apply(tmp_path / "in.gif", tmp_path / "out.gif", params=None)
 
     @pytest.mark.parametrize("bad_level", [-1, 101, 120])
     def test_out_of_range_level_raises(self, wrapper_cls, bad_level, tmp_path):
@@ -148,7 +143,8 @@ class TestFFmpegLossyCommand:
 
         def fake_run(cmd, *, engine, output_path, **kw):
             calls.append(list(cmd))
-            return dict(_META, engine=engine)
+            # Mirror the real run_command contract: command is the joined cmd.
+            return dict(_META, engine=engine, command=" ".join(cmd))
 
         with patch.object(
             ffmpeg_engine, "_ffmpeg_binary", return_value="ffmpeg"

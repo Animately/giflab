@@ -57,6 +57,7 @@ from .lossy_extended import (
     GifsicleDitheringMode,
     GifsicleOptimizationLevel,
     compress_with_gifsicle_extended,
+    validate_lossy_level_for_engine,
 )
 from .meta import extract_gif_metadata
 from .system_tools import discover_tool
@@ -67,6 +68,35 @@ from .tool_interfaces import (
     LossyCompressionTool,
 )
 from .wrapper_validation.integration import validate_wrapper_apply_result
+
+# ---------------------------------------------------------------------------
+# Shared lossy-level mapping (ffmpeg / imagemagick)
+# ---------------------------------------------------------------------------
+
+_MAX_PALETTE_SIZE = 256
+_MIN_PALETTE_SIZE = 16
+
+
+def _lossy_level_to_palette_size(lossy_level: int) -> int:
+    """Map the public ``lossy_level`` (0–100) onto a GIF palette size.
+
+    ffmpeg and imagemagick have no error-bounded GIF lossy mode (gifsicle's
+    ``--lossy`` / animately's re-quantiser), so their engine-native lossy
+    axis is palette-size reduction + dithering. The mapping is geometric —
+    ``256 * (16/256) ** (level/100)`` — halving the palette every 25 levels
+    (256/128/64/32/16 at 0/25/50/75/100): monotone and smooth across the
+    whole range with no cliff-edge thresholds (continuous-over-discrete,
+    see CLAUDE.md). The floor of 16 keeps maximum lossy clearly degraded
+    but not destroyed (a floor of 8 risks unusable output and the 0.3
+    wrapper-validation quality floor on ordinary content).
+    """
+    # Annotated to keep mypy happy: typeshed types ``float ** float`` as Any
+    # (a negative base with fractional exponent would be complex).
+    scaled: float = _MAX_PALETTE_SIZE * (
+        (_MIN_PALETTE_SIZE / _MAX_PALETTE_SIZE) ** (lossy_level / 100)
+    )
+    return max(_MIN_PALETTE_SIZE, round(scaled))
+
 
 # ---------------------------------------------------------------------------
 # GIFSICLE
@@ -637,14 +667,19 @@ class ImageMagickLossyCompressor(LossyCompressionTool):
         if params is None or "lossy_level" not in params:
             raise ValueError("params must include 'lossy_level' for lossy compression")
         lossy_level = int(params["lossy_level"])
-        # Map: lossy_level 0 (least lossy) → quality 100 (best quality)
-        #       lossy_level 100 (most lossy) → quality 0 (worst quality)
-        quality = 100 - lossy_level
+        validate_lossy_level_for_engine(lossy_level, "imagemagick")
+        # GIF's engine-native lossy axis is palette quantisation: map the
+        # public lossy_level (0-100) onto a palette size (geometric 256→16;
+        # 256 → plain re-save, pixels untouched). The previous mapping
+        # (quality = 100 - lossy_level → ``-quality``, a PNG/JPEG zlib knob)
+        # was INERT for GIF output — byte-identical at every level
+        # (2026-06-09 calibration).
+        colors = _lossy_level_to_palette_size(lossy_level)
 
         result = imagemagick_lossy_compress(
             input_path,
             output_path,
-            quality=quality,
+            colors=colors,
         )
 
         # Add validation
@@ -776,14 +811,19 @@ class FFmpegLossyCompressor(LossyCompressionTool):
         if params is None or "lossy_level" not in params:
             raise ValueError("params must include 'lossy_level' for lossy compression")
         lossy_level = int(params["lossy_level"])
-        # Map: lossy_level 0 (least lossy) → q_scale 1 (best quality)
-        #       lossy_level 100 (most lossy) → q_scale 31 (worst quality)
-        q_scale = max(1, min(31, 1 + round(lossy_level * 30 / 100)))
+        validate_lossy_level_for_engine(lossy_level, "ffmpeg")
+        # GIF's engine-native lossy axis is palette quantisation: map the
+        # public lossy_level (0-100) onto a palette size (geometric 256→16)
+        # for the palettegen/paletteuse two-pass chain. The previous mapping
+        # (q_scale via silent clamp → ``-q:v``, a video-DCT knob) was INERT
+        # for GIF output — byte-identical at every level (2026-06-09
+        # calibration).
+        colors = _lossy_level_to_palette_size(lossy_level)
 
         result = ffmpeg_lossy_compress(
             input_path,
             output_path,
-            q_scale=q_scale,
+            colors=colors,
         )
 
         # Add validation

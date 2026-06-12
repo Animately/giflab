@@ -311,11 +311,19 @@ class ClassifierConfig:
       degrades GRADUALLY with ``banding_score == 0`` at every level — no
       posterisation cliff — so clamping them would discard good compression for
       no benefit.
-    * ffmpeg and imagemagick (2026-06-09) have an INERT ``lossy_level`` for GIF
-      output: their wrappers map it to ``-q:v`` / ``-quality`` (video-DCT / zlib
-      knobs that do not touch GIF pixels), so output is BYTE-IDENTICAL across all
-      levels (md5 probe). With no lossy axis exercised they cannot cliff — their
-      flat curves are "nothing changed", NOT "graceful degradation".
+    * ffmpeg (recalibrated 2026-06-12 after its inert ``-q:v`` mapping was
+      replaced with a real palette-size + dithering axis): GRADUAL decline on
+      every archetype (rich gradient 0.686→0.458 over L0→100, max adjacent
+      grid step 0.052, banding 0 throughout) — no cliff, NO ceiling.
+    * imagemagick (recalibrated 2026-06-12 after its inert ``-quality``
+      mapping was replaced with ``-dither Riemersma -colors N``): L=0 is an
+      honest plain re-save (composite 1.000); the FIRST quantisation step
+      (L0→10) costs ~0.24 composite on gradient archetypes with banding 0 —
+      an entry-step discontinuity of its quantiser, not progressive
+      posterisation (gradual 0.758→0.508 over L10→100). Whether that entry
+      step warrants a ceiling is deferred to the follow-up task
+      ``giflab-imagemagick-lossy-entry-step-ceiling-calibration``; until that
+      calibration lands, no imagemagick ceiling.
 
     The values below are animately-specific. ``ClassifierConfig`` has no
     per-engine dimension because the data says no second engine needs one; if a

@@ -44,18 +44,25 @@ magick "$IN_GIF" -coalesce -delete '1--2' -layers optimize "$OUT_GIF"
 - `keep_ratio=0.33` → `step=3` → `-delete '1--3'` (keep every 3rd frame)
 - `keep_ratio=1.0` → no deletion, direct copy
 
-### 1.3  Lossy compression
+### 1.3  Lossy compression (palette quantisation + dithering)
 ```bash
-magick "$IN_GIF" -sampling-factor 4:2:0 -strip -quality 85 "$OUT_GIF"
-# -quality ∈ [1-100]; wrapper selects value
+magick "$IN_GIF" -dither Riemersma -colors 64 "$OUT_GIF"
+# colors mapped from lossy_level (geometric 256→16); lossy_level 0 → plain re-save:
+magick "$IN_GIF" "$OUT_GIF"
 ```
 
 **Parameter Mapping:**
 | Wrapper Param | CLI Argument | Notes |
 |---------------|-------------|--------|
-| `quality: int` | `-quality {quality}` | Range 1-100, higher = better quality |
-| N/A | `-sampling-factor 4:2:0` | Fixed chroma subsampling |
-| N/A | `-strip` | Remove metadata for smaller files |
+| `lossy_level: int` (0–100) | `-colors {N}` | `N = max(16, round(256 * (16/256) ** (level/100)))` — palette halves every 25 levels (256/128/64/32/16 at 0/25/50/75/100) |
+| `dithering_method: str` | `-dither {method}` | Default `Riemersma` (best all-round performer from the dithering research) |
+| — | (no args when `colors >= 256`) | `lossy_level 0` is a plain re-save: nothing to quantise away, pixels untouched |
+
+> **Why not `-quality`?** GIF is palette-based: ImageMagick's `-quality` is the PNG/JPEG
+> compression-level knob and does not touch GIF pixels. The pre-2026-06-12 recipe
+> (`-sampling-factor 4:2:0 -strip -quality {q}`) produced byte-identical output at every
+> lossy level (md5-verified, 2026-06-09 calibration). Palette size + dithering is the
+> engine-native GIF lossy axis.
 
 ---
 ## 2  FFmpeg (`ffmpeg`)
@@ -85,19 +92,25 @@ ffmpeg -y -v error -i "$IN_GIF" -filter_complex "fps=7.5" "$OUT_GIF"
 |---------------|-------------|-----------|
 | `fps: float` | `fps={fps}` | Direct mapping to target frame rate |
 
-### 2.3  Lossy compression (quantiser)
+### 2.3  Lossy compression (palette quantisation + dithering, two-pass)
 ```bash
-ffmpeg -y -v error -i "$IN_GIF" -lavfi "fps=15" -q:v 30 "$OUT_GIF"
-# lower q:v ⇒ higher quality; wrapper maps quality ∈ [0-100] to q:v
+ffmpeg -y -v error -i "$IN_GIF" -filter_complex "palettegen=max_colors=64" "$PALETTE_PNG"
+ffmpeg -y -v error -i "$IN_GIF" -i "$PALETTE_PNG" -filter_complex "paletteuse=dither=sierra2_4a" "$OUT_GIF"
+# max_colors mapped from lossy_level (geometric 256→16); no fps filter in the chain
 ```
 
 **Parameter Mapping:**
 | Wrapper Param | CLI Argument | Algorithm |
 |---------------|-------------|-----------|
-| `qv: int` | `-q:v {qv}` | Direct mapping, lower = higher quality |
-| `fps: float` | `fps={fps}` in lavfi | Frame rate filter |
+| `lossy_level: int` (0–100) | `palettegen=max_colors={N}` | `N = max(16, round(256 * (16/256) ** (level/100)))` — palette halves every 25 levels (256/128/64/32/16 at 0/25/50/75/100) |
+| `dithering_method: str` | `paletteuse=dither={method}` | Default `sierra2_4a` (FFmpeg's own default dither) |
 
-**Quality Scale:** FFmpeg's `-q:v` is inverse (lower = better), range typically 1-31 for reasonable quality.
+> **Why not `-q:v`?** GIF is palette-based: FFmpeg's `-q:v` is an MPEG/DCT video quality
+> knob and does not touch GIF pixels. The pre-2026-06-12 recipe produced byte-identical
+> output at every lossy level (md5-verified, 2026-06-09 calibration). FFmpeg has no
+> error-bounded GIF lossy mode, so palette size + dithering is its lossy axis. Note even
+> `lossy_level 0` re-encodes through a palettegen-optimised 256-colour palette — a quality
+> *improvement* over FFmpeg's default generic-palette GIF encode, but not byte-lossless.
 
 ---
 ## 3  gifski (`gifski`)

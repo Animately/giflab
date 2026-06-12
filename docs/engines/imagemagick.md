@@ -11,7 +11,7 @@ We use three operations:
 |--------|------------------------|-------|
 | **Color reduction** | `magick in.gif +dither -colors {colors} out.gif` | `colors` ≤ 256 |
 | **Frame reduction**  | `magick in.gif -coalesce -delete '1--2' -layers optimize out.gif` | Wrapper will approximate ratio by deleting every _n_-th frame. |
-| **Lossy compression** | `magick in.gif -sampling-factor 4:2:0 -strip -quality {q} out.gif` | `q` derived from `lossy_level`. |
+| **Lossy compression** | `magick in.gif -dither Riemersma -colors {N} out.gif` | `N` is mapped from `lossy_level` geometrically (256→16; level 0 → 256, 50 → 64, 100 → 16). `lossy_level 0` is a plain re-save (`magick in.gif out.gif`) — nothing to quantise away. (The previous `-sampling-factor 4:2:0 -strip -quality {q}` recipe used the PNG/JPEG compression-level knob — inert for GIF pixels; see the 2026-06-09 calibration finding.) |
 
 Exact commands are centralised in the helper so tests stay stable.
 
