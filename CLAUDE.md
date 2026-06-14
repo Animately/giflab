@@ -289,6 +289,9 @@ Agent teams are enabled for this project. When using them, follow these guidelin
 ## Active Technologies
 - Python 3.11 (per `pyproject.toml`) + No new dependencies. Reuses existing internals: `tool_wrappers.AnimatelyLossyCompressor` + 4 sibling compressors, `metrics.calculate_comprehensive_metrics`, `external_engines.common.run_command`, `error_handling.GifLabError` hierarchy. (003-public-api-refactor)
 - N/A (filesystem read/write only; no DB) (003-public-api-refactor)
+- Python 3.11 (Poetry) + reuses existing internals (`scripts/audit/` harness, `metrics.calculate_comprehensive_metrics`, shipped `compress()`); `scipy.stats` for rank-correlation, `pydantic` for study schemas. (004-metric-validation-gate)
+- Filesystem artifacts under `docs/metrics-audit/<date>/validation-gate/` (CSV/markdown/PNG); no SQLite — research-artifact deviation, justified in plan. (004-metric-validation-gate)
 
 ## Recent Changes
+- 004-metric-validation-gate: validation-gate study layered on `scripts/audit/`; read-only consumer of metrics + `compress()`; outputs a go/no-go verdict + per-content-type quality floors under `docs/metrics-audit/<date>/`.
 - 003-public-api-refactor: Added Python 3.11 (per `pyproject.toml`) + No new dependencies. Reuses existing internals: `tool_wrappers.AnimatelyLossyCompressor` + 4 sibling compressors, `metrics.calculate_comprehensive_metrics`, `external_engines.common.run_command`, `error_handling.GifLabError` hierarchy.
