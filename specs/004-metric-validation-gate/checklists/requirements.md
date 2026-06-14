@@ -34,4 +34,4 @@
 - Validated 2026-06-14, first pass — all items pass.
 - **Zero `[NEEDS CLARIFICATION]` markers**: the one genuine judgement call (the SC-002 "GO" agreement thresholds, ρ ≥ 0.85 and the ≤ 0.5 inversion bar) is captured as a recorded, tunable starting value in Assumptions rather than a blocking clarification, since a reasonable default exists. Confirm or adjust it in `/speckit.clarify`.
 - `composite_quality` is referenced as the domain subject being validated (the verdict under test), not as an implementation/technology detail — this is the feature's object, so it is intentionally named.
-- Ready for `/speckit.clarify` (recommended, to settle SC-002 thresholds and rater count) or `/speckit.plan`.
+- `/speckit.clarify` completed 2026-06-14 — 4 clarifications recorded in the spec's `## Clarifications` section (SC-002 thresholds confirmed, single-boundary floor capture, single rater, operation-type bias grouping). Spec is ready for `/speckit.plan`.
