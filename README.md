@@ -1,14 +1,21 @@
 # GifLab
 
-Training dataset generation for GIF compression curve prediction.
+GIF compression engines + trustworthy quality metrics, and the experiment instrument that ranks the best compression pipeline for each kind of GIF.
 
 ---
 
 ## Overview
 
-GifLab processes raw GIFs through 7 compression engines, measures quality with comprehensive GIF-specific metrics, and produces normalized SQLite datasets for training ML models that predict compression curves from visual features alone.
+GifLab wears two hats:
 
-**Data flow**: Raw GIFs → Visual feature extraction (25 features) → Compression across 7 engines → Quality metrics (13 measures) → SQLite → Training data → Curve prediction models
+1. **Measurement library** — stable `compress()` and `measure()` functions over 7 compression engines and a comprehensive GIF-specific quality metric stack (including the calibrated `composite_quality` verdict). This is the public API the sibling [gifprep](https://github.com/animately/gifprep) repo consumes for its *preprocessing* experiments. See [docs/public-api.md](docs/public-api.md).
+2. **Compression-pipeline leaderboard instrument** — a matrix-benchmark harness that fans out compression pipelines (frame / colour / lossy, across engines) and ranks the best pipeline **per GIF content-type** on the quality-vs-size trade-off.
+
+It also extracts visual features and stores compression results in normalised SQLite, intended as ML training data.
+
+> **Status.** The leaderboard instrument is being **rebuilt** — the original was removed in commit `648db9a` — and the ML curve-predictor is a **deferred** follow-on (the `train` CLI is currently a stub; see below). This README marks **(shipped)** vs **(planned)** where it matters. For the direction and the shipped/planned split, see [Compression-Pipeline Leaderboard](docs/technical/compression-pipeline-leaderboard.md).
+
+**Data flow (shipped)**: Raw GIFs → Visual feature extraction (25 features) → Compression across 7 engines → Quality metrics → `composite_quality` verdict → SQLite.
 
 ## Quick Start
 
@@ -16,18 +23,18 @@ GifLab processes raw GIFs through 7 compression engines, measures quality with c
 # Install dependencies
 poetry install
 
-# Run the compression pipeline (generates dataset)
-poetry run python -m giflab run --sampling representative
+# Run the compression + feature-extraction pipeline over a directory of GIFs
+poetry run python -m giflab run data/raw                 # single-engine (quick)
+poetry run python -m giflab run data/raw --mode full     # all tool combinations
 
-# Train prediction models on collected data
-poetry run python -m giflab train
-
-# Export training data for external use
-poetry run python -m giflab export --format csv
+# Export collected data
+poetry run python -m giflab export --db data/giflab.db --output out.csv --table runs
 
 # View dataset statistics
-poetry run python -m giflab stats
+poetry run python -m giflab stats --db data/giflab.db
 ```
+
+> **Heads-up:** `giflab train` exists but is currently a **stub** (it prints row counts, not a trained model). Real curve-prediction training lives under `giflab predict train` (see [ML Pipeline](#ml-pipeline)). Older docs referenced `--sampling`, `--preset`, `select-pipelines`, and `view-failures` — those commands were removed in `648db9a` and are **not** in the current CLI.
 
 ## The Dataset
 
@@ -70,56 +77,38 @@ poetry run python -m giflab export --format csv
 poetry run python -m giflab stats
 ```
 
-## ML Pipeline
+## ML Pipeline (partial — predictor deferred)
 
-The prediction pipeline has three stages: collect data, train models, predict curves.
+The longer-term vision is a model that predicts compression curves from visual features alone, so engine/parameter selection is instant without trial-and-error compression. **Current state:** data collection and feature extraction are shipped; end-to-end model training is **not finished** (the top-level `giflab train` command is a stub). Treat this section as direction, not a working pipeline.
 
-### 1. Collect: `giflab run`
+### 1. Collect: `giflab run` (shipped)
 
-Processes GIFs through all engine/parameter combinations, extracts visual features, computes quality metrics, and stores everything in SQLite.
-
-```bash
-# Process a directory of GIFs
-poetry run python -m giflab run data/raw --workers 8
-
-# Use research presets for targeted experiments
-poetry run python -m giflab run --preset frame-focus
-
-# Intelligent sampling across parameter space
-poetry run python -m giflab run --sampling representative
-```
-
-### 2. Train: `giflab train`
-
-Trains gradient boosting models (CurvePredictionModel) that learn to predict compression curves from visual features.
+Processes GIFs through engine/parameter combinations, extracts the 25 visual features, computes quality metrics, and stores everything in SQLite.
 
 ```bash
-# Train on collected data
-poetry run python -m giflab train
-
-# Train for a specific engine
-poetry run python -m giflab train --engine animately-advanced
+poetry run python -m giflab run data/raw                # single-engine per lossy engine
+poetry run python -m giflab run data/raw --mode full    # all frame × colour × lossy combinations
 ```
 
-The trained models predict two curve types:
-- **Lossy curves**: quality score at each lossy compression level
-- **Color curves**: quality score at each palette size
+### 2. Train (planned — `giflab train` is a stub)
 
-### 3. Predict: `giflab predict`
-
-Uses trained models to predict compression curves for new GIFs without running actual compression.
+`giflab train` currently loads the training split and prints row counts **without fitting a model**. The real (still-maturing) training code is `src/giflab/prediction/models.py`, exposed via the `predict` subgroup:
 
 ```bash
-# Predict curves for a new GIF
-poetry run python -m giflab predict --input new.gif
-
-# Predict for a specific engine and curve type
-poetry run python -m giflab predict --input new.gif --engine gifsicle --curve-type lossy
+poetry run python -m giflab predict train --dataset data/ --engine animately-advanced
 ```
 
-### Why prediction matters
+### 3. Predict: `giflab predict` (partial)
 
-Running a GIF through all 7 engines at every parameter combination is slow. Prediction lets you estimate compression curves from visual features alone, enabling instant engine/parameter selection without trial-and-error compression.
+The `predict` subgroup exposes feature extraction and curve prediction:
+
+```bash
+poetry run python -m giflab predict extract-features new.gif      # 25-feature vector
+poetry run python -m giflab predict lossy-curve new.gif --engine gifsicle
+poetry run python -m giflab predict color-curve new.gif --engine gifsicle
+```
+
+> The **compression-pipeline leaderboard** (which pipeline actually wins per content-type) is a *separate* effort from this predictor — see [Compression-Pipeline Leaderboard](docs/technical/compression-pipeline-leaderboard.md). The leaderboard is the near-term goal; the predictor is downstream of it.
 
 ## Dataset Best Practices
 
@@ -199,46 +188,21 @@ efficiency = (composite_quality^0.5) * (normalized_compression^0.5)
 
 Compression ratio is log-normalized and capped at 20x to handle diminishing returns.
 
-## Research Presets
+## Compression-Pipeline Leaderboard (direction — in rebuild)
 
-Research presets provide predefined pipeline combinations for common analysis scenarios.
+The near-term goal is a **trustworthy leaderboard** that answers: *for this kind of GIF, which compression pipeline gives the smallest file at acceptable quality?* It fans out every pipeline combination (frame / colour / lossy, across engines, including cross-engine chains), ranks them at an **iso-quality** operating point, and reports the best per content-type.
 
-```bash
-# List all available presets
-poetry run python -m giflab run --list-presets
+This experiment was built and run in 2025, then **removed in `648db9a`**; it is being **rebuilt fresh** now that the `composite_quality` metric is trustworthy enough to rank on. The building blocks survive — `src/giflab/dynamic_pipeline.py::generate_all_pipelines()` enumerates ~1,200 pipeline structures, and `scripts/audit/` provides the sweep/metric machinery.
 
-# Compare frame reduction algorithms
-poetry run python -m giflab run --preset frame-focus
+> A previous CLI exposed `--preset`, `--sampling`, `select-pipelines`, and `view-failures`. **Those were removed in `648db9a` and are not in the current CLI.** The concepts (sampling, Pareto elimination, presets) return in the rebuild under new names.
 
-# Compare color quantization methods
-poetry run python -m giflab run --preset color-optimization
+See [Compression-Pipeline Leaderboard](docs/technical/compression-pipeline-leaderboard.md) for the full design (deliverable, the quality/size pivot, two-stage screening, validation gate, taxonomy) and the shipped-vs-planned split.
 
-# Quick testing preset
-poetry run python -m giflab run --preset quick-test
-```
+## Validation
 
-Available presets: `frame-focus`, `color-optimization`, `lossy-quality-sweep`, `tool-comparison-baseline`, `dithering-focus`, `png-optimization`, `quick-test`.
+GifLab validates compression results in-pipeline (`src/giflab/wrapper_validation/`), detecting quality degradation, efficiency problems, frame-reduction issues, disposal artifacts, and temporal-consistency failures. Validation status levels: PASS, WARNING, ERROR, ARTIFACT, UNKNOWN. Thresholds adapt to content type (animation-heavy, smooth gradients, text/graphics, photo-realistic).
 
-See [Compression Testing Guide](docs/guides/experimental-testing.md) for details.
-
-## Validation and Debugging
-
-GifLab includes automatic validation during compression that detects quality degradation, efficiency problems, frame reduction issues, disposal artifacts, and temporal consistency failures.
-
-```bash
-# View detailed failure analysis
-poetry run python -m giflab view-failures results/runs/latest/
-
-# Filter by specific error types
-poetry run python -m giflab view-failures results/runs/latest/ --error-type gifski
-
-# Get detailed error information
-poetry run python -m giflab view-failures results/runs/latest/ --detailed
-```
-
-Validation status levels: PASS, WARNING, ERROR, ARTIFACT, UNKNOWN. The system adjusts thresholds based on content type (animation-heavy, smooth gradients, text/graphics, photo-realistic).
-
-See [Compression Testing Guide](docs/guides/experimental-testing.md) for the full validation reference.
+> The standalone `giflab view-failures` CLI viewer was removed in `648db9a`. Validation still runs as part of the pipeline; the failure-inspection CLI is not currently exposed.
 
 ## Source Detection
 
@@ -256,37 +220,26 @@ Source platform and metadata are tracked in the CSV output (`source_platform`, `
 
 See [Directory-Based Source Detection Guide](docs/guides/directory-source-detection.md) for details.
 
-## Pareto Frontier Analysis
+## Pareto Frontier Analysis (planned — part of the leaderboard)
 
-Pareto analysis identifies mathematically optimal compression pipelines -- trade-offs where you cannot improve quality without increasing file size, or reduce file size without degrading quality.
-
-```bash
-# Run experiments with Pareto analysis
-poetry run python -m giflab run --sampling representative
-
-# View top performers
-poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 5
-```
-
-Dominated pipelines are automatically identified and can be safely eliminated from consideration.
+Pareto analysis identifies optimal compression pipelines — trade-offs where you cannot improve quality without increasing file size, or vice versa — and eliminates dominated pipelines. This is a core mechanism of the [Compression-Pipeline Leaderboard](docs/technical/compression-pipeline-leaderboard.md) (used both as a Pareto-frequency cross-check and to prune the search). The previous implementation (`core/pareto.py`, `select-pipelines`) was removed in `648db9a` and is being rebuilt.
 
 ## Pipeline Usage Examples
 
 ```bash
-# Standard production processing
-poetry run python -m giflab run data/raw --workers 8 --resume
+# Single-engine pass over a directory (resume-safe by default; skips already-done GIFs)
+poetry run python -m giflab run data/raw
 
-# Test all engines with comprehensive sampling
-poetry run python -m giflab run --sampling representative
+# All frame × colour × lossy tool combinations
+poetry run python -m giflab run data/raw --mode full
 
-# Quick test for development
-poetry run python -m giflab run --sampling quick
+# Force re-processing of everything / re-process only outdated GIFs
+poetry run python -m giflab run data/raw --force
+poetry run python -m giflab run data/raw --upgrade
 
-# Select top performing pipelines
-poetry run python -m giflab select-pipelines results/runs/latest/enhanced_streaming_results.csv --top 3 -o winners.yaml
-
-# Run with selected pipelines
-poetry run python -m giflab run data/raw --pipelines winners.yaml
+# Inspect the collected dataset
+poetry run python -m giflab stats --db data/giflab.db
+poetry run python -m giflab export --db data/giflab.db --output runs.csv --table runs
 ```
 
 ## Project Structure

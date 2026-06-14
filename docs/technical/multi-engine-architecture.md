@@ -2,6 +2,8 @@
 
 **Technical documentation of GifLab's multi-engine compression architecture, testing strategies, and operational patterns.**
 
+> **⚠️ PARTIALLY OUT OF DATE.** The engine/capability-registry architecture described here is current, but the **usage examples** below (`--sampling`, `--preset`) reference the CLI removed in `648db9a` — those commands no longer exist. See [Compression-Pipeline Leaderboard](./compression-pipeline-leaderboard.md) for the rebuild.
+
 ---
 
 ## Overview

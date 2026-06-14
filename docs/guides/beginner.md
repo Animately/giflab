@@ -2,6 +2,8 @@
 
 **A step-by-step guide to generating prediction datasets from GIF compression sweeps**
 
+> **⚠️ PARTIALLY OUT OF DATE.** This guide predates commit `648db9a`, which removed the `eliminate-pipelines` / `--sampling` / preset workflow and the `elimination_results/` outputs it references. Those commands no longer exist; the harness is being rebuilt (see [Compression-Pipeline Leaderboard](../technical/compression-pipeline-leaderboard.md)). For the current CLI, follow the [README](../../README.md) Quick Start. A full rewrite of this guide is pending.
+
 ## 👋 Welcome to GifLab!
 
 GifLab builds structured datasets that map visual features to compression outcomes. You feed it GIFs; it runs them through every combination of engine, lossy level, frame ratio, and palette size; measures quality after each run; and stores the results in SQLite. The end goal is training ML models that predict compression curves from visual features alone, without having to compress anything at inference time.

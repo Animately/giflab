@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVED / OBSOLETE.** This guide documents the experimental pipeline-elimination harness (presets / `--sampling` / `select-pipelines` / `eliminate-pipelines`) **removed in commit `648db9a`**. Those commands no longer exist. The concepts return in the rebuilt leaderboard under new names — see [`docs/technical/compression-pipeline-leaderboard.md`](../../technical/compression-pipeline-leaderboard.md). Preserved for historical reference only.
+
+---
+
 # Preset Types Reference Guide
 
 This reference provides detailed technical information about all available preset types, their configurations, and specific use cases.

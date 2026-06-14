@@ -1,5 +1,7 @@
 # CLI Reference: Targeted Presets
 
+> **⚠️ OBSOLETE.** This entire reference documents the **targeted-presets CLI** (`--preset`, `--variable-slot`, `--sampling`, etc.) that was **removed in commit `648db9a`**. None of these commands exist in the current CLI. For the actual command surface, see the [README](../../README.md); for the leaderboard rebuild that will reintroduce these concepts under new names, see [Compression-Pipeline Leaderboard](../technical/compression-pipeline-leaderboard.md). Retained for historical reference only.
+
 This reference provides complete documentation for all command-line options and usage patterns for the targeted presets system.
 
 ## Basic Command Structure

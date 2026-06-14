@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVED / OBSOLETE.** This guide documents the experimental pipeline-elimination harness (presets / `--sampling` / `select-pipelines` / `eliminate-pipelines`) **removed in commit `648db9a`**. Those commands no longer exist. The concepts return in the rebuilt leaderboard under new names — see [`docs/technical/compression-pipeline-leaderboard.md`](../../technical/compression-pipeline-leaderboard.md). Preserved for historical reference only.
+
+---
+
 # Quick Start Guide: Targeted Presets
 
 Get started with targeted presets in under 10 minutes. This guide shows you the essential commands and concepts to run efficient GIF compression analysis.
