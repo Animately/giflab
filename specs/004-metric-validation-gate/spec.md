@@ -11,6 +11,15 @@ The compression-pipeline leaderboard ranks compression outputs by quality using 
 
 This feature is a **gate**, not a pipeline. It answers one question before any leaderboard machinery is built — *can we trust `composite_quality` to rank?* — and produces the one number the leaderboard needs to operate: the **quality floor** (the `composite_quality` value at the boundary of acceptable quality), calibrated per content type. It is the first gated milestone of the leaderboard rebuild; if the metric fails the gate, fixing the metric becomes the next priority instead of building the leaderboard.
 
+## Clarifications
+
+### Session 2026-06-14
+
+- Q: Confirm the SC-002 "GO" thresholds (mean per-GIF rank agreement ≥ 0.85 AND no bucket ≤ 0.5)? → A: Confirmed — keep 0.85 / 0.5.
+- Q: How does the human mark the "lowest still-acceptable" point for the floor? → A: One cutover boundary per GIF, marked on the human's own quality ordering (the lowest-quality output still judged acceptable).
+- Q: How many raters run the gate? → A: Single rater only; the single-rater limitation is a recorded confidence caveat.
+- Q: What grouping does the FR-007 disagreement attribution use? → A: By compression operation type (lossy / colour-reduction / frame-reduction).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Decide whether the quality verdict can be trusted to rank (Priority: P1)
@@ -47,15 +56,15 @@ The leaderboard ranks at an iso-quality operating point — "the smallest file t
 
 ### User Story 3 - Surface systematic verdict biases for follow-up (Priority: P3)
 
-When the human and the verdict disagree, the researcher needs to understand *why* and *where*, so that any metric fix can be targeted. The gate characterises systematic disagreements — grouped by content type and by the kind of compression that produced them — and attributes each to the contributing part of the verdict, producing a short report that becomes the input to metric-fix work.
+When the human and the verdict disagree, the researcher needs to understand *why* and *where*, so that any metric fix can be targeted. The gate characterises systematic disagreements — grouped by content type and by compression operation type (lossy / colour-reduction / frame-reduction) — and attributes each to the contributing part of the verdict, producing a short report that becomes the input to metric-fix work.
 
 **Why this priority**: Diagnostic value that turns a "NO-GO" into actionable next steps, and adds confidence to a "GO". Useful but not required for the gate's primary decision, so lowest priority.
 
-**Independent Test**: On a study set with known disagreements, confirm the gate emits a report listing each systematic divergence with its content bucket, the compression family involved, and the contributing component of the verdict.
+**Independent Test**: On a study set with known disagreements, confirm the gate emits a report listing each systematic divergence with its content bucket, the compression operation type involved, and the contributing component of the verdict.
 
 **Acceptance Scenarios**:
 
-1. **Given** outputs where the human and verdict rankings diverge beyond a set margin, **When** the gate analyses them, **Then** each systematic divergence is listed with its content bucket and the compression family it involves.
+1. **Given** outputs where the human and verdict rankings diverge beyond a set margin, **When** the gate analyses them, **Then** each systematic divergence is listed with its content bucket and the compression operation type (lossy / colour-reduction / frame-reduction) it involves.
 2. **Given** a listed divergence, **When** the researcher reads the report, **Then** it names the contributing component of the verdict so a fix can be scoped.
 
 ---
@@ -67,19 +76,19 @@ When the human and the verdict disagree, the researcher needs to understand *why
 - The verdict cannot be computed for an output (returns an undefined / `NaN` value) → that output is excluded from agreement and floor calculations transparently, and the exclusion is recorded, never silently treated as a score.
 - The human rater is uncertain about an ordering → the uncertainty is captured rather than forced into a false-precise rank.
 - A content bucket has too few study GIFs to support a verdict or a floor → results for that bucket are flagged low-confidence rather than reported as firm.
-- Only a single rater is available → the gate still produces a verdict, and the single-rater limitation is recorded as a stated confidence caveat.
+- The single rater's judgement is the sole signal (by design) → a near-threshold result is recorded as low-confidence rather than a firm GO/NO-GO, and the single-rater basis is stated as a caveat.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: The gate MUST assemble a study set of compressed outputs that spans a range of visible quality for each study GIF, drawn from multiple content-type buckets.
-- **FR-002**: The gate MUST capture, for each study GIF, a human **quality ranking** of that GIF's compressions and a human **"lowest still-acceptable"** marker.
+- **FR-002**: The gate MUST capture, for each study GIF, a human **quality ranking** of that GIF's compressions and a human **"lowest still-acceptable"** marker, recorded as a single cutover boundary on the human's own quality ordering (the lowest-quality output still judged acceptable).
 - **FR-003**: The gate MUST obtain a `composite_quality` verdict for every study output, computed under the same configuration the leaderboard will use near the operating point.
 - **FR-004**: The gate MUST quantify the agreement between the human ranking and the `composite_quality` ranking, reported per content-type bucket.
 - **FR-005**: The gate MUST emit a single go/no-go verdict on whether `composite_quality` is trustworthy enough to rank, evaluated against a stated, recorded agreement threshold.
 - **FR-006**: The gate MUST derive a per-content-type quality **floor** — the `composite_quality` value at the human acceptability boundary — and report each floor with its spread / uncertainty.
-- **FR-007**: The gate MUST characterise systematic disagreements between human and verdict (grouped by content bucket and compression family) and attribute each to a contributing component of the verdict.
+- **FR-007**: The gate MUST characterise systematic disagreements between human and verdict (grouped by content bucket and by compression operation type — lossy, colour-reduction, frame-reduction) and attribute each to a contributing component of the verdict.
 - **FR-008**: Study GIFs MUST be assigned to content-type buckets by hand for this gate; the gate MUST NOT depend on an automated content classifier.
 - **FR-009**: The gate MUST persist its outputs — the verdict, the per-bucket floors, the agreement tables, and the disagreement report — to a dated, versioned location alongside prior metric-audit records.
 - **FR-010**: The study MUST be reproducible: the GIF set, the compression settings used to produce each output, and the verdict configuration and software version MUST be recorded so the result can be regenerated.
@@ -88,7 +97,7 @@ When the human and the verdict disagree, the researcher needs to understand *why
 
 - **Study GIF**: an original GIF selected for the study, with a hand-assigned content-type bucket.
 - **Study Output**: one compressed result of a study GIF, with its compression settings, its file size, and its `composite_quality` verdict.
-- **Human Judgement**: for one study GIF, the human's ranking of its outputs by quality plus the "lowest still-acceptable" marker.
+- **Human Judgement**: for one study GIF, the human's ranking of its outputs by quality plus the "lowest still-acceptable" marker — a single acceptability boundary on that human ordering.
 - **Agreement Result**: per content bucket, how closely the human ranking and the verdict ranking match.
 - **Quality Floor**: per content bucket, the calibrated acceptability threshold expressed as a `composite_quality` value, with its spread.
 - **Gate Verdict**: the overall go/no-go decision with its supporting evidence and the threshold it was judged against.
@@ -98,17 +107,17 @@ When the human and the verdict disagree, the researcher needs to understand *why
 ### Measurable Outcomes
 
 - **SC-001**: The gate produces an unambiguous go/no-go decision accompanied by a per-content-type agreement number for every represented bucket (no decision rests on unquantified judgement).
-- **SC-002**: A "GO" decision requires the human and verdict rankings to agree strongly across the study set — a mean per-GIF rank agreement of at least 0.85 — AND no content bucket exhibiting systematic inversion (rank agreement at or below 0.5). *(Thresholds are the recorded starting values and may be tuned in clarification.)*
+- **SC-002**: A "GO" decision requires the human and verdict rankings to agree strongly across the study set — a mean per-GIF rank agreement of at least 0.85 — AND no content bucket exhibiting systematic inversion (rank agreement at or below 0.5). *(Thresholds confirmed in clarification 2026-06-14.)*
 - **SC-003**: Every content bucket represented in the study set receives a quality-floor value with a stated spread, usable directly as the leaderboard's iso-quality operating point.
 - **SC-004**: Every human-versus-verdict disagreement beyond the set margin appears in the disagreement report, attributed to its content bucket and a contributing component of the verdict.
 - **SC-005**: The human ranking effort required to run the gate fits within a single focused session (on the order of 20 GIFs and 100 compressed outputs).
 
 ## Assumptions
 
-- A single experienced rater is sufficient to produce the go/no-go decision; a second rater is optional and would only raise confidence. The single-rater limitation is recorded as a caveat.
+- A single rater (the researcher) produces the go/no-go decision — the chosen design for this gate; the single-rater limitation is recorded as a stated confidence caveat.
 - The study set is on the order of 15–20 GIFs with roughly 4–6 compressions each (≈ 60–120 outputs), enough to span quality and cover buckets within one session.
 - The content-type buckets are the five compression-behaviour buckets defined in `docs/technical/compression-pipeline-leaderboard.md` (photographic/continuous-tone, flat-graphic/vector, animation/cartoon, text/screen-capture, pixel-art), hand-assigned for this gate.
-- The agreement thresholds in SC-002 are reasonable starting values, not settled policy; they may be adjusted during clarification before the gate is run.
+- The SC-002 agreement thresholds (mean rank agreement ≥ 0.85, no bucket ≤ 0.5) were confirmed in clarification (2026-06-14).
 - Study GIFs are drawn from the existing local GIF collection used for prior metric-audit work.
 - "Near the operating point" means the verdict configuration matches what the leaderboard will use to rank at the acceptability boundary, rather than a different or cheaper configuration.
 
