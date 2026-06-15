@@ -5,9 +5,15 @@
 ## 0 Objective
 
 ### Core Mission
-**Generate prediction training datasets** by analyzing GIFs and running compression sweeps at prediction-required granularity. Results are stored in SQLite for ML model training.
+GifLab is, in priority order:
 
-**Primary Output**: Trained prediction models (`.pkl` files) exported for use by external tools (e.g., Animately).
+1. **A measurement library** — stable `compress()` / `measure()` over 7 engines plus a comprehensive quality metric stack (including the calibrated `composite_quality` verdict), consumed by the sibling **gifprep** repo for its preprocessing experiments. See `docs/public-api.md`.
+2. **A compression-pipeline leaderboard instrument** — fan out compression pipelines (frame / colour / lossy, across engines) and rank the best pipeline **per GIF content-type** on the quality-vs-size trade-off. *(In rebuild — the original harness was removed in `648db9a`; see `docs/technical/compression-pipeline-leaderboard.md`.)*
+3. **A prediction-dataset generator** — analyse GIFs and run compression sweeps at prediction-required granularity, stored in SQLite as ML training data.
+
+**Boundary with gifprep**: gifprep owns *preprocessing* (denoise / cleanup / AI transforms applied *before* compression) and its own Pareto harness; giflab owns the engines, the metrics, and the *compression-pipeline* matrix benchmark. The dependency is one-way (gifprep → giflab).
+
+**Deferred**: the ML curve-predictor (`.pkl` export). The top-level `giflab train` CLI is currently a **stub**; real training lives under `giflab predict train`.
 
 ### Compression Parameters
 * **Lossy levels** ∈ { 0 · 20 · 40 · 60 · 80 · 100 · 120 } — 7 points for smooth curve prediction
@@ -156,9 +162,10 @@ Add more ratios or palette sizes via `config.py`; the pipeline renders only miss
 
 ```bash
 poetry run python -m giflab run [options]       # compression + feature extraction
-poetry run python -m giflab train [options]      # train prediction models
+poetry run python -m giflab train [options]      # STUB: prints row counts, does not fit a model (use `predict train`)
 poetry run python -m giflab export [options]     # export data/models
 poetry run python -m giflab stats [options]      # database statistics
+poetry run python -m giflab predict [subcommand] # extract-features | train | lossy-curve | color-curve
 ```
 
 Options:

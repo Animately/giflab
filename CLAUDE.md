@@ -8,7 +8,7 @@ This file provides project-specific guidance for AI assistants working with the 
 
 ### ❌ **WRONG** - These will fail with ModuleNotFoundError:
 ```bash
-python -m giflab run --preset quick-test
+python -m giflab run data/raw
 python -m pytest tests/
 python -c "from giflab.metrics import calculate_metrics"
 PYTHONPATH=src python -m giflab run
@@ -16,7 +16,7 @@ PYTHONPATH=src python -m giflab run
 
 ### ✅ **CORRECT** - Always use Poetry:
 ```bash
-poetry run python -m giflab run --preset quick-test
+poetry run python -m giflab run data/raw
 poetry run pytest tests/
 poetry run python -c "from giflab.metrics import calculate_metrics"
 ```
@@ -67,16 +67,15 @@ poetry run pytest tests/integration/ -n auto -q
 
 ### GifLab Operations
 ```bash
-# Pipeline analysis and optimization
-poetry run python -m giflab run --preset frame-focus
-poetry run python -m giflab run --sampling representative
+# Compression + feature extraction over a directory of GIFs
+poetry run python -m giflab run data/raw                 # single-engine (quick)
+poetry run python -m giflab run data/raw --mode full     # all frame × colour × lossy combos
 
-# Large-scale processing
-poetry run python -m giflab run data/raw --workers 8
-
-# Analysis tools
-poetry run python -m giflab select-pipelines results.csv --top 3
+# Inspect the collected dataset
+poetry run python -m giflab stats --db data/giflab.db
+poetry run python -m giflab export --db data/giflab.db --output runs.csv --table runs
 ```
+> Note: `--preset`, `--sampling`, and `select-pipelines` were removed in `648db9a`; the leaderboard harness that used them is being rebuilt (see `docs/technical/compression-pipeline-leaderboard.md`).
 
 ### Development Tools
 ```bash

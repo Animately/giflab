@@ -1,3 +1,7 @@
+> **⚠️ ARCHIVED / OBSOLETE.** This guide documents the experimental pipeline-elimination harness (presets / `--sampling` / `select-pipelines` / `eliminate-pipelines`) **removed in commit `648db9a`**. Those commands no longer exist. The concepts return in the rebuilt leaderboard under new names — see [`docs/technical/compression-pipeline-leaderboard.md`](../../technical/compression-pipeline-leaderboard.md). Preserved for historical reference only.
+
+---
+
 # Elimination Results Tracking
 
 The pipeline elimination system now saves timestamped results to preserve the history of all your elimination runs, making it easy to track changes and compare different testing scenarios.

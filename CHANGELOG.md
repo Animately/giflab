@@ -2,6 +2,17 @@
 
 All notable changes to giflab are documented here. Versioning follows semver within the 0.x major; see [docs/public-api.md](./docs/public-api.md) for the versioning policy that applies to the public API surface.
 
+## Unreleased
+
+### Docs: conceptual reframe + honesty pass (no code change)
+
+Documentation now reflects giflab's **dual role** — a measurement library (`compress`/`measure`, consumed by gifprep) **and** a compression-pipeline leaderboard instrument — and stops documenting features that were removed in `648db9a`.
+
+- **New direction doc**: [`docs/technical/compression-pipeline-leaderboard.md`](./docs/technical/compression-pipeline-leaderboard.md) — the canonical design for the leaderboard rebuild (deliverable, the iso-quality pivot, two-stage screening, validation gate, content-type taxonomy, gifprep boundary, and an explicit shipped-vs-planned table).
+- **README / SCOPE reframed** to the dual-role framing; stale examples for the deleted `--sampling` / `--preset` / `select-pipelines` / `view-failures` commands removed; the `giflab train` stub is now flagged (real training is `giflab predict train`).
+- **Archived** five guides describing the removed pipeline-elimination harness to `docs/archive/deleted-experimental-harness/` (with deprecation banners): `sampling-strategies`, `elimination-results-tracking`, `targeted-presets-quickstart`, `targeted-experiment-presets`, `preset-types-reference`.
+- **Deprecation banners** added to the still-live `docs/guides/testing-strategy.md` (Elimination Testing section) and `docs/guides/beginner.md`; `CLAUDE.md` command examples corrected.
+
 ## v0.4.0 — 2026-06-09
 
 ### Changed (BREAKING): single-stream metric legacy bare-key aliases removed

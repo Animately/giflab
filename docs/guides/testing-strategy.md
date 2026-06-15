@@ -135,6 +135,8 @@ def create_noise_gif(path, size=(100, 100), frames=5):
 
 ## Elimination Testing
 
+> **⚠️ OBSOLETE SECTION.** The `giflab eliminate-pipelines` command and the sampling-strategy / results-tracking guides linked below were **removed in commit `648db9a`**. This section is retained only as a description of how the harness *used* to work. The replacement is being rebuilt — see [Compression-Pipeline Leaderboard](../technical/compression-pipeline-leaderboard.md). The rest of this guide (test-file guidelines above) is still current.
+
 The elimination framework systematically tests pipeline combinations on synthetic GIFs and eliminates underperforming ones:
 
 ```bash
