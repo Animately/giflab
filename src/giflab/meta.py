@@ -1,5 +1,8 @@
 """Metadata extraction and hashing for GIF files."""
 
+# Version of the GIF metadata-extraction contract.
+__GIFLAB_META_VERSION__ = "1.0.0"
+
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
