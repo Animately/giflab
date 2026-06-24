@@ -49,6 +49,17 @@ def _which(cmd: str) -> str | None:
 
 
 def _extract_version(output: str, pattern: str) -> str | None:
+    """Pull a version string out of captured command output via a regex.
+
+    Args:
+        output: The captured text (a tool's stdout or stderr) to search.
+        pattern: A regular expression whose **first capture group** is the
+            version string to extract.
+
+    Returns:
+        The text matched by the pattern's first capture group, or ``None`` if
+        the pattern does not match anywhere in *output*.
+    """
     match = re.search(pattern, output)
     if match:
         return match.group(1)
